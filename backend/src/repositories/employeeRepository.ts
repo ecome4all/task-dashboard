@@ -15,4 +15,12 @@ export const employeeRepository = {
       data: { name, tenantId: TENANT_ID },
     });
   },
+
+  findByEmail(email: string) {
+    return prisma.employee.findUnique({ where: { email } });
+  },
+
+  findById(id: string) {
+    return prisma.employee.findFirst({ where: { id, tenantId: TENANT_ID } });
+  },
 };

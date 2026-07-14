@@ -27,8 +27,10 @@ model Task {
 }
 
 model Employee {
-  id       String  @id @default(cuid())
-  tenantId String  @default("default")
-  name     String
-  active   Boolean @default(true)
+  id           String  @id @default(cuid())
+  tenantId     String  @default("default")
+  name         String
+  email        String? @unique
+  passwordHash String?
+  active       Boolean @default(true)
 }

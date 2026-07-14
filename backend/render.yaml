@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: task-dashboard-backend
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEBHOOK_SHARED_SECRET
+        sync: false
+      - key: WHAPI_API_KEY
+        sync: false
+      - key: WHAPI_BASE_URL
+        value: https://gate.whapi.cloud
+      - key: WHATSAPP_CLOUD_API_TOKEN
+        sync: false
+      - key: WHATSAPP_CLOUD_PHONE_NUMBER_ID
+        sync: false
