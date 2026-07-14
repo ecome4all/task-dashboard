@@ -56,6 +56,7 @@ export interface CurrentUser {
   id: string;
   name: string;
   email: string;
+  role: "admin" | "member";
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { employeeRepository } from "../repositories/employeeRepository";
+import { requireRole } from "../auth/requireRole";
 
 export function createEmployeesRouter() {
   const router = Router();
@@ -8,7 +9,7 @@ export function createEmployeesRouter() {
     res.json(await employeeRepository.list());
   });
 
-  router.post("/", async (req, res) => {
+  router.post("/", requireRole("admin"), async (req, res) => {
     const { name } = req.body;
     if (typeof name !== "string" || !name.trim()) {
       res.status(400).json({ error: "name is required" });

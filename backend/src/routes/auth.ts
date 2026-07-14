@@ -25,7 +25,7 @@ export function createAuthRouter() {
       sameSite: "lax",
       maxAge: authService.cookieMaxAgeMs,
     });
-    res.json({ id: employee.id, name: employee.name, email: employee.email });
+    res.json({ id: employee.id, name: employee.name, email: employee.email, role: employee.role });
   });
 
   router.post("/logout", (_req, res) => {
@@ -39,7 +39,7 @@ export function createAuthRouter() {
       res.status(401).json({ error: "not authenticated" });
       return;
     }
-    res.json({ id: employee.id, name: employee.name, email: employee.email });
+    res.json({ id: employee.id, name: employee.name, email: employee.email, role: employee.role });
   });
 
   return router;

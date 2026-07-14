@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { taskRepository } from "../repositories/taskRepository";
-import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
+import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
 
-export function createTasksRouter(whatsapp: WhatsAppAdapter) {
+export function createTasksRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.get("/", async (_req, res) => {
@@ -15,6 +15,7 @@ export function createTasksRouter(whatsapp: WhatsAppAdapter) {
     const task = await taskRepository.update(req.params.id, { assignee, status });
 
     if (status === "done") {
+      const whatsapp = resolveAdapterForSource(task.source, channels);
       await whatsapp.sendMessage(task.sourceRef, `✅ Task done: ${task.description}`);
     }
 

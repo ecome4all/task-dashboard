@@ -32,5 +32,6 @@ model Employee {
   name         String
   email        String? @unique
   passwordHash String?
+  role         String  @default("member") // "admin" | "member"
   active       Boolean @default(true)
 }

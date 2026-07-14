@@ -17,11 +17,11 @@ async function main() {
 
   const employee = await prisma.employee.upsert({
     where: { email },
-    update: { passwordHash, name },
-    create: { email, passwordHash, name },
+    update: { passwordHash, name, role: "admin" },
+    create: { email, passwordHash, name, role: "admin" },
   });
 
-  console.log(`Seeded login for ${employee.name} <${employee.email}>`);
+  console.log(`Seeded admin login for ${employee.name} <${employee.email}>`);
 }
 
 main()

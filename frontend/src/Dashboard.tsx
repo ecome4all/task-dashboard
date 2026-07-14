@@ -57,15 +57,17 @@ export default function Dashboard({ user, onLoggedOut }: { user: CurrentUser; on
         <p>Loading…</p>
       ) : (
         <>
-          <form className="add-employee" onSubmit={handleAddEmployee}>
-            <input
-              type="text"
-              placeholder="Add employee name"
-              value={newEmployeeName}
-              onChange={(e) => setNewEmployeeName(e.target.value)}
-            />
-            <button type="submit">Add</button>
-          </form>
+          {user.role === "admin" && (
+            <form className="add-employee" onSubmit={handleAddEmployee}>
+              <input
+                type="text"
+                placeholder="Add employee name"
+                value={newEmployeeName}
+                onChange={(e) => setNewEmployeeName(e.target.value)}
+              />
+              <button type="submit">Add</button>
+            </form>
+          )}
           <table>
             <thead>
               <tr>
