@@ -23,3 +23,23 @@ export async function updateTask(id: string, changes: Partial<Pick<Task, "assign
   });
   return res.json();
 }
+
+export interface Employee {
+  id: string;
+  name: string;
+  active: boolean;
+}
+
+export async function fetchEmployees(): Promise<Employee[]> {
+  const res = await fetch("/api/employees");
+  return res.json();
+}
+
+export async function createEmployee(name: string): Promise<Employee> {
+  const res = await fetch("/api/employees", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}

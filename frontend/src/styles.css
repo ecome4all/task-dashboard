@@ -27,3 +27,19 @@ th, td {
 th {
   background: #eee;
 }
+
+.add-employee {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.add-employee input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.add-employee button {
+  padding: 0.4rem 0.8rem;
+}

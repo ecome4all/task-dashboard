@@ -1,23 +1,32 @@
 import { useEffect, useState } from "react";
-import { Task, fetchTasks, updateTask } from "./api";
-
-// Placeholder until an employee-management screen exists; swap for a real
-// fetched list before go-live.
-const EMPLOYEES = ["Unassigned", "Priya", "Rahul", "Anjali"];
+import { Task, Employee, fetchTasks, updateTask, fetchEmployees, createEmployee } from "./api";
 
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [newEmployeeName, setNewEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
 
   async function load() {
     setLoading(true);
-    setTasks(await fetchTasks());
+    const [taskList, employeeList] = await Promise.all([fetchTasks(), fetchEmployees()]);
+    setTasks(taskList);
+    setEmployees(employeeList);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, []);
+
+  async function handleAddEmployee(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newEmployeeName.trim();
+    if (!name) return;
+    const employee = await createEmployee(name);
+    setEmployees((prev) => [...prev, employee].sort((a, b) => a.name.localeCompare(b.name)));
+    setNewEmployeeName("");
+  }
 
   async function handleAssigneeChange(task: Task, assignee: string) {
     const updated = await updateTask(task.id, { assignee });
@@ -36,6 +45,16 @@ export default function App() {
       {loading ? (
         <p>Loading…</p>
       ) : (
+        <>
+        <form className="add-employee" onSubmit={handleAddEmployee}>
+          <input
+            type="text"
+            placeholder="Add employee name"
+            value={newEmployeeName}
+            onChange={(e) => setNewEmployeeName(e.target.value)}
+          />
+          <button type="submit">Add</button>
+        </form>
         <table>
           <thead>
             <tr>
@@ -53,12 +72,13 @@ export default function App() {
                 <td>{task.source}</td>
                 <td>
                   <select
-                    value={task.assignee ?? "Unassigned"}
+                    value={task.assignee ?? ""}
                     onChange={(e) => handleAssigneeChange(task, e.target.value)}
                   >
-                    {EMPLOYEES.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
+                    <option value="">Unassigned</option>
+                    {employees.map((employee) => (
+                      <option key={employee.id} value={employee.name}>
+                        {employee.name}
                       </option>
                     ))}
                   </select>
@@ -78,6 +98,7 @@ export default function App() {
             ))}
           </tbody>
         </table>
+        </>
       )}
     </main>
   );

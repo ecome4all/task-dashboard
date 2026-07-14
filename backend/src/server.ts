@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { createWebhookRouter } from "./routes/webhook";
 import { createTasksRouter } from "./routes/tasks";
+import { createEmployeesRouter } from "./routes/employees";
 import { WhapiAdapter } from "./whatsapp/whapiAdapter";
 
 const app = express();
@@ -16,6 +17,7 @@ const whatsapp = new WhapiAdapter(
 
 app.use("/webhook", createWebhookRouter(whatsapp));
 app.use("/api/tasks", createTasksRouter(whatsapp));
+app.use("/api/employees", createEmployeesRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
