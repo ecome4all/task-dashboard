@@ -18,9 +18,10 @@ export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) 
   }
 
   return (
-    <main className="page login-page">
-      <form className="login-form" onSubmit={handleSubmit}>
-        <h1>Task Dashboard</h1>
+    <main className="login-page">
+      <form className="login-card" onSubmit={handleSubmit}>
+        <h1>Ecom4all</h1>
+        <p className="subtitle">Task Dashboard</p>
         <input
           type="email"
           placeholder="Email"
@@ -35,7 +36,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) 
           onChange={(e) => setPassword(e.target.value)}
         />
         {error && <p className="error">{error}</p>}
-        <button type="submit">Log in</button>
+        <button className="btn btn-primary" type="submit">Log in</button>
       </form>
     </main>
   );

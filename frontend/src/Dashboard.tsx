@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
-import { Task, Employee, CurrentUser, fetchTasks, updateTask, fetchEmployees, createEmployee, logout } from "./api";
+import { Task, Employee, CurrentUser, fetchTasks, updateTask, fetchEmployees, createEmployee } from "./api";
 
-export default function Dashboard({ user, onLoggedOut }: { user: CurrentUser; onLoggedOut: () => void }) {
+const STATUS_PILL: Record<Task["status"], string> = {
+  new: "pill-neutral",
+  in_progress: "pill-warn",
+  done: "pill-good",
+};
+
+const STATUS_LABEL: Record<Task["status"], string> = {
+  new: "New",
+  in_progress: "In Progress",
+  done: "Done",
+};
+
+export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [newEmployeeName, setNewEmployeeName] = useState("");
@@ -38,37 +50,37 @@ export default function Dashboard({ user, onLoggedOut }: { user: CurrentUser; on
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
   }
 
-  async function handleLogout() {
-    await logout();
-    onLoggedOut();
-  }
+  if (loading) return <p>Loading…</p>;
 
   return (
-    <main className="page">
-      <header className="page-header">
-        <h1>Task Dashboard</h1>
-        <div className="header-user">
-          <span>{user.name}</span>
-          <button onClick={handleLogout}>Log out</button>
-        </div>
-      </header>
-
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        <>
-          {user.role === "admin" && (
+    <>
+      {user.role === "admin" && (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">Add employee</span>
+          </div>
+          <div className="panel-body">
             <form className="add-employee" onSubmit={handleAddEmployee}>
               <input
+                className="field-input"
                 type="text"
-                placeholder="Add employee name"
+                placeholder="Employee name"
                 value={newEmployeeName}
                 onChange={(e) => setNewEmployeeName(e.target.value)}
               />
-              <button type="submit">Add</button>
+              <button className="btn btn-primary" type="submit">Add</button>
             </form>
-          )}
-          <table>
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Tasks</span>
+          <span className="panel-sub">{tasks.length} total</span>
+        </div>
+        <div className="panel-body">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Task</th>
@@ -85,6 +97,7 @@ export default function Dashboard({ user, onLoggedOut }: { user: CurrentUser; on
                   <td>{task.source}</td>
                   <td>
                     <select
+                      className="field-select"
                       value={task.assignee ?? ""}
                       onChange={(e) => handleAssigneeChange(task, e.target.value)}
                     >
@@ -97,22 +110,26 @@ export default function Dashboard({ user, onLoggedOut }: { user: CurrentUser; on
                     </select>
                   </td>
                   <td>
-                    <select
-                      value={task.status}
-                      onChange={(e) => handleStatusChange(task, e.target.value as Task["status"])}
-                    >
-                      <option value="new">New</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                    </select>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={`pill ${STATUS_PILL[task.status]}`}>{STATUS_LABEL[task.status]}</span>
+                      <select
+                        className="field-select"
+                        value={task.status}
+                        onChange={(e) => handleStatusChange(task, e.target.value as Task["status"])}
+                      >
+                        <option value="new">New</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="done">Done</option>
+                      </select>
+                    </div>
                   </td>
                   <td>{new Date(task.createdAt).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </>
-      )}
-    </main>
+        </div>
+      </div>
+    </>
   );
 }
