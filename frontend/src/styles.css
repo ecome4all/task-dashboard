@@ -1,0 +1,29 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #f7f7f8;
+  margin: 0;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+th {
+  background: #eee;
+}

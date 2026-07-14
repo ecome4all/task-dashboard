@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// tenantId is unused while there's only one business on the system, but every
+// row carries it from day one so multi-tenant resale later is a query filter,
+// not a schema migration.
+model Task {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("default")
+  source      String // "whatsapp_group" | "whatsapp_official"
+  sourceRef   String // WhatsApp group id or phone number the task came from
+  description String
+  clientName  String?
+  assignee    String?
+  status      String    @default("new") // new | in_progress | done
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  doneAt      DateTime?
+
+  @@index([tenantId, status])
+}
+
+model Employee {
+  id       String  @id @default(cuid())
+  tenantId String  @default("default")
+  name     String
+  active   Boolean @default(true)
+}
