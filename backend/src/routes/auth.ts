@@ -21,15 +21,14 @@ export function createAuthRouter() {
 
     const token = authService.signSession({ employeeId: employee.id });
     res.cookie(authService.cookieName, token, {
-      httpOnly: true,
-      sameSite: "lax",
+      ...authService.cookieOptions(),
       maxAge: authService.cookieMaxAgeMs,
     });
     res.json({ id: employee.id, name: employee.name, email: employee.email, role: employee.role });
   });
 
   router.post("/logout", (_req, res) => {
-    res.clearCookie(authService.cookieName);
+    res.clearCookie(authService.cookieName, authService.cookieOptions());
     res.status(204).send();
   });
 

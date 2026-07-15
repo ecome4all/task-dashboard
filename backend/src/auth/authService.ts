@@ -16,6 +16,20 @@ export interface SessionPayload {
   employeeId: string;
 }
 
+// Frontend and backend live on different domains in production (Vercel +
+// Railway), so the session cookie must be SameSite=None + Secure to be sent
+// on cross-origin requests at all. Locally, both run on localhost over
+// plain HTTP, where Secure cookies are silently dropped — so this only
+// switches on when NODE_ENV=production.
+function cookieOptions() {
+  const isProduction = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true as const,
+    sameSite: (isProduction ? "none" : "lax") as "none" | "lax",
+    secure: isProduction,
+  };
+}
+
 export const authService = {
   hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 10);
@@ -39,4 +53,5 @@ export const authService = {
 
   cookieName: SESSION_COOKIE,
   cookieMaxAgeMs: SESSION_MAX_AGE_MS,
+  cookieOptions,
 };
