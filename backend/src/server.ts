@@ -23,9 +23,10 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-// Two independent channels can run at once during the Phase 2→5 transition
-// (see PROPOSAL_V2.md). Each adapter only knows how to send on its own
-// channel — see resolveAdapter.ts for how a reply picks the right one.
+// Both channels run side by side indefinitely (see PROPOSAL_V2.md — moving
+// existing clients off the group channel is the client's own call, not part
+// of this project). Each adapter only knows how to send on its own channel —
+// see resolveAdapter.ts for how a reply picks the right one.
 const channels: WhatsAppChannels = {
   whapi: new WhapiAdapter(
     process.env.WHAPI_API_KEY ?? "",
