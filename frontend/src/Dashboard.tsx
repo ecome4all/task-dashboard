@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { Task, Employee, CurrentUser, fetchTasks, updateTask, fetchEmployees, createEmployee } from "./api";
+import { Task, Employee, CurrentUser, ApiError, fetchTasks, updateTask, fetchEmployees, createEmployee } from "./api";
+import Spinner from "./Spinner";
+import ErrorBanner from "./ErrorBanner";
 
 const STATUS_PILL: Record<Task["status"], string> = {
   new: "pill-neutral",
@@ -13,18 +15,30 @@ const STATUS_LABEL: Record<Task["status"], string> = {
   done: "Done",
 };
 
+function errorMessage(err: unknown): string {
+  return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
+}
+
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [newEmployeeName, setNewEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   async function load() {
     setLoading(true);
-    const [taskList, employeeList] = await Promise.all([fetchTasks(), fetchEmployees()]);
-    setTasks(taskList);
-    setEmployees(employeeList);
-    setLoading(false);
+    setLoadError("");
+    try {
+      const [taskList, employeeList] = await Promise.all([fetchTasks(), fetchEmployees()]);
+      setTasks(taskList);
+      setEmployees(employeeList);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -35,25 +49,44 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     e.preventDefault();
     const name = newEmployeeName.trim();
     if (!name) return;
-    const employee = await createEmployee(name);
-    setEmployees((prev) => [...prev, employee].sort((a, b) => a.name.localeCompare(b.name)));
-    setNewEmployeeName("");
+    setActionError("");
+    try {
+      const employee = await createEmployee(name);
+      setEmployees((prev) => [...prev, employee].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewEmployeeName("");
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
   }
 
   async function handleAssigneeChange(task: Task, assignee: string) {
-    const updated = await updateTask(task.id, { assignee });
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    setActionError("");
+    try {
+      const updated = await updateTask(task.id, { assignee });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
   }
 
   async function handleStatusChange(task: Task, status: Task["status"]) {
-    const updated = await updateTask(task.id, { status });
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    setActionError("");
+    try {
+      const updated = await updateTask(task.id, { status });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
   }
 
-  if (loading) return <p>Loading…</p>;
+  if (loading) return <Spinner label="Loading tasks…" />;
+
+  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
   return (
     <>
+      {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError("")} />}
+
       {user.role === "admin" && (
         <div className="panel">
           <div className="panel-head">

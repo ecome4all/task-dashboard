@@ -3,6 +3,8 @@ import { CurrentUser, fetchCurrentUser, logout } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
 import ReportLinks from "./ReportLinks";
+import { BrandMark, BrandCredit } from "./Brand";
+import Spinner from "./Spinner";
 
 const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   admin: "Admin",
@@ -24,7 +26,13 @@ export default function App() {
     });
   }, []);
 
-  if (checkingSession) return null;
+  if (checkingSession) {
+    return (
+      <main className="login-page">
+        <Spinner label="Loading…" />
+      </main>
+    );
+  }
 
   if (!user) {
     return <Login onLoggedIn={setUser} />;
@@ -40,7 +48,10 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand">Ecom4all</div>
+        <div className="brand">
+          <BrandMark />
+          <span className="brand-name">Ecom4all</span>
+        </div>
         <nav className="nav">
           <button
             className={`nav-item ${view === "tasks" ? "active" : ""}`}
@@ -58,11 +69,7 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-footer">
-          created by{" "}
-          <span className="credit-mark">
-            <span className="n4">ai4</span>
-            <span className="work">work</span>
-          </span>
+          created by <BrandCredit />
         </div>
       </aside>
 

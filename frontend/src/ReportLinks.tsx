@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
-import { ReportLink, fetchReportLinks, createReportLink, sendReportLink } from "./api";
+import { ReportLink, ApiError, fetchReportLinks, createReportLink, sendReportLink } from "./api";
+import Spinner from "./Spinner";
+import ErrorBanner from "./ErrorBanner";
+
+function errorMessage(err: unknown): string {
+  return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
+}
 
 export default function ReportLinks() {
   const [links, setLinks] = useState<ReportLink[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [description, setDescription] = useState("");
   const [url, setUrl] = useState("");
   const [sendTargets, setSendTargets] = useState<Record<string, { phone: string; channel: "whapi" | "official" }>>(
@@ -12,8 +20,14 @@ export default function ReportLinks() {
 
   async function load() {
     setLoading(true);
-    setLinks(await fetchReportLinks());
-    setLoading(false);
+    setLoadError("");
+    try {
+      setLinks(await fetchReportLinks());
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -23,10 +37,15 @@ export default function ReportLinks() {
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!description.trim() || !url.trim()) return;
-    const link = await createReportLink(description.trim(), url.trim());
-    setLinks((prev) => [link, ...prev]);
-    setDescription("");
-    setUrl("");
+    setActionError("");
+    try {
+      const link = await createReportLink(description.trim(), url.trim());
+      setLinks((prev) => [link, ...prev]);
+      setDescription("");
+      setUrl("");
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
   }
 
   function targetFor(id: string) {
@@ -40,14 +59,23 @@ export default function ReportLinks() {
   async function handleSend(id: string) {
     const target = targetFor(id);
     if (!target.phone.trim()) return;
-    const updated = await sendReportLink(id, target.phone.trim(), target.channel);
-    setLinks((prev) => prev.map((l) => (l.id === id ? updated : l)));
+    setActionError("");
+    try {
+      const updated = await sendReportLink(id, target.phone.trim(), target.channel);
+      setLinks((prev) => prev.map((l) => (l.id === id ? updated : l)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
   }
 
-  if (loading) return <p>Loading…</p>;
+  if (loading) return <Spinner label="Loading reports…" />;
+
+  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
   return (
     <>
+      {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError("")} />}
+
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Save a report link</span>

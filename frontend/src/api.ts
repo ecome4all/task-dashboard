@@ -2,7 +2,42 @@
 // (see vite.config.ts). In production, set VITE_API_BASE_URL to the deployed
 // backend's origin, since the frontend and backend live on different domains.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
-const BASE_OPTS: RequestInit = { credentials: "include" };
+
+export class ApiError extends Error {
+  constructor(message: string, public status?: number) {
+    super(message);
+  }
+}
+
+// Network failures (offline, DNS, CORS) throw before a Response even exists —
+// wrapped here so every caller sees the same ApiError shape either way.
+// 401 is deliberately generic here ("not authorized") rather than assuming
+// "session expired" — that interpretation is only right for already-logged-in
+// routes, not for /auth/login itself, where 401 means "wrong password".
+// Callers that need to tell those apart check err.status themselves.
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { credentials: "include", ...init });
+  } catch {
+    throw new ApiError("Couldn't reach the server. Check your connection and try again.");
+  }
+
+  if (!res.ok) {
+    throw new ApiError(`Something went wrong (${res.status}). Try again.`, res.status);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
 
 export interface Task {
   id: string;
@@ -16,19 +51,16 @@ export interface Task {
   doneAt: string | null;
 }
 
-export async function fetchTasks(): Promise<Task[]> {
-  const res = await fetch(`${API_BASE}/api/tasks`, BASE_OPTS);
-  return res.json();
+export function fetchTasks(): Promise<Task[]> {
+  return request("/api/tasks");
 }
 
-export async function updateTask(id: string, changes: Partial<Pick<Task, "assignee" | "status">>): Promise<Task> {
-  const res = await fetch(`${API_BASE}/api/tasks/${id}`, {
-    ...BASE_OPTS,
+export function updateTask(id: string, changes: Partial<Pick<Task, "assignee" | "status">>): Promise<Task> {
+  return request(`/api/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
-  return res.json();
 }
 
 export interface Employee {
@@ -37,19 +69,12 @@ export interface Employee {
   active: boolean;
 }
 
-export async function fetchEmployees(): Promise<Employee[]> {
-  const res = await fetch(`${API_BASE}/api/employees`, BASE_OPTS);
-  return res.json();
+export function fetchEmployees(): Promise<Employee[]> {
+  return request("/api/employees");
 }
 
-export async function createEmployee(name: string): Promise<Employee> {
-  const res = await fetch(`${API_BASE}/api/employees`, {
-    ...BASE_OPTS,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  return res.json();
+export function createEmployee(name: string): Promise<Employee> {
+  return postJson("/api/employees", { name });
 }
 
 export interface CurrentUser {
@@ -59,25 +84,29 @@ export interface CurrentUser {
   role: "admin" | "supervisor" | "member";
 }
 
+// Callers treat "not logged in" as a normal, expected state, not an error —
+// so this swallows failures (401 or otherwise) rather than throwing.
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {
-  const res = await fetch(`${API_BASE}/api/auth/me`, BASE_OPTS);
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    return await request<CurrentUser>("/api/auth/me");
+  } catch {
+    return null;
+  }
 }
 
+// Wrong password (401) is an expected outcome the caller shows inline, not
+// an error state — only a genuine connection/server failure throws here.
 export async function login(email: string, password: string): Promise<CurrentUser | null> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    ...BASE_OPTS,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    return await postJson<CurrentUser>("/api/auth/login", { email, password });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
+    throw err;
+  }
 }
 
-export async function logout(): Promise<void> {
-  await fetch(`${API_BASE}/api/auth/logout`, { ...BASE_OPTS, method: "POST" });
+export function logout(): Promise<void> {
+  return request("/api/auth/logout", { method: "POST" });
 }
 
 export interface ReportLink {
@@ -89,27 +118,14 @@ export interface ReportLink {
   lastSentAt: string | null;
 }
 
-export async function fetchReportLinks(): Promise<ReportLink[]> {
-  const res = await fetch(`${API_BASE}/api/report-links`, BASE_OPTS);
-  return res.json();
+export function fetchReportLinks(): Promise<ReportLink[]> {
+  return request("/api/report-links");
 }
 
-export async function createReportLink(description: string, url: string): Promise<ReportLink> {
-  const res = await fetch(`${API_BASE}/api/report-links`, {
-    ...BASE_OPTS,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ description, url }),
-  });
-  return res.json();
+export function createReportLink(description: string, url: string): Promise<ReportLink> {
+  return postJson("/api/report-links", { description, url });
 }
 
-export async function sendReportLink(id: string, phone: string, channel: "whapi" | "official"): Promise<ReportLink> {
-  const res = await fetch(`${API_BASE}/api/report-links/${id}/send`, {
-    ...BASE_OPTS,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, channel }),
-  });
-  return res.json();
+export function sendReportLink(id: string, phone: string, channel: "whapi" | "official"): Promise<ReportLink> {
+  return postJson(`/api/report-links/${id}/send`, { phone, channel });
 }
