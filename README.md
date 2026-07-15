@@ -48,11 +48,18 @@ npm test
 
 ## Deployment
 
-- **Backend → Railway or Render.** `railway.json` and `render.yaml` are both included — pick one platform, not both. Set the env vars listed in `.env.example` in that platform's dashboard (`render.yaml` lists which ones need manual values vs. `generateValue: true` for `JWT_SECRET`).
-- **Frontend → Vercel.** `vercel.json` is included. Set `VITE_API_BASE_URL` in Vercel's project settings to the deployed backend's URL.
-- Once both are deployed, set the backend's `FRONTEND_URL` env var to the real Vercel URL (needed for CORS + cookies to work — see `src/server.ts`).
-- **whapi.cloud webhook:** register `https://<your-backend>/webhook/whapi?secret=<WEBHOOK_SHARED_SECRET>` — the secret in the URL is what stops arbitrary internet requests from creating fake tasks, since this endpoint can't sit behind a login session.
-- **Official Cloud API webhook:** register `https://<your-backend>/webhook/official` in the Meta App Dashboard, with the verify token set to `WHATSAPP_VERIFY_TOKEN`. Meta calls this URL with a `GET` once to confirm you control it before it'll deliver real messages.
+**Live now:**
+- Backend (Railway): `https://task-dashboard-production-7d35.up.railway.app`
+- Frontend (Vercel): `https://frontend-sigma-one-11.vercel.app`
+
+Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `github.com/ecome4all/task-dashboard`.
+
+- **Backend → Railway.** `railway.json` in this repo configures the build. Env vars are set directly on the Railway service (Variables tab) — see `.env.example` for the full list. **Important:** the build command explicitly uses `npm install --include=dev`, not plain `npm install` — with `NODE_ENV=production` set (required for the secure-cookie fix below), npm skips devDependencies by default, which breaks the build since `tsc` lives there. Don't "simplify" this back to a plain install.
+- **Frontend → Vercel.** `vercel.json` is included. `VITE_API_BASE_URL` is set to the Railway backend's URL in Vercel's project env vars — this is baked in at build time (Vite), so changing it requires a redeploy, not just an env var update.
+- Railway's `FRONTEND_URL` is set to the real Vercel URL — required for CORS + the session cookie's `SameSite=None` to work (see `src/auth/authService.ts` — the cookie is `SameSite=None; Secure` in production since frontend and backend are on different domains, and `SameSite=Lax` locally since both run on `localhost` there).
+- **Railway approval gate:** deployments triggered by a GitHub account that isn't a member of the Railway workspace/team require manual approval in the Railway dashboard before they'll build. This will keep happening on every push unless the pushing account is added as a proper Railway team member (not just a GitHub repo collaborator).
+- **whapi.cloud webhook:** register `https://task-dashboard-production-7d35.up.railway.app/webhook/whapi?secret=<WEBHOOK_SHARED_SECRET>` — the secret in the URL is what stops arbitrary internet requests from creating fake tasks, since this endpoint can't sit behind a login session.
+- **Official Cloud API webhook:** register `https://task-dashboard-production-7d35.up.railway.app/webhook/official` in the Meta App Dashboard, with the verify token set to `WHATSAPP_VERIFY_TOKEN`. Meta calls this URL with a `GET` once to confirm you control it before it'll deliver real messages.
 
 ## What's here vs. what's still needed
 
