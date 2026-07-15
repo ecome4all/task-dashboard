@@ -35,7 +35,7 @@ npm install
 npm run dev
 ```
 
-Runs on `http://localhost:5173`, proxying `/api` to the backend.
+Runs on `http://localhost:5190` (pinned in `vite.config.ts` — avoids colliding with other locally-running projects' dev servers, which happened during development; don't change this back to a random port without reason).
 
 ### 4. Tests
 
@@ -44,7 +44,7 @@ cd backend
 npm test
 ```
 
-32 tests, covering: the `task:` message parser, both webhook payload extractors (whapi.cloud and official Cloud API), the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler, and the channel-resolver that picks the right WhatsApp adapter to reply on. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+33 tests, covering: the `task:` message parser, both webhook payload extractors (whapi.cloud and official Cloud API), the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler, the channel-resolver that picks the right WhatsApp adapter to reply on, and the report-link message composer. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
@@ -66,8 +66,9 @@ npm test
 - Auto-acknowledgement reply on task creation, on whichever channel it arrived on
 - Dashboard: list tasks, assign from a real employee list, change status
 - Employee management: admins add employees from the dashboard (`/api/employees`); dropdown is backed by the database, not a hardcoded list
-- Login/auth: email+password sessions (httpOnly cookie, JWT-backed), `/api/tasks` and `/api/employees` require login
-- **Roles:** `admin` / `member` on every employee. Only admins can add new employees; task access (view/assign/status) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
+- Login/auth: email+password sessions (httpOnly cookie, JWT-backed), `/api/tasks`, `/api/employees`, and `/api/report-links` require login
+- **Roles:** `admin` / `supervisor` / `member` on every employee. Only admins can add new employees; only admins and supervisors can see/use Report Links; task access (view/assign/status) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
+- **Report Links:** the client's reports live in spreadsheets they maintain themselves (e.g. Google Sheets) — this app never reads or writes their contents. Admins/supervisors save a description + link in the dashboard's "Reports" view, then send it to a client over WhatsApp (either channel) with one click. Deliberately not a live data sync or an embedded spreadsheet — see the conversation this came out of for why that was ruled out.
 - Deployment config for Railway, Render, and Vercel
 
 **Not yet built (later phases / follow-ups):**

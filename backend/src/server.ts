@@ -6,6 +6,7 @@ import { createWebhookRouter } from "./routes/webhook";
 import { createOfficialWebhookRouter } from "./routes/officialWebhook";
 import { createTasksRouter } from "./routes/tasks";
 import { createEmployeesRouter } from "./routes/employees";
+import { createReportLinksRouter } from "./routes/reportLinks";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
 import { WhapiAdapter } from "./whatsapp/whapiAdapter";
@@ -15,7 +16,7 @@ import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
 const app = express();
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL ?? "http://localhost:5173",
+    origin: process.env.FRONTEND_URL ?? "http://localhost:5190",
     credentials: true,
   })
 );
@@ -45,6 +46,7 @@ app.use("/webhook", createOfficialWebhookRouter(channels.official));
 app.use("/api/auth", createAuthRouter());
 app.use("/api/tasks", requireAuth, createTasksRouter(channels));
 app.use("/api/employees", requireAuth, createEmployeesRouter());
+app.use("/api/report-links", requireAuth, createReportLinksRouter(channels));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

@@ -2,15 +2,20 @@ import { useEffect, useState } from "react";
 import { CurrentUser, fetchCurrentUser, logout } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
+import ReportLinks from "./ReportLinks";
 
 const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   admin: "Admin",
+  supervisor: "Supervisor",
   member: "Member",
 };
+
+type View = "tasks" | "reports";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [view, setView] = useState<View>("tasks");
 
   useEffect(() => {
     fetchCurrentUser().then((currentUser) => {
@@ -25,6 +30,8 @@ export default function App() {
     return <Login onLoggedIn={setUser} />;
   }
 
+  const canSeeReports = user.role === "admin" || user.role === "supervisor";
+
   async function handleLogout() {
     await logout();
     setUser(null);
@@ -35,7 +42,20 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">Ecom4all</div>
         <nav className="nav">
-          <button className="nav-item active">Tasks</button>
+          <button
+            className={`nav-item ${view === "tasks" ? "active" : ""}`}
+            onClick={() => setView("tasks")}
+          >
+            Tasks
+          </button>
+          {canSeeReports && (
+            <button
+              className={`nav-item ${view === "reports" ? "active" : ""}`}
+              onClick={() => setView("reports")}
+            >
+              Reports
+            </button>
+          )}
         </nav>
         <div className="sidebar-footer">
           created by{" "}
@@ -56,7 +76,7 @@ export default function App() {
         </header>
 
         <section className="view">
-          <Dashboard user={user} />
+          {view === "tasks" ? <Dashboard user={user} /> : <ReportLinks />}
         </section>
       </div>
     </div>
