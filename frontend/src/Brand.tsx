@@ -1,5 +1,13 @@
-export function BrandMark() {
-  return <div className="brand-mark">4</div>;
+export function BrandMark({ size = 30 }: { size?: number }) {
+  return <img className="brand-mark" src="/logo-icon.png" alt="Ecom4all" style={{ width: size, height: size }} />;
+}
+
+export function BrandLogo({ height = 32 }: { height?: number }) {
+  return (
+    <span className="brand-logo">
+      <img src="/logo-full.png" alt="Ecom4all" style={{ height }} />
+    </span>
+  );
 }
 
 export function BrandCredit() {

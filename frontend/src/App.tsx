@@ -3,7 +3,10 @@ import { CurrentUser, fetchCurrentUser, logout } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
 import ReportLinks from "./ReportLinks";
-import { BrandMark, BrandCredit } from "./Brand";
+import Employees from "./Employees";
+import Clients from "./Clients";
+import ClientUpdate from "./ClientUpdate";
+import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
 
 const ROLE_LABEL: Record<CurrentUser["role"], string> = {
@@ -12,7 +15,7 @@ const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   member: "Member",
 };
 
-type View = "tasks" | "reports";
+type View = "tasks" | "reports" | "employees" | "clients" | "client-update";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -39,6 +42,8 @@ export default function App() {
   }
 
   const canSeeReports = user.role === "admin" || user.role === "supervisor";
+  const canSeeClients = canSeeReports;
+  const canSeeEmployees = user.role === "admin";
 
   async function handleLogout() {
     await logout();
@@ -49,8 +54,7 @@ export default function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <BrandMark />
-          <span className="brand-name">Ecom4all</span>
+          <BrandLogo height={26} />
         </div>
         <nav className="nav">
           <button
@@ -65,6 +69,30 @@ export default function App() {
               onClick={() => setView("reports")}
             >
               Reports
+            </button>
+          )}
+          {canSeeEmployees && (
+            <button
+              className={`nav-item ${view === "employees" ? "active" : ""}`}
+              onClick={() => setView("employees")}
+            >
+              Employees
+            </button>
+          )}
+          {canSeeClients && (
+            <button
+              className={`nav-item ${view === "clients" ? "active" : ""}`}
+              onClick={() => setView("clients")}
+            >
+              Clients
+            </button>
+          )}
+          {canSeeClients && (
+            <button
+              className={`nav-item ${view === "client-update" ? "active" : ""}`}
+              onClick={() => setView("client-update")}
+            >
+              Send Update
             </button>
           )}
         </nav>
@@ -83,7 +111,11 @@ export default function App() {
         </header>
 
         <section className="view">
-          {view === "tasks" ? <Dashboard user={user} /> : <ReportLinks />}
+          {view === "tasks" && <Dashboard />}
+          {view === "reports" && <ReportLinks />}
+          {view === "employees" && <Employees user={user} />}
+          {view === "clients" && <Clients />}
+          {view === "client-update" && <ClientUpdate />}
         </section>
       </div>
     </div>

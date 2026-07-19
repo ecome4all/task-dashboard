@@ -19,7 +19,13 @@ model Task {
   description String
   clientName  String?
   assignee    String?
-  status      String    @default("new") // new | in_progress | done
+  // listing | inventory_manage | fba | claims | inactive_blocked_product | no_pickup | ads | other
+  // Nothing is auto-filled — same as assignee, this is picked manually during triage.
+  taskType    String?
+  // amazon | flipkart | meesho | other — also manually picked, not auto-detected from the message.
+  marketplace String?
+  // started | submitted | waiting_for_amazon_client | again_submitted | done
+  status      String    @default("started")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   doneAt      DateTime?
@@ -35,6 +41,19 @@ model Employee {
   passwordHash String?
   role         String  @default("member") // "admin" | "supervisor" | "member"
   active       Boolean @default(true)
+}
+
+// A managed directory of clients, separate from Task.clientName (which is
+// just whatever name comes in on the WhatsApp source and isn't linked here).
+// Lets report-sends pick a saved phone number instead of retyping it.
+model Client {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  name      String
+  phone     String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
 
 // A saved link to a report the client owns and maintains themselves

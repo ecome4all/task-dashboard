@@ -7,6 +7,7 @@ import { createOfficialWebhookRouter } from "./routes/officialWebhook";
 import { createTasksRouter } from "./routes/tasks";
 import { createEmployeesRouter } from "./routes/employees";
 import { createReportLinksRouter } from "./routes/reportLinks";
+import { createClientsRouter } from "./routes/clients";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
 import { WhapiAdapter } from "./whatsapp/whapiAdapter";
@@ -48,6 +49,7 @@ app.use("/api/auth", createAuthRouter());
 app.use("/api/tasks", requireAuth, createTasksRouter(channels));
 app.use("/api/employees", requireAuth, createEmployeesRouter());
 app.use("/api/report-links", requireAuth, createReportLinksRouter(channels));
+app.use("/api/clients", requireAuth, createClientsRouter(channels));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

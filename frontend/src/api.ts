@@ -39,6 +39,20 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+export type TaskStatus = "started" | "submitted" | "waiting_for_amazon_client" | "again_submitted" | "done";
+
+export type TaskType =
+  | "listing"
+  | "inventory_manage"
+  | "fba"
+  | "claims"
+  | "inactive_blocked_product"
+  | "no_pickup"
+  | "ads"
+  | "other";
+
+export type Marketplace = "amazon" | "flipkart" | "meesho" | "other";
+
 export interface Task {
   id: string;
   source: string;
@@ -46,7 +60,9 @@ export interface Task {
   description: string;
   clientName: string | null;
   assignee: string | null;
-  status: "new" | "in_progress" | "done";
+  taskType: TaskType | null;
+  marketplace: Marketplace | null;
+  status: TaskStatus;
   createdAt: string;
   doneAt: string | null;
 }
@@ -55,7 +71,10 @@ export function fetchTasks(): Promise<Task[]> {
   return request("/api/tasks");
 }
 
-export function updateTask(id: string, changes: Partial<Pick<Task, "assignee" | "status">>): Promise<Task> {
+export function updateTask(
+  id: string,
+  changes: Partial<Pick<Task, "assignee" | "status" | "taskType" | "marketplace">>
+): Promise<Task> {
   return request(`/api/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -66,6 +85,7 @@ export function updateTask(id: string, changes: Partial<Pick<Task, "assignee" | 
 export interface Employee {
   id: string;
   name: string;
+  role: "admin" | "supervisor" | "member";
   active: boolean;
 }
 
@@ -73,8 +93,24 @@ export function fetchEmployees(): Promise<Employee[]> {
   return request("/api/employees");
 }
 
+// Admin-only: includes inactive employees so they can be reactivated.
+export function fetchAllEmployees(): Promise<Employee[]> {
+  return request("/api/employees/all");
+}
+
 export function createEmployee(name: string): Promise<Employee> {
   return postJson("/api/employees", { name });
+}
+
+export function updateEmployee(
+  id: string,
+  changes: Partial<Pick<Employee, "role" | "active">>
+): Promise<Employee> {
+  return request(`/api/employees/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
 }
 
 export interface CurrentUser {
@@ -107,6 +143,45 @@ export async function login(email: string, password: string): Promise<CurrentUse
 
 export function logout(): Promise<void> {
   return request("/api/auth/logout", { method: "POST" });
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  active: boolean;
+}
+
+export function fetchClients(): Promise<Client[]> {
+  return request("/api/clients");
+}
+
+// Admin/supervisor-only: includes inactive clients so they can be reactivated.
+export function fetchAllClients(): Promise<Client[]> {
+  return request("/api/clients/all");
+}
+
+export function createClient(data: { name: string; phone?: string; notes?: string }): Promise<Client> {
+  return postJson("/api/clients", data);
+}
+
+export function sendClientUpdate(
+  id: string,
+  data: { phone: string; channel: "whapi" | "official"; message: string }
+): Promise<{ sent: boolean }> {
+  return postJson(`/api/clients/${id}/send-update`, data);
+}
+
+export function updateClient(
+  id: string,
+  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
+): Promise<Client> {
+  return request(`/api/clients/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
 }
 
 export interface ReportLink {

@@ -8,9 +8,13 @@ export interface CreateTaskInput {
   description: string;
 }
 
+export type TaskStatus = "started" | "submitted" | "waiting_for_amazon_client" | "again_submitted" | "done";
+
 export interface UpdateTaskInput {
   assignee?: string;
-  status?: "new" | "in_progress" | "done";
+  taskType?: string;
+  marketplace?: string;
+  status?: TaskStatus;
 }
 
 export const taskRepository = {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ReportLink, ApiError, fetchReportLinks, createReportLink, sendReportLink } from "./api";
+import { ReportLink, Client, ApiError, fetchReportLinks, createReportLink, sendReportLink, fetchClients } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 
@@ -9,6 +9,7 @@ function errorMessage(err: unknown): string {
 
 export default function ReportLinks() {
   const [links, setLinks] = useState<ReportLink[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -22,7 +23,9 @@ export default function ReportLinks() {
     setLoading(true);
     setLoadError("");
     try {
-      setLinks(await fetchReportLinks());
+      const [linkList, clientList] = await Promise.all([fetchReportLinks(), fetchClients()]);
+      setLinks(linkList);
+      setClients(clientList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -131,6 +134,21 @@ export default function ReportLinks() {
                     <td>{link.lastSentAt ? new Date(link.lastSentAt).toLocaleString() : "Never"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
+                        {clients.length > 0 && (
+                          <select
+                            className="field-select"
+                            value=""
+                            onChange={(e) => {
+                              const client = clients.find((c) => c.id === e.target.value);
+                              if (client) updateTarget(link.id, { phone: client.phone ?? "" });
+                            }}
+                          >
+                            <option value="">Saved client…</option>
+                            {clients.map((client) => (
+                              <option key={client.id} value={client.id}>{client.name}</option>
+                            ))}
+                          </select>
+                        )}
                         <input
                           className="field-input"
                           type="text"

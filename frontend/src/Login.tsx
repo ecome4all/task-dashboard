@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { login, ApiError, CurrentUser } from "./api";
-import { BrandMark, BrandCredit } from "./Brand";
+import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
 
 export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) => void }) {
@@ -31,9 +31,8 @@ export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) 
     <main className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
         <div className="brand">
-          <BrandMark />
+          <BrandLogo height={46} />
         </div>
-        <h1>Ecom4all</h1>
         <p className="subtitle">Task Dashboard</p>
         <input
           type="email"

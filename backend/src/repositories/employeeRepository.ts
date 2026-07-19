@@ -16,9 +16,27 @@ export const employeeRepository = {
     });
   },
 
+  // Includes inactive employees — only the admin employee-management panel
+  // needs those (to reactivate someone), so this stays separate from list().
+  listAll() {
+    return prisma.employee.findMany({
+      where: { tenantId: TENANT_ID },
+      orderBy: { name: "asc" },
+      select: PUBLIC_FIELDS,
+    });
+  },
+
   create(name: string) {
     return prisma.employee.create({
       data: { name, tenantId: TENANT_ID },
+      select: PUBLIC_FIELDS,
+    });
+  },
+
+  updateRoleAndActive(id: string, changes: { role?: string; active?: boolean }) {
+    return prisma.employee.update({
+      where: { id },
+      data: changes,
       select: PUBLIC_FIELDS,
     });
   },
