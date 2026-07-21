@@ -16,6 +16,10 @@ model Task {
   tenantId    String    @default("default")
   source      String // "whatsapp_group" | "whatsapp_official"
   sourceRef   String // WhatsApp group id or phone number the task came from
+  // Human-readable group name from whapi's webhook (chat_name), captured at
+  // intake time so staff can recognize a group without reading its raw JID.
+  // Null for official-channel (1:1) tasks, which have no group name.
+  chatName    String?
   description String
   clientName  String?
   assignee    String?
@@ -24,7 +28,7 @@ model Task {
   taskType    String?
   // amazon | flipkart | meesho | other — also manually picked, not auto-detected from the message.
   marketplace String?
-  // started | submitted | waiting_for_amazon_client | again_submitted | done
+  // started | submitted | waiting_for_amazon | waiting_for_client | again_submitted | done
   status      String    @default("started")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -51,6 +55,13 @@ model Client {
   tenantId  String   @default("default")
   name      String
   phone     String?
+  // The WhatsApp group this client's tasks actually come from (whapi chat_id,
+  // e.g. "919001524054-1380436383@g.us"), and its display name at the time it
+  // was linked. Manually assigned by staff from the groups seen on incoming
+  // tasks — never auto-matched. When set, this is the send target for
+  // client updates / report links instead of `phone`.
+  whatsappGroupId   String?
+  whatsappGroupName String?
   notes     String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())

@@ -1,6 +1,7 @@
 export interface IncomingMessage {
   chatId: string;
   text: string;
+  chatName?: string;
 }
 
 // whapi.cloud's exact webhook shape hasn't been captured against this app yet
@@ -12,7 +13,8 @@ export function extractIncomingMessage(payload: any): IncomingMessage | null {
   const message = payload?.messages?.[0] ?? payload;
   const chatId = message?.chat_id ?? message?.from ?? payload?.group_id ?? payload?.phone;
   const text = message?.text?.body ?? message?.body ?? payload?.text;
+  const chatName = message?.chat_name ?? payload?.chat_name ?? undefined;
 
   if (!chatId || typeof text !== "string") return null;
-  return { chatId, text };
+  return { chatId, text, ...(chatName ? { chatName } : {}) };
 }

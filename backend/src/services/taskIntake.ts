@@ -7,6 +7,7 @@ export interface TaskIntakeParams {
   chatId: string;
   text: string;
   whatsapp: WhatsAppAdapter;
+  chatName?: string;
 }
 
 // Shared by every intake channel (whapi group, official 1:1): parse the
@@ -21,6 +22,7 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     source: params.source,
     sourceRef: params.chatId,
     description: parsed.description,
+    chatName: params.chatName,
   });
 
   await params.whatsapp.sendMessage(params.chatId, "✅ Got it, logged.");

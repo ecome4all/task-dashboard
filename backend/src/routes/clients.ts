@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { clientRepository } from "../repositories/clientRepository";
+import { taskRepository } from "../repositories/taskRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
@@ -18,6 +19,32 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     res.json(await clientRepository.listAll());
   });
 
+  // Groups seen on incoming WhatsApp-group tasks that aren't tied to any
+  // client yet — staff assign these manually via PATCH /:id, nothing here
+  // is auto-matched. First occurrence per group (rows are newest-first) also
+  // gives us the most recently seen chat_name and task count.
+  router.get("/unlinked-groups", requireRole(...MANAGE_ROLES), async (_req, res) => {
+    const [rows, linkedIds] = await Promise.all([taskRepository.listGroupSources(), clientRepository.linkedGroupIds()]);
+
+    const groups = new Map<string, { chatId: string; chatName: string | null; taskCount: number; lastSeenAt: Date }>();
+    for (const row of rows) {
+      if (linkedIds.has(row.sourceRef)) continue;
+      const existing = groups.get(row.sourceRef);
+      if (existing) {
+        existing.taskCount += 1;
+      } else {
+        groups.set(row.sourceRef, {
+          chatId: row.sourceRef,
+          chatName: row.chatName,
+          taskCount: 1,
+          lastSeenAt: row.createdAt,
+        });
+      }
+    }
+
+    res.json([...groups.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()));
+  });
+
   router.post("/", requireRole(...MANAGE_ROLES), async (req, res) => {
     const { name, phone, notes } = req.body;
     if (typeof name !== "string" || !name.trim()) {
@@ -34,7 +61,7 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { name, phone, notes, active } = req.body;
+    const { name, phone, whatsappGroupId, whatsappGroupName, notes, active } = req.body;
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       res.status(400).json({ error: "name must be a non-empty string" });
       return;
@@ -46,6 +73,8 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     const client = await clientRepository.update(req.params.id, {
       ...(name !== undefined && { name: name.trim() }),
       ...(phone !== undefined && { phone }),
+      ...(whatsappGroupId !== undefined && { whatsappGroupId }),
+      ...(whatsappGroupName !== undefined && { whatsappGroupName }),
       ...(notes !== undefined && { notes }),
       ...(active !== undefined && { active }),
     });

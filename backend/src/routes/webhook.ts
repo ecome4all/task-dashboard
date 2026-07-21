@@ -29,6 +29,7 @@ export function createWebhookRouter(whatsapp: WhatsAppAdapter) {
       source: "whatsapp_group",
       chatId: incoming.chatId,
       text: incoming.text,
+      chatName: incoming.chatName,
       whatsapp,
     });
 

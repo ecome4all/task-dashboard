@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { Client, ApiError, fetchAllClients, createClient, updateClient } from "./api";
+import {
+  Client,
+  UnlinkedGroup,
+  ApiError,
+  fetchAllClients,
+  fetchUnlinkedGroups,
+  createClient,
+  updateClient,
+} from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 
@@ -9,9 +17,11 @@ function errorMessage(err: unknown): string {
 
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [unlinkedGroups, setUnlinkedGroups] = useState<UnlinkedGroup[]>([]);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
+  const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -20,7 +30,9 @@ export default function Clients() {
     setLoading(true);
     setLoadError("");
     try {
-      setClients(await fetchAllClients());
+      const [clientList, groups] = await Promise.all([fetchAllClients(), fetchUnlinkedGroups()]);
+      setClients(clientList);
+      setUnlinkedGroups(groups);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -73,6 +85,32 @@ export default function Clients() {
     }
   }
 
+  async function handleUnlinkGroup(client: Client) {
+    setActionError("");
+    try {
+      const updated = await updateClient(client.id, { whatsappGroupId: null, whatsappGroupName: null });
+      setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleLinkGroup(group: UnlinkedGroup) {
+    const clientId = linkChoice[group.chatId];
+    if (!clientId) return;
+    setActionError("");
+    try {
+      const updated = await updateClient(clientId, {
+        whatsappGroupId: group.chatId,
+        whatsappGroupName: group.chatName ?? group.chatId,
+      });
+      setClients((prev) => prev.map((c) => (c.id === clientId ? updated : c)));
+      setUnlinkedGroups((prev) => prev.filter((g) => g.chatId !== group.chatId));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
   if (loading) return <Spinner label="Loading clients…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
@@ -108,6 +146,57 @@ export default function Clients() {
         </div>
       </div>
 
+      {unlinkedGroups.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">Unassigned WhatsApp Groups</span>
+            <span className="panel-sub">
+              {unlinkedGroups.length} seen on incoming tasks, not yet tied to a client
+            </span>
+          </div>
+          <div className="panel-body">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Tasks</th>
+                  <th>Last Seen</th>
+                  <th>Assign To</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unlinkedGroups.map((group) => (
+                  <tr key={group.chatId}>
+                    <td>{group.chatName ?? group.chatId}</td>
+                    <td>{group.taskCount}</td>
+                    <td>{new Date(group.lastSeenAt).toLocaleString()}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <select
+                          className="field-select"
+                          value={linkChoice[group.chatId] ?? ""}
+                          onChange={(e) =>
+                            setLinkChoice((prev) => ({ ...prev, [group.chatId]: e.target.value }))
+                          }
+                        >
+                          <option value="">Select client…</option>
+                          {clients.map((client) => (
+                            <option key={client.id} value={client.id}>{client.name}</option>
+                          ))}
+                        </select>
+                        <button className="btn btn-primary btn-sm" onClick={() => handleLinkGroup(group)}>
+                          Link
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Clients</span>
@@ -119,6 +208,7 @@ export default function Clients() {
               <tr>
                 <th>Name</th>
                 <th>Phone</th>
+                <th>WhatsApp Group</th>
                 <th>Active</th>
               </tr>
             </thead>
@@ -135,6 +225,18 @@ export default function Clients() {
                       onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
                       onBlur={() => handlePhoneSave(client)}
                     />
+                  </td>
+                  <td>
+                    {client.whatsappGroupId ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="panel-sub">{client.whatsappGroupName ?? client.whatsappGroupId}</span>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(client)}>
+                          Unlink
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="panel-sub">Not linked</span>
+                    )}
                   </td>
                   <td>
                     <button

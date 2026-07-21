@@ -6,20 +6,40 @@ import ErrorBanner from "./ErrorBanner";
 const STATUS_PILL: Record<TaskStatus, string> = {
   started: "pill-neutral",
   submitted: "pill-info",
-  waiting_for_amazon_client: "pill-warn",
+  waiting_for_marketplace: "pill-warn",
+  waiting_for_client: "pill-warn",
   again_submitted: "pill-info",
   done: "pill-good",
 };
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  started: "Started",
-  submitted: "Submitted",
-  waiting_for_amazon_client: "Waiting For Amazon / Client",
-  again_submitted: "Again Submitted",
-  done: "Done",
-};
+const STATUS_ORDER: TaskStatus[] = [
+  "started",
+  "submitted",
+  "waiting_for_marketplace",
+  "waiting_for_client",
+  "again_submitted",
+  "done",
+];
 
-const STATUS_ORDER: TaskStatus[] = ["started", "submitted", "waiting_for_amazon_client", "again_submitted", "done"];
+// "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending on
+// the task's own marketplace column — same rule the backend uses when it
+// composes the WhatsApp update message.
+function statusLabel(status: TaskStatus, marketplace: Marketplace | null): string {
+  if (status === "waiting_for_marketplace") {
+    const name = marketplace === "amazon" || marketplace === "flipkart" || marketplace === "meesho"
+      ? MARKETPLACE_LABEL[marketplace]
+      : "Marketplace";
+    return `Waiting for ${name}`;
+  }
+  const labels: Record<Exclude<TaskStatus, "waiting_for_marketplace">, string> = {
+    started: "Started",
+    submitted: "Submitted",
+    waiting_for_client: "Waiting for Client",
+    again_submitted: "Again Submitted",
+    done: "Done",
+  };
+  return labels[status];
+}
 
 const TASK_TYPE_LABEL: Record<TaskType, string> = {
   listing: "Listing",
@@ -198,7 +218,9 @@ export default function Dashboard() {
                   </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className={`pill ${STATUS_PILL[task.status]}`}>{STATUS_LABEL[task.status]}</span>
+                      <span className={`pill ${STATUS_PILL[task.status]}`}>
+                        {statusLabel(task.status, task.marketplace)}
+                      </span>
                       <select
                         className="field-select"
                         value={task.status}
@@ -206,7 +228,7 @@ export default function Dashboard() {
                       >
                         {STATUS_ORDER.map((status) => (
                           <option key={status} value={status}>
-                            {STATUS_LABEL[status]}
+                            {statusLabel(status, task.marketplace)}
                           </option>
                         ))}
                       </select>

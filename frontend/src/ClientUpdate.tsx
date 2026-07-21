@@ -48,7 +48,6 @@ export default function ClientUpdate() {
 
   const [clientId, setClientId] = useState("");
   const [phone, setPhone] = useState("");
-  const [channel, setChannel] = useState<"whapi" | "official">("whapi");
   const [period, setPeriod] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [included, setIncluded] = useState<Record<string, boolean>>({});
@@ -74,7 +73,11 @@ export default function ClientUpdate() {
 
   function handleClientChange(id: string) {
     setClientId(id);
-    setPhone(clients.find((c) => c.id === id)?.phone ?? "");
+    const client = clients.find((c) => c.id === id);
+    // Prefer the client's linked WhatsApp group — that's the channel their
+    // tasks actually come in on — and only fall back to a 1:1 phone number
+    // if no group has been linked yet.
+    setPhone(client?.whatsappGroupId ?? client?.phone ?? "");
   }
 
   function setValue(key: string, value: string) {
@@ -147,7 +150,7 @@ export default function ClientUpdate() {
     setSent(false);
     setSending(true);
     try {
-      await sendClientUpdate(clientId, { phone: phone.trim(), channel, message });
+      await sendClientUpdate(clientId, { phone: phone.trim(), channel: "whapi", message });
       setSent(true);
     } catch (err) {
       setSendError(errorMessage(err));
@@ -192,23 +195,20 @@ export default function ClientUpdate() {
                   <option key={client.id} value={client.id}>{client.name}</option>
                 ))}
               </select>
-              <select
-                className="field-select"
-                value={channel}
-                onChange={(e) => setChannel(e.target.value as "whapi" | "official")}
-              >
-                <option value="whapi">Group (whapi)</option>
-                <option value="official">Official</option>
-              </select>
             </div>
             <input
               className="field-input"
               type="text"
-              placeholder="Client phone"
+              placeholder="Client phone or WhatsApp group"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              style={{ width: "100%", marginBottom: 10 }}
+              style={{ width: "100%", marginBottom: 4 }}
             />
+            {clients.find((c) => c.id === clientId)?.whatsappGroupId && (
+              <p className="panel-sub" style={{ marginTop: 0, marginBottom: 10 }}>
+                Sending to this client's linked WhatsApp group.
+              </p>
+            )}
             <input
               className="field-input"
               type="text"

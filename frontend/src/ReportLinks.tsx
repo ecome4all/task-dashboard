@@ -15,9 +15,7 @@ export default function ReportLinks() {
   const [actionError, setActionError] = useState("");
   const [description, setDescription] = useState("");
   const [url, setUrl] = useState("");
-  const [sendTargets, setSendTargets] = useState<Record<string, { phone: string; channel: "whapi" | "official" }>>(
-    {}
-  );
+  const [sendTargets, setSendTargets] = useState<Record<string, { phone: string }>>({});
 
   async function load() {
     setLoading(true);
@@ -52,10 +50,10 @@ export default function ReportLinks() {
   }
 
   function targetFor(id: string) {
-    return sendTargets[id] ?? { phone: "", channel: "whapi" as const };
+    return sendTargets[id] ?? { phone: "" };
   }
 
-  function updateTarget(id: string, changes: Partial<{ phone: string; channel: "whapi" | "official" }>) {
+  function updateTarget(id: string, changes: Partial<{ phone: string }>) {
     setSendTargets((prev) => ({ ...prev, [id]: { ...targetFor(id), ...changes } }));
   }
 
@@ -64,7 +62,7 @@ export default function ReportLinks() {
     if (!target.phone.trim()) return;
     setActionError("");
     try {
-      const updated = await sendReportLink(id, target.phone.trim(), target.channel);
+      const updated = await sendReportLink(id, target.phone.trim(), "whapi");
       setLinks((prev) => prev.map((l) => (l.id === id ? updated : l)));
     } catch (err) {
       setActionError(errorMessage(err));
@@ -140,7 +138,7 @@ export default function ReportLinks() {
                             value=""
                             onChange={(e) => {
                               const client = clients.find((c) => c.id === e.target.value);
-                              if (client) updateTarget(link.id, { phone: client.phone ?? "" });
+                              if (client) updateTarget(link.id, { phone: client.whatsappGroupId ?? client.phone ?? "" });
                             }}
                           >
                             <option value="">Saved client…</option>
@@ -152,19 +150,11 @@ export default function ReportLinks() {
                         <input
                           className="field-input"
                           type="text"
-                          placeholder="Client phone"
+                          placeholder="Phone or group"
                           value={target.phone}
                           onChange={(e) => updateTarget(link.id, { phone: e.target.value })}
                           style={{ width: 130 }}
                         />
-                        <select
-                          className="field-select"
-                          value={target.channel}
-                          onChange={(e) => updateTarget(link.id, { channel: e.target.value as "whapi" | "official" })}
-                        >
-                          <option value="whapi">Group (whapi)</option>
-                          <option value="official">Official</option>
-                        </select>
                         <button className="btn btn-primary btn-sm" onClick={() => handleSend(link.id)}>
                           Send
                         </button>

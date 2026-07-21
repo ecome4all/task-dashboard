@@ -39,7 +39,13 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export type TaskStatus = "started" | "submitted" | "waiting_for_amazon_client" | "again_submitted" | "done";
+export type TaskStatus =
+  | "started"
+  | "submitted"
+  | "waiting_for_marketplace"
+  | "waiting_for_client"
+  | "again_submitted"
+  | "done";
 
 export type TaskType =
   | "listing"
@@ -149,6 +155,8 @@ export interface Client {
   id: string;
   name: string;
   phone: string | null;
+  whatsappGroupId: string | null;
+  whatsappGroupName: string | null;
   notes: string | null;
   active: boolean;
 }
@@ -166,6 +174,19 @@ export function createClient(data: { name: string; phone?: string; notes?: strin
   return postJson("/api/clients", data);
 }
 
+export interface UnlinkedGroup {
+  chatId: string;
+  chatName: string | null;
+  taskCount: number;
+  lastSeenAt: string;
+}
+
+// Groups seen on incoming WhatsApp-group tasks that aren't tied to a client
+// yet — admin/supervisor assign these manually, nothing here is auto-matched.
+export function fetchUnlinkedGroups(): Promise<UnlinkedGroup[]> {
+  return request("/api/clients/unlinked-groups");
+}
+
 export function sendClientUpdate(
   id: string,
   data: { phone: string; channel: "whapi" | "official"; message: string }
@@ -175,7 +196,7 @@ export function sendClientUpdate(
 
 export function updateClient(
   id: string,
-  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
+  changes: Partial<Pick<Client, "name" | "phone" | "whatsappGroupId" | "whatsappGroupName" | "notes" | "active">>
 ): Promise<Client> {
   return request(`/api/clients/${id}`, {
     method: "PATCH",

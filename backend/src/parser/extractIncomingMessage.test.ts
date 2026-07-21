@@ -47,4 +47,15 @@ describe("extractIncomingMessage", () => {
   it("returns null for a completely empty payload", () => {
     expect(extractIncomingMessage({})).toBeNull();
   });
+
+  it("captures chat_name when present, for linking a group to a client later", () => {
+    const payload = {
+      messages: [{ chat_id: "1234@g.us", chat_name: "Forensic Files Team", text: { body: "task: x" } }],
+    };
+    expect(extractIncomingMessage(payload)).toEqual({
+      chatId: "1234@g.us",
+      text: "task: x",
+      chatName: "Forensic Files Team",
+    });
+  });
 });
