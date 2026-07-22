@@ -15,9 +15,25 @@ import { CloudApiAdapter } from "./whatsapp/cloudApiAdapter";
 import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
 
 const app = express();
+
+// FRONTEND_URL can be a comma-separated list — lets the same backend serve
+// logins from more than one frontend URL at once (e.g. a nicer *.vercel.app
+// alias alongside the original auto-generated one), without breaking either.
+const allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:5190")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL ?? "http://localhost:5190",
+    origin(origin, callback) {
+      // No Origin header (curl, server-to-server calls) — nothing to check against.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
