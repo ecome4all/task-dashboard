@@ -44,7 +44,7 @@ cd backend
 npm test
 ```
 
-33 tests, covering: the `task:` message parser, both webhook payload extractors (whapi.cloud and official Cloud API), the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler, the channel-resolver that picks the right WhatsApp adapter to reply on, and the report-link message composer. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+34 tests, covering: the `task:` message parser, both webhook payload extractors (whapi.cloud and official Cloud API, including the group `chat_name` capture used to link a WhatsApp group to a client), the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler, the channel-resolver that picks the right WhatsApp adapter to reply on, and the report-link message composer. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
