@@ -11,7 +11,7 @@ import Spinner from "./Spinner";
 
 const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   admin: "Admin",
-  supervisor: "Supervisor",
+  manager: "Manager",
   member: "Member",
 };
 
@@ -41,7 +41,7 @@ export default function App() {
     return <Login onLoggedIn={setUser} />;
   }
 
-  const canSeeReports = user.role === "admin" || user.role === "supervisor";
+  const canSeeReports = user.role === "admin" || user.role === "manager";
   const canSeeClients = canSeeReports;
   const canSeeEmployees = user.role === "admin";
 

@@ -76,8 +76,8 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
 - Dashboard: list tasks, assign from a real employee list, change status
 - Employee management: admins add employees from the dashboard (`/api/employees`); dropdown is backed by the database, not a hardcoded list
 - Login/auth: email+password sessions (httpOnly cookie, JWT-backed), `/api/tasks`, `/api/employees`, and `/api/report-links` require login
-- **Roles:** `admin` / `supervisor` / `member` on every employee. Only admins can add new employees; only admins and supervisors can see/use Report Links; task access (view/assign/status) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
-- **Report Links:** the client's reports live in spreadsheets they maintain themselves (e.g. Google Sheets) — this app never reads or writes their contents. Admins/supervisors save a description + link in the dashboard's "Reports" view, then send it to a client over WhatsApp (either channel) with one click. Deliberately not a live data sync or an embedded spreadsheet — see the conversation this came out of for why that was ruled out.
+- **Roles:** `admin` / `manager` / `member` on every employee. Only admins can add new employees; only admins and managers can see/use Report Links; task access (view/assign/status) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
+- **Report Links:** the client's reports live in spreadsheets they maintain themselves (e.g. Google Sheets) — this app never reads or writes their contents. Admins/managers save a description + link in the dashboard's "Reports" view, then send it to a client over WhatsApp (either channel) with one click. Deliberately not a live data sync or an embedded spreadsheet — see the conversation this came out of for why that was ruled out.
 - Deployment config for Railway, Render, and Vercel
 
 **Not yet built (later phases / follow-ups):**

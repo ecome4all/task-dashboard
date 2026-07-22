@@ -91,7 +91,7 @@ export function updateTask(
 export interface Employee {
   id: string;
   name: string;
-  role: "admin" | "supervisor" | "member";
+  role: "admin" | "manager" | "member";
   active: boolean;
 }
 
@@ -123,7 +123,7 @@ export interface CurrentUser {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "supervisor" | "member";
+  role: "admin" | "manager" | "member";
 }
 
 // Callers treat "not logged in" as a normal, expected state, not an error —
@@ -165,7 +165,7 @@ export function fetchClients(): Promise<Client[]> {
   return request("/api/clients");
 }
 
-// Admin/supervisor-only: includes inactive clients so they can be reactivated.
+// Admin/manager-only: includes inactive clients so they can be reactivated.
 export function fetchAllClients(): Promise<Client[]> {
   return request("/api/clients/all");
 }
@@ -182,7 +182,7 @@ export interface UnlinkedGroup {
 }
 
 // Groups seen on incoming WhatsApp-group tasks that aren't tied to a client
-// yet — admin/supervisor assign these manually, nothing here is auto-matched.
+// yet — admin/manager assign these manually, nothing here is auto-matched.
 export function fetchUnlinkedGroups(): Promise<UnlinkedGroup[]> {
   return request("/api/clients/unlinked-groups");
 }

@@ -5,7 +5,7 @@ import ErrorBanner from "./ErrorBanner";
 
 const ROLE_LABEL: Record<Employee["role"], string> = {
   admin: "Admin",
-  supervisor: "Supervisor",
+  manager: "Manager",
   member: "Member",
 };
 

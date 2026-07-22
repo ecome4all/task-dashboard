@@ -2,7 +2,7 @@ import { Router } from "express";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
 
-const ROLES = ["admin", "supervisor", "member"];
+const ROLES = ["admin", "manager", "member"];
 
 export function createEmployeesRouter() {
   const router = Router();

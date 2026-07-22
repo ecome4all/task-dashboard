@@ -8,11 +8,11 @@ import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 export function createReportLinksRouter(channels: WhatsAppChannels) {
   const router = Router();
 
-  router.get("/", requireRole("admin", "supervisor"), async (_req, res) => {
+  router.get("/", requireRole("admin", "manager"), async (_req, res) => {
     res.json(await reportLinkRepository.list());
   });
 
-  router.post("/", requireRole("admin", "supervisor"), async (req, res) => {
+  router.post("/", requireRole("admin", "manager"), async (req, res) => {
     const { description, url } = req.body;
     if (typeof description !== "string" || !description.trim() || typeof url !== "string" || !url.trim()) {
       res.status(400).json({ error: "description and url are required" });
@@ -24,7 +24,7 @@ export function createReportLinksRouter(channels: WhatsAppChannels) {
     res.status(201).json(reportLink);
   });
 
-  router.post("/:id/send", requireRole("admin", "supervisor"), async (req, res) => {
+  router.post("/:id/send", requireRole("admin", "manager"), async (req, res) => {
     const { phone, channel } = req.body;
     if (typeof phone !== "string" || !phone.trim() || (channel !== "whapi" && channel !== "official")) {
       res.status(400).json({ error: "phone and channel ('whapi' or 'official') are required" });

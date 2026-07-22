@@ -4,9 +4,9 @@ import { taskRepository } from "../repositories/taskRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
-// Same audience as report-links: admins and supervisors are the ones who
+// Same audience as report-links: admins and managers are the ones who
 // send reports to clients, so they're the ones who maintain the directory.
-const MANAGE_ROLES = ["admin", "supervisor"];
+const MANAGE_ROLES = ["admin", "manager"];
 
 export function createClientsRouter(channels: WhatsAppChannels) {
   const router = Router();
