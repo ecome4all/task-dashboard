@@ -139,6 +139,7 @@ export default function Dashboard() {
           <span className="panel-sub">{tasks.length} total</span>
         </div>
         <div className="panel-body">
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -175,7 +176,7 @@ export default function Dashboard() {
                   <td>
                     <SearchableSelect
                       value={task.taskType ?? ""}
-                      placeholder="Untriaged"
+                      placeholder="Not Set"
                       options={taskTypeOptions.map((type) => ({ value: type.value, label: type.label }))}
                       onChange={(value) => handleTypeChange(task, value)}
                     />
@@ -212,6 +213,7 @@ export default function Dashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </>
