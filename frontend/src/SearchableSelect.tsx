@@ -22,12 +22,17 @@ export default function SearchableSelect({
   placeholder,
   onChange,
   allowClear = true,
+  triggerClassName,
 }: {
   value: string;
   options: SearchableSelectOption[];
   placeholder: string;
   onChange: (value: string) => void;
   allowClear?: boolean;
+  // Extra class(es) for the trigger button — e.g. to color-code it by the
+  // selected value (see the Task board's Status column, which colors the
+  // dropdown itself instead of showing a separate pill next to it).
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -95,7 +100,7 @@ export default function SearchableSelect({
       <button
         ref={triggerRef}
         type="button"
-        className="field-select searchable-select-trigger"
+        className={`field-select searchable-select-trigger ${triggerClassName ?? ""}`}
         onClick={() => (open ? close() : openPanel())}
       >
         {selected?.label ?? placeholder}

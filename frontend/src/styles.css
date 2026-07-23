@@ -40,13 +40,13 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---- app shell ---- */
 .shell { display: flex; min-height: 100svh; }
-.sidebar { width: 220px; flex-shrink: 0; background: var(--bg-alt); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
+.sidebar { width: 168px; flex-shrink: 0; background: var(--bg-alt); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 14px 12px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 4px 16px; }
 .brand-mark { border-radius: 7px; flex-shrink: 0; object-fit: contain; }
 .brand-logo { display: inline-flex; align-items: center; border-radius: 8px; }
 .brand-logo img { display: block; }
 .nav { display: flex; flex-direction: column; gap: 4px; }
-.nav-item { display: block; width: 100%; text-align: left; padding: 10px 14px; border-radius: 8px; border: none; background: transparent; color: var(--text); font-size: 14px; cursor: pointer; }
+.nav-item { display: block; width: 100%; text-align: left; padding: 9px 11px; border-radius: 8px; border: none; background: transparent; color: var(--text); font-size: 13.5px; cursor: pointer; }
 .nav-item:hover { background: var(--border); }
 .nav-item.active { background: var(--accent); color: #fff; font-weight: 600; }
 .sidebar-footer { margin-top: auto; padding: 10px 8px; font-size: 12px; color: var(--text); opacity: 0.55; display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -78,6 +78,13 @@ button, input, select { font: inherit; color: inherit; }
 .pill-neutral { background: var(--bg-alt); color: var(--text); opacity: 0.8; } .pill-neutral::before { background: var(--text); }
 .pill-info { background: var(--info-soft); color: var(--info); } .pill-info::before { background: var(--info); }
 
+/* Same colors as the pills above, applied straight to the Status dropdown
+   trigger — one colored control instead of a pill next to a separate select. */
+.status-trigger-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.status-trigger-good { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.status-trigger-neutral { background: var(--bg-alt); color: var(--text); }
+.status-trigger-info { background: var(--info-soft); color: var(--info); border-color: transparent; }
+
 /* ---- panel / card ---- */
 .panel { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 16px; }
 .panel-head { padding: 16px 18px 4px; display: flex; align-items: baseline; justify-content: space-between; }
@@ -90,17 +97,32 @@ button, input, select { font: inherit; color: inherit; }
   padding: 8px 10px; font-size: 13px; color: var(--text);
 }
 
-/* table-layout: fixed splits columns evenly instead of growing past the
-   page — combined with the wrapping below, long unbroken content (a
-   WhatsApp group id, a full timestamp) wraps onto more lines within its
-   own column instead of forcing the whole table wider than the screen. */
-table.data-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+/* table-layout: auto (not fixed) lets each column size to its own content
+   instead of splitting the table width evenly across 13 columns — fixed
+   layout was squeezing narrow-content columns (Status, Marketplace) down
+   to the point where even short words wrapped one letter per line. The
+   wrapping below still keeps long unbroken content (a WhatsApp group id,
+   a full timestamp) from forcing the whole table wider than the screen. */
+table.data-table { width: 100%; table-layout: auto; border-collapse: collapse; }
 table.data-table th, table.data-table td {
   text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 13px;
-  white-space: normal; overflow-wrap: anywhere; vertical-align: top;
+  /* break-word keeps ordinary words whole (so a narrower window doesn't
+     split "Beta" into "Bet"/"a") and only breaks mid-word for something
+     that's one long unbroken token even on its own line, like a group id. */
+  white-space: normal; overflow-wrap: break-word; vertical-align: top;
 }
 table.data-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text); opacity: 0.55; font-weight: 700; }
 table.data-table tr:last-child td { border-bottom: none; }
+
+/* ---- status filter chips ---- */
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip {
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  border-radius: 20px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+}
+.chip:hover { background: var(--bg-alt); }
+.chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip-count { opacity: 0.7; margin-left: 4px; font-size: 11px; }
 
 /* ---- pagination ---- */
 .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 0 0; }
@@ -111,7 +133,7 @@ table.data-table tr:last-child td { border-bottom: none; }
 /* ---- searchable select ---- */
 /* Renders through a portal at document.body with fixed positioning (see
    SearchableSelect.tsx) so it isn't clipped by a narrow table column. */
-.searchable-select-trigger { width: 100%; text-align: left; cursor: pointer; white-space: normal; overflow-wrap: anywhere; }
+.searchable-select-trigger { width: 100%; text-align: left; cursor: pointer; white-space: normal; overflow-wrap: break-word; }
 .searchable-select-panel {
   position: fixed; z-index: 100; min-width: 200px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;

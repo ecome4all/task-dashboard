@@ -17,15 +17,15 @@ import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
 
 // Only used for the handful of statuses this frontend knows to color —
-// anything an admin adds beyond these falls back to pill-neutral, since
+// anything an admin adds beyond these falls back to "neutral", since
 // there's no meaningful color to guess for an arbitrary new status.
-const STATUS_PILL: Record<string, string> = {
-  started: "pill-neutral",
-  submitted: "pill-info",
-  waiting_for_marketplace: "pill-warn",
-  waiting_for_client: "pill-warn",
-  again_submitted: "pill-info",
-  done: "pill-good",
+const STATUS_COLOR: Record<string, string> = {
+  started: "neutral",
+  submitted: "info",
+  waiting_for_marketplace: "warn",
+  waiting_for_client: "warn",
+  again_submitted: "info",
+  done: "good",
 };
 
 const PAGE_SIZE = 10;
@@ -39,6 +39,13 @@ function toDateInputValue(dueDate: string | null): string {
   return dueDate ? dueDate.slice(0, 10) : "";
 }
 
+interface ClientSummaryRow {
+  name: string;
+  total: number;
+  pending: number;
+  done: number;
+}
+
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -49,6 +56,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const canSetDueDate = user.role === "admin" || user.role === "manager";
 
@@ -92,6 +100,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     }
     const option = statusOptions.find((o) => o.value === status);
     return option?.label ?? status;
+  }
+
+  function selectStatusFilter(status: string | null) {
+    setStatusFilter(status);
+    setPage(1);
   }
 
   async function handleAssigneeChange(task: Task, assignee: string) {
@@ -150,10 +163,22 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
-  const pageCount = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+  const filteredTasks = statusFilter ? tasks.filter((t) => t.status === statusFilter) : tasks;
+  const pageCount = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedTasks = tasks.slice(pageStart, pageStart + PAGE_SIZE);
+  const pagedTasks = filteredTasks.slice(pageStart, pageStart + PAGE_SIZE);
+
+  const clientSummary: ClientSummaryRow[] = Object.values(
+    tasks.reduce<Record<string, ClientSummaryRow>>((acc, t) => {
+      const name = t.clientName ?? "No Client";
+      const row = (acc[name] ??= { name, total: 0, pending: 0, done: 0 });
+      row.total += 1;
+      if (t.status === "done") row.done += 1;
+      else row.pending += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.total - a.total);
 
   return (
     <>
@@ -161,10 +186,56 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
       <div className="panel">
         <div className="panel-head">
-          <span className="panel-title">Tasks</span>
-          <span className="panel-sub">{tasks.length} total</span>
+          <span className="panel-title">Client Summary</span>
         </div>
         <div className="panel-body">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Total</th>
+                <th>Pending</th>
+                <th>Done</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clientSummary.map((row) => (
+                <tr key={row.name}>
+                  <td>{row.name}</td>
+                  <td>{row.total}</td>
+                  <td>{row.pending}</td>
+                  <td>{row.done}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Tasks</span>
+          <span className="panel-sub">{filteredTasks.length} shown of {tasks.length} total</span>
+        </div>
+        <div className="panel-body">
+          <div className="filter-chips">
+            <button
+              className={`chip ${statusFilter === null ? "active" : ""}`}
+              onClick={() => selectStatusFilter(null)}
+            >
+              All <span className="chip-count">{tasks.length}</span>
+            </button>
+            {statusOptions.map((option) => (
+              <button
+                key={option.value}
+                className={`chip ${statusFilter === option.value ? "active" : ""}`}
+                onClick={() => selectStatusFilter(option.value)}
+              >
+                {option.label} <span className="chip-count">{tasks.filter((t) => t.status === option.value).length}</span>
+              </button>
+            ))}
+          </div>
+
           <table className="data-table">
             <thead>
               <tr>
@@ -177,8 +248,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Type</th>
                 <th>Employee</th>
                 <th>Status</th>
-                <th>Due Date</th>
                 <th>Created</th>
+                <th>Due Date</th>
                 <th>Updated</th>
                 <th>Completed</th>
               </tr>
@@ -216,22 +287,19 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     />
                   </td>
                   <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className={`pill ${STATUS_PILL[task.status] ?? "pill-neutral"}`}>
-                        {statusLabel(task.status, task.marketplace)}
-                      </span>
-                      <SearchableSelect
-                        value={task.status}
-                        placeholder="Status"
-                        allowClear={false}
-                        options={statusOptions.map((status) => ({
-                          value: status.value,
-                          label: statusLabel(status.value, task.marketplace),
-                        }))}
-                        onChange={(value) => handleStatusChange(task, value)}
-                      />
-                    </div>
+                    <SearchableSelect
+                      value={task.status}
+                      placeholder="Status"
+                      allowClear={false}
+                      triggerClassName={`status-trigger-${STATUS_COLOR[task.status] ?? "neutral"}`}
+                      options={statusOptions.map((status) => ({
+                        value: status.value,
+                        label: statusLabel(status.value, task.marketplace),
+                      }))}
+                      onChange={(value) => handleStatusChange(task, value)}
+                    />
                   </td>
+                  <td>{new Date(task.createdAt).toLocaleString()}</td>
                   <td>
                     {canSetDueDate ? (
                       <input
@@ -244,7 +312,6 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                       task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "—"
                     )}
                   </td>
-                  <td>{new Date(task.createdAt).toLocaleString()}</td>
                   <td>{new Date(task.updatedAt).toLocaleString()}</td>
                   <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
                 </tr>
@@ -255,7 +322,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
           {pageCount > 1 && (
             <div className="pagination">
               <span className="pagination-info">
-                {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, tasks.length)} of {tasks.length}
+                {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredTasks.length)} of {filteredTasks.length}
               </span>
               <button
                 className="btn btn-ghost btn-sm"
