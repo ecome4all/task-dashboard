@@ -54,14 +54,23 @@ export function createTasksRouter(channels: WhatsAppChannels) {
 
     // Every status change is announced back to the group it came from, not
     // just "done" — the client wants visibility into the whole pipeline.
+    // This send is best-effort: the status update itself is already saved
+    // above, and a WhatsApp failure (network blip, bad chat_id, Periskope
+    // outage) must not fail the request or crash the server — an uncaught
+    // rejection here would take down the whole process, not just this one
+    // notification.
     if (status !== undefined) {
-      const whatsapp = resolveAdapterForSource(task.source, channels);
-      const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
-      const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
-      await whatsapp.sendMessage(
-        task.sourceRef,
-        `Task: ${task.description}\nUpdate: ${statusLabel(status, task.marketplace, statusLabels, marketplaceLabels)}`
-      );
+      try {
+        const whatsapp = resolveAdapterForSource(task.source, channels);
+        const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
+        const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
+        await whatsapp.sendMessage(
+          task.sourceRef,
+          `Task: ${task.description}\nUpdate: ${statusLabel(status, task.marketplace, statusLabels, marketplaceLabels)}`
+        );
+      } catch (err) {
+        console.error("Failed to send WhatsApp status update:", err);
+      }
     }
 
     res.json(task);

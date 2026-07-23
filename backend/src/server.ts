@@ -84,6 +84,16 @@ app.use("/api/config-options", requireAuth, createConfigOptionsRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Defense in depth: an unhandled rejection anywhere (a route missing a
+// try/catch around an outbound WhatsApp send, for example — see tasks.ts,
+// taskIntake.ts, reportLinks.ts, clients.ts for the actual fixes) otherwise
+// crashes the entire Node process by default, taking the whole app down
+// until Railway restarts it. Logging instead of crashing keeps one bad
+// request from becoming a full outage.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);

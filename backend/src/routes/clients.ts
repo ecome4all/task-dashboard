@@ -107,7 +107,16 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       return;
     }
 
-    await channels[channel as "whapi" | "official"].sendMessage(phone.trim(), message.trim());
+    try {
+      await channels[channel as "whapi" | "official"].sendMessage(phone.trim(), message.trim());
+    } catch (err) {
+      // A failed send (network blip, bad number, provider outage) must not
+      // crash the server — an uncaught rejection here would take down the
+      // whole process, not just this one request.
+      console.error("Failed to send client update:", err);
+      res.status(502).json({ error: "Couldn't send the message. Try again." });
+      return;
+    }
     res.json({ sent: true });
   });
 

@@ -48,7 +48,15 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     clientName: client.name,
   });
 
-  await params.whatsapp.sendMessage(params.chatId, "✅ Got it, logged.");
+  // Best-effort: the task is already saved above, and this ack is just a
+  // courtesy — a failed send (network blip, bad chat_id, provider outage)
+  // must not crash the webhook handler, since an uncaught rejection here
+  // would take down the whole server, not just this one message.
+  try {
+    await params.whatsapp.sendMessage(params.chatId, "✅ Got it, logged.");
+  } catch (err) {
+    console.error("Failed to send task acknowledgement:", err);
+  }
 
   return task;
 }

@@ -38,7 +38,18 @@ export function createReportLinksRouter(channels: WhatsAppChannels) {
     }
 
     const whatsapp = channels[channel as "whapi" | "official"];
-    await whatsapp.sendMessage(phone.trim(), composeReportMessage(reportLink.description, reportLink.url));
+    try {
+      await whatsapp.sendMessage(phone.trim(), composeReportMessage(reportLink.description, reportLink.url));
+    } catch (err) {
+      // A failed send (network blip, bad number, provider outage) must not
+      // crash the server — an uncaught rejection here would take down the
+      // whole process, not just this one request. The user asked us to
+      // send something, so unlike a status-update notification, report the
+      // failure back instead of silently marking it sent.
+      console.error("Failed to send report link:", err);
+      res.status(502).json({ error: "Couldn't send the message. Try again." });
+      return;
+    }
 
     const updated = await reportLinkRepository.markSent(reportLink.id);
     res.json(updated);
