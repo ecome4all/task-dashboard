@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { reportLinkRepository } from "../repositories/reportLinkRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
-import { composeReportMessage } from "../services/composeReportMessage";
 import { requireRole } from "../auth/requireRole";
-import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
-export function createReportLinksRouter(channels: WhatsAppChannels) {
+// Report links no longer send their own message — a saved link is now
+// attached into the single combined message composed on the Send Report
+// screen (see ClientUpdate.tsx), which sends it via /api/clients/:id/send-update.
+// This route just records that a link was used, for the "Last sent" column.
+export function createReportLinksRouter() {
   const router = Router();
 
   router.get("/", requireRole("admin", "manager"), async (_req, res) => {
@@ -24,30 +26,10 @@ export function createReportLinksRouter(channels: WhatsAppChannels) {
     res.status(201).json(reportLink);
   });
 
-  router.post("/:id/send", requireRole("admin", "manager"), async (req, res) => {
-    const { phone, channel } = req.body;
-    if (typeof phone !== "string" || !phone.trim() || (channel !== "whapi" && channel !== "official")) {
-      res.status(400).json({ error: "phone and channel ('whapi' or 'official') are required" });
-      return;
-    }
-
+  router.post("/:id/mark-sent", requireRole("admin", "manager"), async (req, res) => {
     const reportLink = await reportLinkRepository.findById(req.params.id);
     if (!reportLink) {
       res.status(404).json({ error: "not found" });
-      return;
-    }
-
-    const whatsapp = channels[channel as "whapi" | "official"];
-    try {
-      await whatsapp.sendMessage(phone.trim(), composeReportMessage(reportLink.description, reportLink.url));
-    } catch (err) {
-      // A failed send (network blip, bad number, provider outage) must not
-      // crash the server — an uncaught rejection here would take down the
-      // whole process, not just this one request. The user asked us to
-      // send something, so unlike a status-update notification, report the
-      // failure back instead of silently marking it sent.
-      console.error("Failed to send report link:", err);
-      res.status(502).json({ error: "Couldn't send the message. Try again." });
       return;
     }
 

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { CurrentUser, fetchCurrentUser, logout } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
-import ReportLinks from "./ReportLinks";
 import Employees from "./Employees";
 import Clients from "./Clients";
 import ClientUpdate from "./ClientUpdate";
@@ -16,7 +15,7 @@ const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   member: "Member",
 };
 
-type View = "tasks" | "reports" | "employees" | "clients" | "client-update" | "settings";
+type View = "tasks" | "employees" | "clients" | "client-update" | "settings";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -42,8 +41,7 @@ export default function App() {
     return <Login onLoggedIn={setUser} />;
   }
 
-  const canSeeReports = user.role === "admin" || user.role === "manager";
-  const canSeeClients = canSeeReports;
+  const canSeeClients = user.role === "admin" || user.role === "manager";
   const canSeeEmployees = user.role === "admin";
 
   async function handleLogout() {
@@ -64,14 +62,6 @@ export default function App() {
           >
             Tasks
           </button>
-          {canSeeReports && (
-            <button
-              className={`nav-item ${view === "reports" ? "active" : ""}`}
-              onClick={() => setView("reports")}
-            >
-              Reports
-            </button>
-          )}
           {canSeeEmployees && (
             <button
               className={`nav-item ${view === "employees" ? "active" : ""}`}
@@ -121,7 +111,6 @@ export default function App() {
 
         <section className="view">
           {view === "tasks" && <Dashboard user={user} />}
-          {view === "reports" && <ReportLinks />}
           {view === "employees" && <Employees user={user} />}
           {view === "clients" && <Clients />}
           {view === "client-update" && <ClientUpdate />}

@@ -78,7 +78,7 @@ app.use("/webhook", createOfficialWebhookRouter(channels.official));
 app.use("/api/auth", createAuthRouter());
 app.use("/api/tasks", requireAuth, createTasksRouter(channels));
 app.use("/api/employees", requireAuth, createEmployeesRouter());
-app.use("/api/report-links", requireAuth, createReportLinksRouter(channels));
+app.use("/api/report-links", requireAuth, createReportLinksRouter());
 app.use("/api/clients", requireAuth, createClientsRouter(channels));
 app.use("/api/config-options", requireAuth, createConfigOptionsRouter());
 

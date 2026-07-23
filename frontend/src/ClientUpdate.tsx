@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Client, ApiError, fetchClients, sendClientUpdate } from "./api";
+import {
+  Client,
+  ReportLink,
+  ApiError,
+  fetchClients,
+  sendClientUpdate,
+  fetchReportLinks,
+  createReportLink,
+  markReportLinkSent,
+} from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 
@@ -40,6 +49,7 @@ const RAW_FIELDS: RawFieldDef[] = [
 
 export default function ClientUpdate() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [links, setLinks] = useState<ReportLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [sendError, setSendError] = useState("");
@@ -53,13 +63,20 @@ export default function ClientUpdate() {
   const [included, setIncluded] = useState<Record<string, boolean>>({});
   const [highlights, setHighlights] = useState("");
   const [includeHighlights, setIncludeHighlights] = useState(true);
+  const [attachedLinkId, setAttachedLinkId] = useState("");
   const [copied, setCopied] = useState(false);
+
+  const [newLinkDescription, setNewLinkDescription] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [linkError, setLinkError] = useState("");
 
   async function load() {
     setLoading(true);
     setLoadError("");
     try {
-      setClients(await fetchClients());
+      const [clientList, linkList] = await Promise.all([fetchClients(), fetchReportLinks()]);
+      setClients(clientList);
+      setLinks(linkList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -70,6 +87,20 @@ export default function ClientUpdate() {
   useEffect(() => {
     load();
   }, []);
+
+  async function handleAddLink(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newLinkDescription.trim() || !newLinkUrl.trim()) return;
+    setLinkError("");
+    try {
+      const link = await createReportLink(newLinkDescription.trim(), newLinkUrl.trim());
+      setLinks((prev) => [link, ...prev]);
+      setNewLinkDescription("");
+      setNewLinkUrl("");
+    } catch (err) {
+      setLinkError(errorMessage(err));
+    }
+  }
 
   function handleClientChange(id: string) {
     setClientId(id);
@@ -136,10 +167,17 @@ export default function ClientUpdate() {
       lines.push(highlights.trim());
     }
 
+    const attachedLink = links.find((l) => l.id === attachedLinkId);
+    if (attachedLink) {
+      lines.push("");
+      lines.push(`📎 ${attachedLink.description}`);
+      lines.push(attachedLink.url);
+    }
+
     lines.push("");
     lines.push("— Team Ecom4all");
     return lines.join("\n");
-  }, [clients, clientId, period, rawValues, included, includeHighlights, highlights]);
+  }, [clients, clientId, period, rawValues, included, includeHighlights, highlights, links, attachedLinkId]);
 
   async function handleSend() {
     if (!clientId || !phone.trim()) {
@@ -152,6 +190,17 @@ export default function ClientUpdate() {
     try {
       await sendClientUpdate(clientId, { phone: phone.trim(), channel: "whapi", message });
       setSent(true);
+      // The link's own send already happened as part of the message above —
+      // this just records it for the "Last sent" column. A failure here
+      // shouldn't undo the "Sent" state above, since the update itself did go out.
+      if (attachedLinkId) {
+        try {
+          const updated = await markReportLinkSent(attachedLinkId);
+          setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+        } catch (err) {
+          console.error("Failed to record report link as sent:", err);
+        }
+      }
     } catch (err) {
       setSendError(errorMessage(err));
     } finally {
@@ -215,8 +264,19 @@ export default function ClientUpdate() {
               placeholder="Period (e.g. Week of 1–7 July)"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
-              style={{ width: "100%", marginBottom: 16 }}
+              style={{ width: "100%", marginBottom: 10 }}
             />
+            <select
+              className="field-select"
+              value={attachedLinkId}
+              onChange={(e) => setAttachedLinkId(e.target.value)}
+              style={{ width: "100%", marginBottom: 16 }}
+            >
+              <option value="">Attach a saved report link (optional)…</option>
+              {links.map((link) => (
+                <option key={link.id} value={link.id}>{link.description}</option>
+              ))}
+            </select>
 
             <table className="data-table">
               <thead>
@@ -323,6 +383,57 @@ export default function ClientUpdate() {
             </p>
             {sent && <p style={{ color: "var(--good)", fontSize: 13, marginTop: 8 }}>Sent ✓</p>}
           </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Saved report links</span>
+          <span className="panel-sub">e.g. a Google Sheet you maintain yourself — attach one above to include it</span>
+        </div>
+        <div className="panel-body">
+          {linkError && <ErrorBanner message={linkError} onRetry={() => setLinkError("")} />}
+
+          <form className="add-employee" onSubmit={handleAddLink} style={{ marginBottom: 14 }}>
+            <input
+              className="field-input"
+              type="text"
+              placeholder="What's it about (e.g. Weekly summary — 1 to 7 Oct)"
+              value={newLinkDescription}
+              onChange={(e) => setNewLinkDescription(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              className="field-input"
+              type="url"
+              placeholder="Sheet link"
+              value={newLinkUrl}
+              onChange={(e) => setNewLinkUrl(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button className="btn btn-primary" type="submit">Save</button>
+          </form>
+
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Link</th>
+                <th>Last sent</th>
+              </tr>
+            </thead>
+            <tbody>
+              {links.map((link) => (
+                <tr key={link.id}>
+                  <td>{link.description}</td>
+                  <td>
+                    <a href={link.url} target="_blank" rel="noopener noreferrer">Open</a>
+                  </td>
+                  <td>{link.lastSentAt ? new Date(link.lastSentAt).toLocaleString() : "Never"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </>

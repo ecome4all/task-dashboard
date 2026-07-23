@@ -215,8 +215,12 @@ export function createReportLink(description: string, url: string): Promise<Repo
   return postJson("/api/report-links", { description, url });
 }
 
-export function sendReportLink(id: string, phone: string, channel: "whapi" | "official"): Promise<ReportLink> {
-  return postJson(`/api/report-links/${id}/send`, { phone, channel });
+// A saved link no longer sends its own WhatsApp message — it's attached
+// into the single combined message composed on the Send Report screen,
+// which sends via sendClientUpdate. This just records that it was used,
+// for the "Last sent" column.
+export function markReportLinkSent(id: string): Promise<ReportLink> {
+  return postJson(`/api/report-links/${id}/mark-sent`, {});
 }
 
 export type ConfigOptionCategory = "marketplace" | "status" | "task_type";
