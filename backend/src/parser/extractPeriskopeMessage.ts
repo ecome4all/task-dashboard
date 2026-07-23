@@ -13,7 +13,10 @@ export function extractPeriskopeMessage(payload: any): IncomingMessage | null {
 
   const data = payload?.data;
   if (!data || data.from_me) return null;
-  if (data.message_type && data.message_type !== "text") return null;
+  // Confirmed against real traffic: Periskope uses "chat" for a plain text
+  // message (not "text") — other values seen include "ptt" (voice note) and
+  // presumably "image"/etc. for media.
+  if (data.message_type && data.message_type !== "chat") return null;
 
   const chatId = data.chat_id;
   const text = data.body;

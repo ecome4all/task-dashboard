@@ -13,7 +13,7 @@ describe("extractPeriskopeMessage", () => {
       chat_name: "Forensic Files Team",
       from: "919876543210@c.us",
       body: "task: update price for SKU123",
-      message_type: "text",
+      message_type: "chat",
       from_me: false,
     });
 
@@ -28,7 +28,7 @@ describe("extractPeriskopeMessage", () => {
     const payload = messageCreated({
       chat_id: "919876543210@c.us",
       body: "task: reduce stock to 5",
-      message_type: "text",
+      message_type: "chat",
       from_me: false,
     });
 
@@ -42,17 +42,17 @@ describe("extractPeriskopeMessage", () => {
     const payload = messageCreated({
       chat_id: "919876543210@c.us",
       body: "✅ Got it, logged.",
-      message_type: "text",
+      message_type: "chat",
       from_me: true,
     });
 
     expect(extractPeriskopeMessage(payload)).toBeNull();
   });
 
-  it("ignores non-text messages (e.g. images)", () => {
+  it("ignores non-text messages (e.g. voice notes)", () => {
     const payload = messageCreated({
       chat_id: "919876543210@c.us",
-      message_type: "image",
+      message_type: "ptt",
       from_me: false,
     });
 
