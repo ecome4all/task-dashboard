@@ -13,6 +13,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import SearchableSelect from "./SearchableSelect";
 
 // Only used for the handful of statuses this frontend knows to color —
 // anything an admin adds beyond these falls back to pill-neutral, since
@@ -164,63 +165,44 @@ export default function Dashboard() {
                   <td>{task.chatName ?? "—"}</td>
                   <td className="panel-sub">{task.sourceRef}</td>
                   <td>
-                    <select
-                      className="field-select"
+                    <SearchableSelect
                       value={task.marketplace ?? ""}
-                      onChange={(e) => handleMarketplaceChange(task, e.target.value)}
-                    >
-                      <option value="">Unset</option>
-                      {marketplaceOptions.map((mp) => (
-                        <option key={mp.value} value={mp.value}>
-                          {mp.label}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Unset"
+                      options={marketplaceOptions.map((mp) => ({ value: mp.value, label: mp.label }))}
+                      onChange={(value) => handleMarketplaceChange(task, value)}
+                    />
                   </td>
                   <td>
-                    <select
-                      className="field-select"
+                    <SearchableSelect
                       value={task.taskType ?? ""}
-                      onChange={(e) => handleTypeChange(task, e.target.value)}
-                    >
-                      <option value="">Untriaged</option>
-                      {taskTypeOptions.map((type) => (
-                        <option key={type.value} value={type.value}>
-                          {type.label}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Untriaged"
+                      options={taskTypeOptions.map((type) => ({ value: type.value, label: type.label }))}
+                      onChange={(value) => handleTypeChange(task, value)}
+                    />
                   </td>
                   <td>
-                    <select
-                      className="field-select"
+                    <SearchableSelect
                       value={task.assignee ?? ""}
-                      onChange={(e) => handleAssigneeChange(task, e.target.value)}
-                    >
-                      <option value="">Unassigned</option>
-                      {employees.map((employee) => (
-                        <option key={employee.id} value={employee.name}>
-                          {employee.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Unassigned"
+                      options={employees.map((employee) => ({ value: employee.name, label: employee.name }))}
+                      onChange={(value) => handleAssigneeChange(task, value)}
+                    />
                   </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span className={`pill ${STATUS_PILL[task.status] ?? "pill-neutral"}`}>
                         {statusLabel(task.status, task.marketplace)}
                       </span>
-                      <select
-                        className="field-select"
+                      <SearchableSelect
                         value={task.status}
-                        onChange={(e) => handleStatusChange(task, e.target.value as TaskStatus)}
-                      >
-                        {statusOptions.map((status) => (
-                          <option key={status.value} value={status.value}>
-                            {statusLabel(status.value, task.marketplace)}
-                          </option>
-                        ))}
-                      </select>
+                        placeholder="Status"
+                        allowClear={false}
+                        options={statusOptions.map((status) => ({
+                          value: status.value,
+                          label: statusLabel(status.value, task.marketplace),
+                        }))}
+                        onChange={(value) => handleStatusChange(task, value)}
+                      />
                     </div>
                   </td>
                   <td>{new Date(task.createdAt).toLocaleString()}</td>

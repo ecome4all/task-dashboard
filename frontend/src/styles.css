@@ -97,6 +97,20 @@ table.data-table tr:last-child td { border-bottom: none; }
 
 .add-employee { display: flex; gap: 8px; }
 
+/* ---- searchable select ---- */
+.searchable-select { position: relative; display: inline-block; min-width: 150px; }
+.searchable-select-trigger { width: 100%; text-align: left; cursor: pointer; }
+.searchable-select-panel {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 200px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 6px;
+}
+.searchable-select-panel .field-input { width: 100%; margin-bottom: 6px; }
+.searchable-select-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.searchable-select-option { padding: 7px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.searchable-select-option:hover, .searchable-select-option.selected { background: var(--bg-alt); }
+.searchable-select-empty { padding: 7px 9px; font-size: 12px; opacity: 0.6; }
+
 /* ---- loading / error ---- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.7s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
