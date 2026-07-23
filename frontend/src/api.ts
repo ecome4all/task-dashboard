@@ -174,17 +174,18 @@ export function createClient(data: { name: string; phone?: string; notes?: strin
   return postJson("/api/clients", data);
 }
 
-export interface UnlinkedGroup {
+export interface UnrecognizedSender {
   chatId: string;
   chatName: string | null;
-  taskCount: number;
+  messageCount: number;
   lastSeenAt: string;
 }
 
-// Groups seen on incoming WhatsApp-group tasks that aren't tied to a client
-// yet — admin/manager assign these manually, nothing here is auto-matched.
-export function fetchUnlinkedGroups(): Promise<UnlinkedGroup[]> {
-  return request("/api/clients/unlinked-groups");
+// Senders (individuals or groups) that have sent a task: message but aren't
+// tied to a client yet — their messages were logged here instead of becoming
+// a task. Admin/manager assign these manually, nothing here is auto-matched.
+export function fetchUnrecognizedSenders(): Promise<UnrecognizedSender[]> {
+  return request("/api/clients/unrecognized");
 }
 
 export function sendClientUpdate(

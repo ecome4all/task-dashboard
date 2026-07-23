@@ -67,6 +67,24 @@ model Client {
   createdAt DateTime @default(now())
 }
 
+// A task: message from a chat_id that isn't tied to any active Client yet —
+// logged here instead of becoming a Task, so an unknown number can't spam
+// the board, while staff can still see it, recognize it, and link it to a
+// client (or add a new one) from the Clients tab. Once linked, that chat_id's
+// future messages become real Tasks; existing rows here for it are just
+// filtered out of the "unrecognized" view, not deleted.
+model UnrecognizedMessage {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  source    String
+  sourceRef String // chat_id
+  chatName  String?
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, sourceRef])
+}
+
 // A saved link to a report the client owns and maintains themselves
 // (e.g. a Google Sheet) — this app never reads/writes its contents,
 // just stores the link and sends it to the client over WhatsApp.

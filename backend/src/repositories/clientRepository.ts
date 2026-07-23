@@ -12,6 +12,17 @@ const PUBLIC_FIELDS = {
   active: true,
 } as const;
 
+// Staff type a bare 10-digit Indian mobile number most of the time — this
+// adds the "91" country code so it actually matches the full chat_id format
+// WhatsApp providers use ("91XXXXXXXXXX@c.us"), both for the sender-gate
+// lookup below and for outbound sends (Send Update / Report Links use
+// `phone` directly as the send target). Numbers that already carry a country
+// code (or any other digit count) are left untouched, not double-prefixed.
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 10 ? `91${digits}` : digits;
+}
+
 export const clientRepository = {
   list() {
     return prisma.client.findMany({
@@ -33,7 +44,7 @@ export const clientRepository = {
 
   create(data: { name: string; phone?: string; notes?: string }) {
     return prisma.client.create({
-      data: { ...data, tenantId: TENANT_ID },
+      data: { ...data, phone: data.phone ? normalizePhone(data.phone) : data.phone, tenantId: TENANT_ID },
       select: PUBLIC_FIELDS,
     });
   },
@@ -51,13 +62,13 @@ export const clientRepository = {
   ) {
     return prisma.client.update({
       where: { id },
-      data: changes,
+      data: { ...changes, phone: changes.phone ? normalizePhone(changes.phone) : changes.phone },
       select: PUBLIC_FIELDS,
     });
   },
 
   // Every WhatsApp group chat_id already linked to a client — used to work
-  // out which groups seen on incoming tasks are still unassigned.
+  // out which chats seen on incoming messages are still unrecognized.
   linkedGroupIds() {
     return prisma.client
       .findMany({
@@ -65,5 +76,25 @@ export const clientRepository = {
         select: { whatsappGroupId: true },
       })
       .then((rows) => new Set(rows.map((r) => r.whatsappGroupId as string)));
+  },
+
+  // The sender gate for incoming WhatsApp messages: is this chat_id already
+  // tied to an active client, either as their linked group (exact match) or
+  // their saved phone (compared by last-10-digits, so country-code/plus-sign
+  // formatting differences between what staff typed and what the provider
+  // sends don't cause a false negative)? Fetches all active clients rather
+  // than pushing the digit comparison into SQL — fine at this volume (a
+  // handful of clients), and far simpler than raw SQL for a normalize-then-
+  // compare match.
+  async findByChatId(chatId: string) {
+    const clients = await prisma.client.findMany({ where: { tenantId: TENANT_ID, active: true } });
+    const chatDigits = chatId.split("@")[0].replace(/\D/g, "").slice(-10);
+    return (
+      clients.find((c) => {
+        if (c.whatsappGroupId === chatId) return true;
+        if (!c.phone) return false;
+        return c.phone.replace(/\D/g, "").slice(-10) === chatDigits;
+      }) ?? null
+    );
   },
 };

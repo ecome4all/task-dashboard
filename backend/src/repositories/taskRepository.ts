@@ -42,17 +42,6 @@ export const taskRepository = {
     return prisma.task.findFirst({ where: { id, tenantId: TENANT_ID } });
   },
 
-  // Raw rows, newest first, for the caller to reduce down to one entry per
-  // group (first occurrence = most recently seen chat_name) and filter
-  // against clients already linked — see clients.ts's /unlinked-groups route.
-  listGroupSources() {
-    return prisma.task.findMany({
-      where: { tenantId: TENANT_ID, source: "whatsapp_group" },
-      select: { sourceRef: true, chatName: true, createdAt: true },
-      orderBy: { createdAt: "desc" },
-    });
-  },
-
   update(id: string, input: UpdateTaskInput) {
     return prisma.task.update({
       where: { id },

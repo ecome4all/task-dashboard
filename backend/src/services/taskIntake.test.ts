@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleIncomingTaskMessage } from "./taskIntake";
 import { taskRepository } from "../repositories/taskRepository";
+import { clientRepository } from "../repositories/clientRepository";
+import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
 
 vi.mock("../repositories/taskRepository", () => ({
   taskRepository: { create: vi.fn() },
+}));
+vi.mock("../repositories/clientRepository", () => ({
+  clientRepository: { findByChatId: vi.fn() },
+}));
+vi.mock("../repositories/unrecognizedMessageRepository", () => ({
+  unrecognizedMessageRepository: { create: vi.fn() },
 }));
 
 function fakeAdapter() {
@@ -14,9 +22,12 @@ function fakeAdapter() {
 describe("handleIncomingTaskMessage", () => {
   beforeEach(() => {
     vi.mocked(taskRepository.create).mockReset();
+    vi.mocked(clientRepository.findByChatId).mockReset();
+    vi.mocked(unrecognizedMessageRepository.create).mockReset();
   });
 
-  it("creates a task and acknowledges on the same channel for a task: message", async () => {
+  it("creates a task and acknowledges on the same channel for a known client", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Forensic Files" } as any);
     vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
     const whatsapp = fakeAdapter();
 
@@ -27,12 +38,14 @@ describe("handleIncomingTaskMessage", () => {
       whatsapp,
     });
 
+    expect(clientRepository.findByChatId).toHaveBeenCalledWith("919876543210");
     expect(taskRepository.create).toHaveBeenCalledWith({
       source: "whatsapp_official",
       sourceRef: "919876543210",
       description: "reduce stock to 5",
     });
     expect(whatsapp.sendMessage).toHaveBeenCalledWith("919876543210", "✅ Got it, logged.");
+    expect(unrecognizedMessageRepository.create).not.toHaveBeenCalled();
     expect(task).toEqual({ id: "task-1" });
   });
 
@@ -46,6 +59,30 @@ describe("handleIncomingTaskMessage", () => {
       whatsapp,
     });
 
+    expect(clientRepository.findByChatId).not.toHaveBeenCalled();
+    expect(taskRepository.create).not.toHaveBeenCalled();
+    expect(whatsapp.sendMessage).not.toHaveBeenCalled();
+    expect(task).toBeNull();
+  });
+
+  it("logs to UnrecognizedMessage instead of creating a task for an unknown sender", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(null);
+    const whatsapp = fakeAdapter();
+
+    const task = await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "919999999999-123@g.us",
+      chatName: "Unknown Group",
+      text: "task: please help",
+      whatsapp,
+    });
+
+    expect(unrecognizedMessageRepository.create).toHaveBeenCalledWith({
+      source: "whatsapp_group",
+      sourceRef: "919999999999-123@g.us",
+      text: "please help",
+      chatName: "Unknown Group",
+    });
     expect(taskRepository.create).not.toHaveBeenCalled();
     expect(whatsapp.sendMessage).not.toHaveBeenCalled();
     expect(task).toBeNull();

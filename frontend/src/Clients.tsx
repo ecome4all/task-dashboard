@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   Client,
-  UnlinkedGroup,
+  UnrecognizedSender,
   ApiError,
   fetchAllClients,
-  fetchUnlinkedGroups,
+  fetchUnrecognizedSenders,
   createClient,
   updateClient,
 } from "./api";
@@ -17,7 +17,7 @@ function errorMessage(err: unknown): string {
 
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [unlinkedGroups, setUnlinkedGroups] = useState<UnlinkedGroup[]>([]);
+  const [unrecognizedSenders, setUnrecognizedSenders] = useState<UnrecognizedSender[]>([]);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
@@ -30,9 +30,9 @@ export default function Clients() {
     setLoading(true);
     setLoadError("");
     try {
-      const [clientList, groups] = await Promise.all([fetchAllClients(), fetchUnlinkedGroups()]);
+      const [clientList, senders] = await Promise.all([fetchAllClients(), fetchUnrecognizedSenders()]);
       setClients(clientList);
-      setUnlinkedGroups(groups);
+      setUnrecognizedSenders(senders);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -95,17 +95,17 @@ export default function Clients() {
     }
   }
 
-  async function handleLinkGroup(group: UnlinkedGroup) {
-    const clientId = linkChoice[group.chatId];
+  async function handleLinkSender(sender: UnrecognizedSender) {
+    const clientId = linkChoice[sender.chatId];
     if (!clientId) return;
     setActionError("");
     try {
       const updated = await updateClient(clientId, {
-        whatsappGroupId: group.chatId,
-        whatsappGroupName: group.chatName ?? group.chatId,
+        whatsappGroupId: sender.chatId,
+        whatsappGroupName: sender.chatName ?? sender.chatId,
       });
       setClients((prev) => prev.map((c) => (c.id === clientId ? updated : c)));
-      setUnlinkedGroups((prev) => prev.filter((g) => g.chatId !== group.chatId));
+      setUnrecognizedSenders((prev) => prev.filter((s) => s.chatId !== sender.chatId));
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -146,37 +146,37 @@ export default function Clients() {
         </div>
       </div>
 
-      {unlinkedGroups.length > 0 && (
+      {unrecognizedSenders.length > 0 && (
         <div className="panel">
           <div className="panel-head">
-            <span className="panel-title">Unassigned WhatsApp Groups</span>
+            <span className="panel-title">Unrecognized Senders</span>
             <span className="panel-sub">
-              {unlinkedGroups.length} seen on incoming tasks, not yet tied to a client
+              {unrecognizedSenders.length} sent a task: message but aren't tied to a client — not logged as tasks yet
             </span>
           </div>
           <div className="panel-body">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Group</th>
-                  <th>Tasks</th>
+                  <th>Sender</th>
+                  <th>Messages</th>
                   <th>Last Seen</th>
                   <th>Assign To</th>
                 </tr>
               </thead>
               <tbody>
-                {unlinkedGroups.map((group) => (
-                  <tr key={group.chatId}>
-                    <td>{group.chatName ?? group.chatId}</td>
-                    <td>{group.taskCount}</td>
-                    <td>{new Date(group.lastSeenAt).toLocaleString()}</td>
+                {unrecognizedSenders.map((sender) => (
+                  <tr key={sender.chatId}>
+                    <td>{sender.chatName ?? sender.chatId}</td>
+                    <td>{sender.messageCount}</td>
+                    <td>{new Date(sender.lastSeenAt).toLocaleString()}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
                         <select
                           className="field-select"
-                          value={linkChoice[group.chatId] ?? ""}
+                          value={linkChoice[sender.chatId] ?? ""}
                           onChange={(e) =>
-                            setLinkChoice((prev) => ({ ...prev, [group.chatId]: e.target.value }))
+                            setLinkChoice((prev) => ({ ...prev, [sender.chatId]: e.target.value }))
                           }
                         >
                           <option value="">Select client…</option>
@@ -184,7 +184,7 @@ export default function Clients() {
                             <option key={client.id} value={client.id}>{client.name}</option>
                           ))}
                         </select>
-                        <button className="btn btn-primary btn-sm" onClick={() => handleLinkGroup(group)}>
+                        <button className="btn btn-primary btn-sm" onClick={() => handleLinkSender(sender)}>
                           Link
                         </button>
                       </div>

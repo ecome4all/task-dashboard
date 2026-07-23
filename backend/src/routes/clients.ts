@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { clientRepository } from "../repositories/clientRepository";
-import { taskRepository } from "../repositories/taskRepository";
+import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
@@ -19,30 +19,38 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     res.json(await clientRepository.listAll());
   });
 
-  // Groups seen on incoming WhatsApp-group tasks that aren't tied to any
-  // client yet — staff assign these manually via PATCH /:id, nothing here
-  // is auto-matched. First occurrence per group (rows are newest-first) also
-  // gives us the most recently seen chat_name and task count.
-  router.get("/unlinked-groups", requireRole(...MANAGE_ROLES), async (_req, res) => {
-    const [rows, linkedIds] = await Promise.all([taskRepository.listGroupSources(), clientRepository.linkedGroupIds()]);
+  // Senders (individuals or groups) that have sent a task: message but
+  // aren't tied to any active client yet, so their messages were logged to
+  // UnrecognizedMessage instead of becoming a task — staff link them to a
+  // client manually via PATCH /:id, nothing here is auto-matched. First
+  // occurrence per chat_id (rows are newest-first) also gives us the most
+  // recently seen chat_name and message count.
+  router.get("/unrecognized", requireRole(...MANAGE_ROLES), async (_req, res) => {
+    const [rows, linkedIds] = await Promise.all([
+      unrecognizedMessageRepository.listSources(),
+      clientRepository.linkedGroupIds(),
+    ]);
 
-    const groups = new Map<string, { chatId: string; chatName: string | null; taskCount: number; lastSeenAt: Date }>();
+    const senders = new Map<
+      string,
+      { chatId: string; chatName: string | null; messageCount: number; lastSeenAt: Date }
+    >();
     for (const row of rows) {
       if (linkedIds.has(row.sourceRef)) continue;
-      const existing = groups.get(row.sourceRef);
+      const existing = senders.get(row.sourceRef);
       if (existing) {
-        existing.taskCount += 1;
+        existing.messageCount += 1;
       } else {
-        groups.set(row.sourceRef, {
+        senders.set(row.sourceRef, {
           chatId: row.sourceRef,
           chatName: row.chatName,
-          taskCount: 1,
+          messageCount: 1,
           lastSeenAt: row.createdAt,
         });
       }
     }
 
-    res.json([...groups.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()));
+    res.json([...senders.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()));
   });
 
   router.post("/", requireRole(...MANAGE_ROLES), async (req, res) => {
