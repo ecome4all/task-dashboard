@@ -2,6 +2,7 @@ export interface IncomingMessage {
   chatId: string;
   text: string;
   chatName?: string;
+  senderPhone?: string;
 }
 
 // Periskope's actual webhook wrapper is { data, event_type, id, org_id,
@@ -23,7 +24,12 @@ export function extractPeriskopeMessage(payload: any): IncomingMessage | null {
   const chatId = data.chat_id;
   const text = data.body;
   const chatName = data.chat_name ?? undefined;
+  // In a group, chat_id is the group's own JID, not the sender's — the
+  // individual who actually posted is sender_phone (author is null in real
+  // traffic, sender_phone is reliably populated for both group and 1:1).
+  // Undefined for 1:1 chats, where chatId already IS the sender's number.
+  const senderPhone = data.sender_phone ?? undefined;
 
   if (!chatId || typeof text !== "string") return null;
-  return { chatId, text, ...(chatName ? { chatName } : {}) };
+  return { chatId, text, ...(chatName ? { chatName } : {}), ...(senderPhone ? { senderPhone } : {}) };
 }

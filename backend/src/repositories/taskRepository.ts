@@ -7,6 +7,7 @@ export interface CreateTaskInput {
   sourceRef: string;
   description: string;
   chatName?: string;
+  clientName?: string;
 }
 
 export type TaskStatus =

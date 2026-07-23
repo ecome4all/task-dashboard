@@ -63,6 +63,7 @@ export interface Task {
   id: string;
   source: string;
   sourceRef: string;
+  chatName: string | null;
   description: string;
   clientName: string | null;
   assignee: string | null;
@@ -70,6 +71,7 @@ export interface Task {
   marketplace: Marketplace | null;
   status: TaskStatus;
   createdAt: string;
+  updatedAt: string;
   doneAt: string | null;
 }
 

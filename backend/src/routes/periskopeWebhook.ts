@@ -42,6 +42,7 @@ export function createPeriskopeWebhookRouter(whatsapp: WhatsAppAdapter) {
       chatId: incoming.chatId,
       text: incoming.text,
       chatName: incoming.chatName,
+      senderPhone: incoming.senderPhone,
       whatsapp,
     });
 

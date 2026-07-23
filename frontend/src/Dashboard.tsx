@@ -161,19 +161,27 @@ export default function Dashboard() {
             <thead>
               <tr>
                 <th>Task</th>
+                <th>Client</th>
                 <th>Source</th>
+                <th>Group Name</th>
+                <th>Group ID</th>
                 <th>Marketplace</th>
                 <th>Type</th>
-                <th>Assignee</th>
+                <th>Employee</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th>Updated</th>
+                <th>Completed</th>
               </tr>
             </thead>
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
                   <td>{task.description}</td>
+                  <td>{task.clientName ?? "—"}</td>
                   <td>{task.source}</td>
+                  <td>{task.chatName ?? "—"}</td>
+                  <td className="panel-sub">{task.sourceRef}</td>
                   <td>
                     <select
                       className="field-select"
@@ -235,6 +243,8 @@ export default function Dashboard() {
                     </div>
                   </td>
                   <td>{new Date(task.createdAt).toLocaleString()}</td>
+                  <td>{new Date(task.updatedAt).toLocaleString()}</td>
+                  <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
                 </tr>
               ))}
             </tbody>

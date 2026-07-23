@@ -6,12 +6,13 @@ function messageCreated(data: unknown) {
 }
 
 describe("extractPeriskopeMessage", () => {
-  it("reads a group text message", () => {
+  it("reads a group text message, including the individual sender's phone", () => {
     const payload = messageCreated({
       message_id: "msg-1",
       chat_id: "120363123456789-1234567890@g.us",
       chat_name: "Forensic Files Team",
-      from: "919876543210@c.us",
+      from: null,
+      sender_phone: "919876543210@c.us",
       body: "task: update price for SKU123",
       message_type: "chat",
       from_me: false,
@@ -21,6 +22,7 @@ describe("extractPeriskopeMessage", () => {
       chatId: "120363123456789-1234567890@g.us",
       text: "task: update price for SKU123",
       chatName: "Forensic Files Team",
+      senderPhone: "919876543210@c.us",
     });
   });
 

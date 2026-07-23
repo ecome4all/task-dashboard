@@ -38,11 +38,12 @@ describe("handleIncomingTaskMessage", () => {
       whatsapp,
     });
 
-    expect(clientRepository.findByChatId).toHaveBeenCalledWith("919876543210");
+    expect(clientRepository.findByChatId).toHaveBeenCalledWith("919876543210", undefined);
     expect(taskRepository.create).toHaveBeenCalledWith({
       source: "whatsapp_official",
       sourceRef: "919876543210",
       description: "reduce stock to 5",
+      clientName: "Forensic Files",
     });
     expect(whatsapp.sendMessage).toHaveBeenCalledWith("919876543210", "✅ Got it, logged.");
     expect(unrecognizedMessageRepository.create).not.toHaveBeenCalled();
@@ -86,5 +87,24 @@ describe("handleIncomingTaskMessage", () => {
     expect(taskRepository.create).not.toHaveBeenCalled();
     expect(whatsapp.sendMessage).not.toHaveBeenCalled();
     expect(task).toBeNull();
+  });
+
+  it("passes the individual sender's phone through to the client lookup, for group messages", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Sh" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+    const whatsapp = fakeAdapter();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "917417017570-1424446551@g.us",
+      senderPhone: "919997905444@c.us",
+      text: "task: hello",
+      whatsapp,
+    });
+
+    expect(clientRepository.findByChatId).toHaveBeenCalledWith(
+      "917417017570-1424446551@g.us",
+      "919997905444@c.us"
+    );
   });
 });

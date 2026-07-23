@@ -78,22 +78,30 @@ export const clientRepository = {
       .then((rows) => new Set(rows.map((r) => r.whatsappGroupId as string)));
   },
 
-  // The sender gate for incoming WhatsApp messages: is this chat_id already
-  // tied to an active client, either as their linked group (exact match) or
-  // their saved phone (compared by last-10-digits, so country-code/plus-sign
-  // formatting differences between what staff typed and what the provider
-  // sends don't cause a false negative)? Fetches all active clients rather
-  // than pushing the digit comparison into SQL — fine at this volume (a
-  // handful of clients), and far simpler than raw SQL for a normalize-then-
-  // compare match.
-  async findByChatId(chatId: string) {
+  // The sender gate for incoming WhatsApp messages: is this message already
+  // tied to an active client? Checked three ways, any one is enough:
+  //   1. chat_id is their linked group (exact match)
+  //   2. chat_id itself is their saved phone (a 1:1 chat — compared by
+  //      last-10-digits, so country-code/plus-sign formatting differences
+  //      between what staff typed and what the provider sends don't cause a
+  //      false negative)
+  //   3. senderPhone matches their saved phone — needed for a group chat,
+  //      where chat_id is the *group's* JID, not whoever actually posted;
+  //      this lets a known client's own number be recognized even in a
+  //      group that hasn't been linked yet.
+  // Fetches all active clients rather than pushing the digit comparison into
+  // SQL — fine at this volume (a handful of clients), and far simpler than
+  // raw SQL for a normalize-then-compare match.
+  async findByChatId(chatId: string, senderPhone?: string) {
     const clients = await prisma.client.findMany({ where: { tenantId: TENANT_ID, active: true } });
     const chatDigits = chatId.split("@")[0].replace(/\D/g, "").slice(-10);
+    const senderDigits = senderPhone ? senderPhone.split("@")[0].replace(/\D/g, "").slice(-10) : undefined;
     return (
       clients.find((c) => {
         if (c.whatsappGroupId === chatId) return true;
         if (!c.phone) return false;
-        return c.phone.replace(/\D/g, "").slice(-10) === chatDigits;
+        const phoneDigits = c.phone.replace(/\D/g, "").slice(-10);
+        return phoneDigits === chatDigits || (senderDigits !== undefined && phoneDigits === senderDigits);
       }) ?? null
     );
   },
