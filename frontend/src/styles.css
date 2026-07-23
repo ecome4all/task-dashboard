@@ -33,9 +33,18 @@ button, input, select { font: inherit; color: inherit; }
 .login-card { width: 340px; padding: 32px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
 .login-card h1 { font-size: 20px; margin: 0; }
 .login-card .subtitle { color: var(--text); opacity: 0.7; margin: 0 0 8px; font-size: 13px; }
-.login-card input { padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.login-card input { padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); width: 100%; }
 .login-card .error { color: var(--danger); font-size: 12px; margin: 0; }
 .login-card .brand { justify-content: center; padding-bottom: 4px; }
+
+.password-field { position: relative; }
+.password-field input { padding-right: 52px; }
+.password-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  border: none; background: none; color: var(--text); opacity: 0.6;
+  font-size: 12px; font-weight: 600; cursor: pointer; padding: 6px 8px;
+}
+.password-toggle:hover { opacity: 1; }
 .login-page-credit { position: fixed; bottom: 16px; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; color: var(--text); opacity: 0.55; }
 
 /* ---- app shell ---- */
