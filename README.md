@@ -1,6 +1,6 @@
 # Task Dashboard (v2)
 
-Replaces the Google Sheets task tracker. See `../PROPOSAL_V2.md` for the client-facing plan and `../TIME_AND_COST_ESTIMATION_V2.md` for internal effort/cost detail.
+Replaces the Google Sheets task tracker. See `../Official Whatsapp API/PROPOSAL_V2.md` for the client-facing plan and `../Official Whatsapp API/TIME_AND_COST_ESTIMATION_V2.md` for internal effort/cost detail.
 
 ## Structure
 
@@ -49,8 +49,8 @@ npm test
 ## Deployment
 
 **Live now:**
+- Frontend: `https://tasks.ecom4all.in` (custom domain, a subdomain on the client's own `ecom4all.in` — the root domain has an unrelated existing business site, don't touch that) — aliased to the Vercel project, still reachable at its original `https://frontend-sigma-one-11.vercel.app` too
 - Backend (Railway): `https://task-dashboard-production-7d35.up.railway.app`
-- Frontend (Vercel): `https://frontend-sigma-one-11.vercel.app`
 
 Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `github.com/ecome4all/task-dashboard`.
 
@@ -74,12 +74,16 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
   - Official WhatsApp Cloud API (1:1 channel) — webhook receiver with exact parsing (Meta's payload shape is documented and stable) plus the `hub.challenge` verification handshake
   - A reply always goes out on the *same* channel a task came in on (`whatsapp/resolveAdapter.ts`) — a group task can't be answered via the official API and vice versa
 - Auto-acknowledgement reply on task creation, on whichever channel it arrived on
-- Dashboard: list tasks, assign from a real employee list, change status
+- Client gating on task intake: an incoming `task:` message only becomes a real Task if its chat_id (or, in a group, the individual sender's phone) is already tied to an active Client — otherwise it's logged to `UnrecognizedMessage` instead, visible on the Clients page for staff to review and link
+- Dashboard: paginated task list (10/page), clickable status filter chips (with live counts) to narrow the list to one status, a per-client summary panel (total/pending/done), assign from a real employee list, change status/marketplace/type via a searchable dropdown, set a due date (admin/manager only — members can edit everything else on a task but not this, enforced server-side too)
+- **Settings:** Marketplace, Status, and Task Type are admin-editable lists (`ConfigOption` model, `/api/config-options`) instead of hardcoded — add/rename/deactivate options from the Settings tab without a code change. `waiting_for_marketplace` still gets its dynamic "Waiting for <marketplace>" label from whatever that marketplace option's current label is.
 - Employee management: admins add employees from the dashboard (`/api/employees`); dropdown is backed by the database, not a hardcoded list
-- Login/auth: email+password sessions (httpOnly cookie, JWT-backed), `/api/tasks`, `/api/employees`, and `/api/report-links` require login
-- **Roles:** `admin` / `manager` / `member` on every employee. Only admins can add new employees; only admins and managers can see/use Report Links; task access (view/assign/status) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
-- **Report Links:** the client's reports live in spreadsheets they maintain themselves (e.g. Google Sheets) — this app never reads or writes their contents. Admins/managers save a description + link in the dashboard's "Reports" view, then send it to a client over WhatsApp (either channel) with one click. Deliberately not a live data sync or an embedded spreadsheet — see the conversation this came out of for why that was ruled out.
-- Deployment config for Railway, Render, and Vercel
+- Client management: admins/managers add clients, link a client to the WhatsApp group its tasks come from, edit phone/name, deactivate/reactivate
+- Login/auth: email+password sessions (httpOnly cookie, JWT-backed); every `/api/*` route below `/api/auth` requires login
+- **Roles:** `admin` / `manager` / `member` on every employee. Only admins can add employees or use Settings; only admins and managers can see Clients or Send Report, and only they can set a task's due date; task access otherwise (view/assign/status/type/marketplace) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
+- **Send Report:** one combined screen — compose a metrics update (ad spend, orders, ACOS, etc., auto-calculating the derived percentages) with a live WhatsApp-formatted preview, optionally attach a saved report link (the client's own spreadsheet, e.g. a Google Sheet this app never reads/writes) into that same message, then send it in one action. A saved link's "last sent" timestamp updates once the combined send succeeds.
+- Crash safety: every outbound WhatsApp send (status-update notification, task-intake ack, report send) is wrapped so a failed send can't crash the whole backend process, plus a process-level `unhandledRejection` handler as a backstop — this was a real production incident (see git history for `tasks.ts`/`taskIntake.ts`/`clients.ts`/`reportLinks.ts`), not a hypothetical
+- Deployment config for Railway and Vercel
 
 **Not yet built (later phases / follow-ups):**
 - End-to-end/integration tests against a real database (needs a provisioned Postgres instance)
