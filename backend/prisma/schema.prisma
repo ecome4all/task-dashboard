@@ -85,6 +85,28 @@ model UnrecognizedMessage {
   @@index([tenantId, sourceRef])
 }
 
+// Admin-editable dropdown options for Task fields: "marketplace", "status",
+// and "task_type". `value` is the stable machine value stored on Task rows
+// (e.g. "amazon") and is never changed after creation, even if `label` is
+// renamed later — existing tasks keep referencing it correctly either way.
+// Deactivating an option removes it from the dropdown going forward without
+// touching tasks that already used it. Employee role and the Employee/
+// Assignee dropdown itself aren't here: role is tied to real permission code
+// (an arbitrary new role would have no actual access behavior), and Assignee
+// is already dynamic — it's just the live Employees list.
+model ConfigOption {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  category  String // "marketplace" | "status" | "task_type"
+  value     String
+  label     String
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, category, value])
+}
+
 // A saved link to a report the client owns and maintains themselves
 // (e.g. a Google Sheet) — this app never reads/writes its contents,
 // just stores the link and sends it to the client over WhatsApp.

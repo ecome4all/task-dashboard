@@ -9,6 +9,7 @@ import { createTasksRouter } from "./routes/tasks";
 import { createEmployeesRouter } from "./routes/employees";
 import { createReportLinksRouter } from "./routes/reportLinks";
 import { createClientsRouter } from "./routes/clients";
+import { createConfigOptionsRouter } from "./routes/configOptions";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
 import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
@@ -79,6 +80,7 @@ app.use("/api/tasks", requireAuth, createTasksRouter(channels));
 app.use("/api/employees", requireAuth, createEmployeesRouter());
 app.use("/api/report-links", requireAuth, createReportLinksRouter(channels));
 app.use("/api/clients", requireAuth, createClientsRouter(channels));
+app.use("/api/config-options", requireAuth, createConfigOptionsRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

@@ -39,25 +39,14 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export type TaskStatus =
-  | "started"
-  | "submitted"
-  | "waiting_for_marketplace"
-  | "waiting_for_client"
-  | "again_submitted"
-  | "done";
-
-export type TaskType =
-  | "listing"
-  | "inventory_manage"
-  | "fba"
-  | "claims"
-  | "inactive_blocked_product"
-  | "no_pickup"
-  | "ads"
-  | "other";
-
-export type Marketplace = "amazon" | "flipkart" | "meesho" | "other";
+// These used to be fixed string-literal unions, but Marketplace/Status/Type
+// are now admin-editable lists (see ConfigOption below) — an admin can add a
+// value this frontend has never heard of, so the type can't enumerate them
+// up front. "waiting_for_marketplace" stays meaningful to the frontend only
+// because statusLabel() in Dashboard.tsx special-cases that one value.
+export type TaskStatus = string;
+export type TaskType = string;
+export type Marketplace = string;
 
 export interface Task {
   id: string;
@@ -227,4 +216,42 @@ export function createReportLink(description: string, url: string): Promise<Repo
 
 export function sendReportLink(id: string, phone: string, channel: "whapi" | "official"): Promise<ReportLink> {
   return postJson(`/api/report-links/${id}/send`, { phone, channel });
+}
+
+export type ConfigOptionCategory = "marketplace" | "status" | "task_type";
+
+export interface ConfigOption {
+  id: string;
+  category: ConfigOptionCategory;
+  value: string;
+  label: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+// Active options only, in display order — what every dropdown on the Task
+// board reads. Any logged-in employee can call this.
+export function fetchConfigOptions(category: ConfigOptionCategory): Promise<ConfigOption[]> {
+  return request(`/api/config-options/${category}`);
+}
+
+// Admin-only: includes inactive options, for the Settings management view.
+export function fetchAllConfigOptions(category: ConfigOptionCategory): Promise<ConfigOption[]> {
+  return request(`/api/config-options/${category}/all`);
+}
+
+export function createConfigOption(category: ConfigOptionCategory, label: string): Promise<ConfigOption> {
+  return postJson(`/api/config-options/${category}`, { label });
+}
+
+export function updateConfigOption(
+  category: ConfigOptionCategory,
+  id: string,
+  changes: Partial<Pick<ConfigOption, "label" | "active">>
+): Promise<ConfigOption> {
+  return request(`/api/config-options/${category}/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
 }

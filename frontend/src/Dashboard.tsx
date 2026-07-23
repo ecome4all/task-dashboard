@@ -1,9 +1,23 @@
 import { useEffect, useState } from "react";
-import { Task, TaskStatus, TaskType, Marketplace, Employee, ApiError, fetchTasks, updateTask, fetchEmployees } from "./api";
+import {
+  Task,
+  TaskStatus,
+  Marketplace,
+  Employee,
+  ConfigOption,
+  ApiError,
+  fetchTasks,
+  updateTask,
+  fetchEmployees,
+  fetchConfigOptions,
+} from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 
-const STATUS_PILL: Record<TaskStatus, string> = {
+// Only used for the handful of statuses this frontend knows to color —
+// anything an admin adds beyond these falls back to pill-neutral, since
+// there's no meaningful color to guess for an arbitrary new status.
+const STATUS_PILL: Record<string, string> = {
   started: "pill-neutral",
   submitted: "pill-info",
   waiting_for_marketplace: "pill-warn",
@@ -12,66 +26,6 @@ const STATUS_PILL: Record<TaskStatus, string> = {
   done: "pill-good",
 };
 
-const STATUS_ORDER: TaskStatus[] = [
-  "started",
-  "submitted",
-  "waiting_for_marketplace",
-  "waiting_for_client",
-  "again_submitted",
-  "done",
-];
-
-// "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending on
-// the task's own marketplace column — same rule the backend uses when it
-// composes the WhatsApp update message.
-function statusLabel(status: TaskStatus, marketplace: Marketplace | null): string {
-  if (status === "waiting_for_marketplace") {
-    const name = marketplace === "amazon" || marketplace === "flipkart" || marketplace === "meesho"
-      ? MARKETPLACE_LABEL[marketplace]
-      : "Marketplace";
-    return `Waiting for ${name}`;
-  }
-  const labels: Record<Exclude<TaskStatus, "waiting_for_marketplace">, string> = {
-    started: "Started",
-    submitted: "Submitted",
-    waiting_for_client: "Waiting for Client",
-    again_submitted: "Again Submitted",
-    done: "Done",
-  };
-  return labels[status];
-}
-
-const TASK_TYPE_LABEL: Record<TaskType, string> = {
-  listing: "Listing",
-  inventory_manage: "Inventory Manage",
-  fba: "FBA",
-  claims: "Claims",
-  inactive_blocked_product: "Inactive or Blocked Product",
-  no_pickup: "No Pick Up",
-  ads: "Ads",
-  other: "Any Other Issue",
-};
-
-const TASK_TYPE_ORDER: TaskType[] = [
-  "listing",
-  "inventory_manage",
-  "fba",
-  "claims",
-  "inactive_blocked_product",
-  "no_pickup",
-  "ads",
-  "other",
-];
-
-const MARKETPLACE_LABEL: Record<Marketplace, string> = {
-  amazon: "Amazon",
-  flipkart: "Flipkart",
-  meesho: "Meesho",
-  other: "Other",
-};
-
-const MARKETPLACE_ORDER: Marketplace[] = ["amazon", "flipkart", "meesho", "other"];
-
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
@@ -79,6 +33,9 @@ function errorMessage(err: unknown): string {
 export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [statusOptions, setStatusOptions] = useState<ConfigOption[]>([]);
+  const [taskTypeOptions, setTaskTypeOptions] = useState<ConfigOption[]>([]);
+  const [marketplaceOptions, setMarketplaceOptions] = useState<ConfigOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -87,9 +44,18 @@ export default function Dashboard() {
     setLoading(true);
     setLoadError("");
     try {
-      const [taskList, employeeList] = await Promise.all([fetchTasks(), fetchEmployees()]);
+      const [taskList, employeeList, statusList, taskTypeList, marketplaceList] = await Promise.all([
+        fetchTasks(),
+        fetchEmployees(),
+        fetchConfigOptions("status"),
+        fetchConfigOptions("task_type"),
+        fetchConfigOptions("marketplace"),
+      ]);
       setTasks(taskList);
       setEmployees(employeeList);
+      setStatusOptions(statusList);
+      setTaskTypeOptions(taskTypeList);
+      setMarketplaceOptions(marketplaceList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -100,6 +66,21 @@ export default function Dashboard() {
   useEffect(() => {
     load();
   }, []);
+
+  const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
+
+  // "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending
+  // on the task's own marketplace column — same rule the backend uses when
+  // it composes the WhatsApp update message. Falls back to the raw value for
+  // any status this list doesn't (yet) know a label for, e.g. right after an
+  // admin renames one and this component hasn't reloaded yet.
+  function statusLabel(status: TaskStatus, marketplace: Marketplace | null): string {
+    if (status === "waiting_for_marketplace") {
+      return `Waiting for ${(marketplace && marketplaceLabels[marketplace]) || "Marketplace"}`;
+    }
+    const option = statusOptions.find((o) => o.value === status);
+    return option?.label ?? status;
+  }
 
   async function handleAssigneeChange(task: Task, assignee: string) {
     setActionError("");
@@ -124,7 +105,7 @@ export default function Dashboard() {
   async function handleTypeChange(task: Task, taskType: string) {
     setActionError("");
     try {
-      const updated = await updateTask(task.id, { taskType: (taskType || null) as TaskType | null | undefined });
+      const updated = await updateTask(task.id, { taskType: (taskType || null) as string | null | undefined });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (err) {
       setActionError(errorMessage(err));
@@ -189,9 +170,9 @@ export default function Dashboard() {
                       onChange={(e) => handleMarketplaceChange(task, e.target.value)}
                     >
                       <option value="">Unset</option>
-                      {MARKETPLACE_ORDER.map((mp) => (
-                        <option key={mp} value={mp}>
-                          {MARKETPLACE_LABEL[mp]}
+                      {marketplaceOptions.map((mp) => (
+                        <option key={mp.value} value={mp.value}>
+                          {mp.label}
                         </option>
                       ))}
                     </select>
@@ -203,9 +184,9 @@ export default function Dashboard() {
                       onChange={(e) => handleTypeChange(task, e.target.value)}
                     >
                       <option value="">Untriaged</option>
-                      {TASK_TYPE_ORDER.map((type) => (
-                        <option key={type} value={type}>
-                          {TASK_TYPE_LABEL[type]}
+                      {taskTypeOptions.map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
                         </option>
                       ))}
                     </select>
@@ -226,7 +207,7 @@ export default function Dashboard() {
                   </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className={`pill ${STATUS_PILL[task.status]}`}>
+                      <span className={`pill ${STATUS_PILL[task.status] ?? "pill-neutral"}`}>
                         {statusLabel(task.status, task.marketplace)}
                       </span>
                       <select
@@ -234,9 +215,9 @@ export default function Dashboard() {
                         value={task.status}
                         onChange={(e) => handleStatusChange(task, e.target.value as TaskStatus)}
                       >
-                        {STATUS_ORDER.map((status) => (
-                          <option key={status} value={status}>
-                            {statusLabel(status, task.marketplace)}
+                        {statusOptions.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {statusLabel(status.value, task.marketplace)}
                           </option>
                         ))}
                       </select>

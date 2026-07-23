@@ -6,6 +6,7 @@ import ReportLinks from "./ReportLinks";
 import Employees from "./Employees";
 import Clients from "./Clients";
 import ClientUpdate from "./ClientUpdate";
+import Settings from "./Settings";
 import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
 
@@ -15,7 +16,7 @@ const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   member: "Member",
 };
 
-type View = "tasks" | "reports" | "employees" | "clients" | "client-update";
+type View = "tasks" | "reports" | "employees" | "clients" | "client-update" | "settings";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -92,7 +93,15 @@ export default function App() {
               className={`nav-item ${view === "client-update" ? "active" : ""}`}
               onClick={() => setView("client-update")}
             >
-              Send Update
+              Send Report
+            </button>
+          )}
+          {canSeeEmployees && (
+            <button
+              className={`nav-item ${view === "settings" ? "active" : ""}`}
+              onClick={() => setView("settings")}
+            >
+              Settings
             </button>
           )}
         </nav>
@@ -116,6 +125,7 @@ export default function App() {
           {view === "employees" && <Employees user={user} />}
           {view === "clients" && <Clients />}
           {view === "client-update" && <ClientUpdate />}
+          {view === "settings" && <Settings />}
         </section>
       </div>
     </div>
