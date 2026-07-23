@@ -4,13 +4,14 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createWebhookRouter } from "./routes/webhook";
 import { createOfficialWebhookRouter } from "./routes/officialWebhook";
+import { createPeriskopeWebhookRouter } from "./routes/periskopeWebhook";
 import { createTasksRouter } from "./routes/tasks";
 import { createEmployeesRouter } from "./routes/employees";
 import { createReportLinksRouter } from "./routes/reportLinks";
 import { createClientsRouter } from "./routes/clients";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
-import { WhapiAdapter } from "./whatsapp/whapiAdapter";
+import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
 import { CloudApiAdapter } from "./whatsapp/cloudApiAdapter";
 import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
 
@@ -37,18 +38,30 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// `verify` captures the raw request body alongside express's parsed JSON —
+// Periskope's webhook signature is an HMAC over the exact raw bytes, which
+// re-serializing the parsed body isn't guaranteed to reproduce byte-for-byte.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  })
+);
 app.use(cookieParser());
 
-// Both channels run side by side indefinitely (see PROPOSAL_V2.md — moving
-// existing clients off the group channel is the client's own call, not part
-// of this project). Each adapter only knows how to send on its own channel —
-// see resolveAdapter.ts for how a reply picks the right one.
+// The "whapi" key is a historical name — the group channel was originally
+// meant to run on whapi.cloud, but that was never actually connected (no API
+// key was ever issued), so it now runs on Periskope instead. Renaming the key
+// itself would ripple into the "whapi" | "official" channel literal used
+// across routes and the frontend for no real benefit, so it stays as-is.
+// The official Cloud API channel runs alongside it indefinitely (see
+// PROPOSAL_V2.md — moving existing clients off the group channel is the
+// client's own call, not part of this project). Each adapter only knows how
+// to send on its own channel — see resolveAdapter.ts for how a reply picks
+// the right one.
 const channels: WhatsAppChannels = {
-  whapi: new WhapiAdapter(
-    process.env.WHAPI_API_KEY ?? "",
-    process.env.WHAPI_BASE_URL ?? "https://gate.whapi.cloud"
-  ),
+  whapi: new PeriskopeAdapter(process.env.PERISKOPE_API_KEY ?? "", process.env.PERISKOPE_PHONE ?? ""),
   official: new CloudApiAdapter(
     process.env.WHATSAPP_CLOUD_API_TOKEN ?? "",
     process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? ""
@@ -56,9 +69,9 @@ const channels: WhatsAppChannels = {
 };
 
 // Not behind requireAuth: WhatsApp calls these directly, not a logged-in
-// browser. See the shared-secret check (whapi) and hub.verify_token check
-// (official) inside each router.
+// browser. See the shared-secret/signature checks inside each router.
 app.use("/webhook", createWebhookRouter(channels.whapi));
+app.use("/webhook", createPeriskopeWebhookRouter(channels.whapi));
 app.use("/webhook", createOfficialWebhookRouter(channels.official));
 
 app.use("/api/auth", createAuthRouter());

@@ -1,0 +1,24 @@
+export interface IncomingMessage {
+  chatId: string;
+  text: string;
+  chatName?: string;
+}
+
+// Periskope wraps every webhook event as { event, data, org_id, timestamp }.
+// Only "message.created" is a new inbound message — everything else (e.g.
+// message.ack.updated, delivery/read receipts) is ignored here. `from_me`
+// filters out our own outgoing sends echoing back through the same webhook.
+export function extractPeriskopeMessage(payload: any): IncomingMessage | null {
+  if (payload?.event !== "message.created") return null;
+
+  const data = payload?.data;
+  if (!data || data.from_me) return null;
+  if (data.message_type && data.message_type !== "text") return null;
+
+  const chatId = data.chat_id;
+  const text = data.body;
+  const chatName = data.chat_name ?? undefined;
+
+  if (!chatId || typeof text !== "string") return null;
+  return { chatId, text, ...(chatName ? { chatName } : {}) };
+}
