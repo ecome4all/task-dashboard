@@ -37,11 +37,15 @@ export function createPeriskopeWebhookRouter(whatsapp: WhatsAppAdapter) {
       return;
     }
 
+    // The webhook payload's `data` is a message, not a chat — it never
+    // carries the chat's display name, so this is a second API call.
+    const chatName = await whatsapp.getChatName?.(incoming.chatId);
+
     const task = await handleIncomingTaskMessage({
       source: "whatsapp_group",
       chatId: incoming.chatId,
       text: incoming.text,
-      chatName: incoming.chatName,
+      chatName,
       senderPhone: incoming.senderPhone,
       whatsapp,
     });

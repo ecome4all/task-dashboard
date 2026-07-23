@@ -1,7 +1,6 @@
 export interface IncomingMessage {
   chatId: string;
   text: string;
-  chatName?: string;
   senderPhone?: string;
 }
 
@@ -23,7 +22,6 @@ export function extractPeriskopeMessage(payload: any): IncomingMessage | null {
 
   const chatId = data.chat_id;
   const text = data.body;
-  const chatName = data.chat_name ?? undefined;
   // In a group, chat_id is the group's own JID, not the sender's — the
   // individual who actually posted is sender_phone (author is null in real
   // traffic, sender_phone is reliably populated for both group and 1:1).
@@ -31,5 +29,5 @@ export function extractPeriskopeMessage(payload: any): IncomingMessage | null {
   const senderPhone = data.sender_phone ?? undefined;
 
   if (!chatId || typeof text !== "string") return null;
-  return { chatId, text, ...(chatName ? { chatName } : {}), ...(senderPhone ? { senderPhone } : {}) };
+  return { chatId, text, ...(senderPhone ? { senderPhone } : {}) };
 }

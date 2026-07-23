@@ -10,7 +10,6 @@ describe("extractPeriskopeMessage", () => {
     const payload = messageCreated({
       message_id: "msg-1",
       chat_id: "120363123456789-1234567890@g.us",
-      chat_name: "Forensic Files Team",
       from: null,
       sender_phone: "919876543210@c.us",
       body: "task: update price for SKU123",
@@ -21,12 +20,11 @@ describe("extractPeriskopeMessage", () => {
     expect(extractPeriskopeMessage(payload)).toEqual({
       chatId: "120363123456789-1234567890@g.us",
       text: "task: update price for SKU123",
-      chatName: "Forensic Files Team",
       senderPhone: "919876543210@c.us",
     });
   });
 
-  it("reads a 1:1 text message with no chat_name", () => {
+  it("reads a 1:1 text message with no sender_phone", () => {
     const payload = messageCreated({
       chat_id: "919876543210@c.us",
       body: "task: reduce stock to 5",

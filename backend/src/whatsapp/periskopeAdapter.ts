@@ -32,4 +32,25 @@ export class PeriskopeAdapter implements WhatsAppAdapter {
       throw new Error(`Periskope send failed (${response.status}): ${errorBody}`);
     }
   }
+
+  // The incoming webhook payload's `data` is a *message*, and (confirmed
+  // against real traffic) a message never carries the chat's display name —
+  // only the Chats endpoint does. So capturing a group's name at task-intake
+  // time means a second API call here, not just reading a field off the
+  // webhook body like the docs' examples imply.
+  async getChatName(chatId: string): Promise<string | undefined> {
+    if (!this.apiKey) return undefined;
+    try {
+      const response = await fetch(
+        `${PERISKOPE_BASE_URL}/v1/chats?chat_id=${encodeURIComponent(chatId)}`,
+        { headers: { Authorization: `Bearer ${this.apiKey}`, "x-phone": this.phone } }
+      );
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as any;
+      return body?.chats?.[0]?.chat_name ?? undefined;
+    } catch (err) {
+      console.error("Failed to fetch Periskope chat name:", err);
+      return undefined;
+    }
+  }
 }

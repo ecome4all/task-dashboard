@@ -229,7 +229,10 @@ export default function Clients() {
                   <td>
                     {client.whatsappGroupId ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span className="panel-sub">{client.whatsappGroupName ?? client.whatsappGroupId}</span>
+                        <div>
+                          <div>{client.whatsappGroupName ?? "—"}</div>
+                          <div className="panel-sub">{client.whatsappGroupId}</div>
+                        </div>
                         <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(client)}>
                           Unlink
                         </button>
