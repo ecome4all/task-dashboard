@@ -107,56 +107,47 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     setPage(1);
   }
 
-  async function handleAssigneeChange(task: Task, assignee: string) {
+  // Updates the row immediately with the picked value (so the dropdown
+  // reflects the change the instant you click it, instead of sitting on
+  // the old value until the PATCH round-trip finishes), then reconciles
+  // with the server response — or rolls back to the prior row on failure.
+  async function applyTaskChange(
+    task: Task,
+    optimistic: Partial<Task>,
+    apiChanges: Partial<Pick<Task, "assignee" | "status" | "taskType" | "marketplace" | "dueDate">>
+  ) {
     setActionError("");
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...optimistic } : t)));
     try {
-      const updated = await updateTask(task.id, { assignee });
+      const updated = await updateTask(task.id, apiChanges);
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
       setActionError(errorMessage(err));
     }
   }
 
-  async function handleStatusChange(task: Task, status: TaskStatus) {
-    setActionError("");
-    try {
-      const updated = await updateTask(task.id, { status });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
+  function handleAssigneeChange(task: Task, assignee: string) {
+    return applyTaskChange(task, { assignee }, { assignee });
   }
 
-  async function handleTypeChange(task: Task, taskType: string) {
-    setActionError("");
-    try {
-      const updated = await updateTask(task.id, { taskType: (taskType || null) as string | null | undefined });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
+  function handleStatusChange(task: Task, status: TaskStatus) {
+    return applyTaskChange(task, { status }, { status });
   }
 
-  async function handleMarketplaceChange(task: Task, marketplace: string) {
-    setActionError("");
-    try {
-      const updated = await updateTask(task.id, {
-        marketplace: (marketplace || null) as Marketplace | null | undefined,
-      });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
+  function handleTypeChange(task: Task, taskType: string) {
+    const value = (taskType || null) as string | null;
+    return applyTaskChange(task, { taskType: value }, { taskType: value });
   }
 
-  async function handleDueDateChange(task: Task, value: string) {
-    setActionError("");
-    try {
-      const updated = await updateTask(task.id, { dueDate: value ? new Date(value).toISOString() : null });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
+  function handleMarketplaceChange(task: Task, marketplace: string) {
+    const value = (marketplace || null) as Marketplace | null;
+    return applyTaskChange(task, { marketplace: value }, { marketplace: value });
+  }
+
+  function handleDueDateChange(task: Task, value: string) {
+    const isoDate = value ? new Date(value).toISOString() : null;
+    return applyTaskChange(task, { dueDate: isoDate }, { dueDate: isoDate });
   }
 
   if (loading) return <Spinner label="Loading tasks…" />;
@@ -242,8 +233,6 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Task</th>
                 <th>Client</th>
                 <th>Source</th>
-                <th>Group Name</th>
-                <th>Group ID</th>
                 <th>Marketplace</th>
                 <th>Type</th>
                 <th>Employee</th>
@@ -260,8 +249,6 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   <td>{task.description}</td>
                   <td>{task.clientName ?? "—"}</td>
                   <td>{task.source}</td>
-                  <td>{task.chatName ?? "—"}</td>
-                  <td className="panel-sub">{task.sourceRef}</td>
                   <td>
                     <SearchableSelect
                       value={task.marketplace ?? ""}

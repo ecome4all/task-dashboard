@@ -34,10 +34,22 @@ export function createTasksRouter(channels: WhatsAppChannels) {
   router.patch("/:id", async (req, res) => {
     const { assignee, status, taskType, marketplace, dueDate } = req.body;
 
+    // Only fetch the option lists this particular request actually needs —
+    // e.g. changing just the assignee needs none of these, and changing
+    // just the marketplace doesn't need status/taskType. Each list was
+    // being fetched unconditionally on every PATCH, which is 2-3 needless
+    // DB round trips (felt as UI lag) for the common case of editing one
+    // field at a time. marketplaceOptions is also needed whenever status
+    // changes, since the "Waiting for <marketplace>" WhatsApp label below
+    // depends on it regardless of whether marketplace itself changed.
+    const needStatusOptions = status !== undefined;
+    const needTaskTypeOptions = taskType !== undefined && taskType !== null;
+    const needMarketplaceOptions = (marketplace !== undefined && marketplace !== null) || status !== undefined;
+
     const [statusOptions, taskTypeOptions, marketplaceOptions] = await Promise.all([
-      configOptionRepository.list("status"),
-      configOptionRepository.list("task_type"),
-      configOptionRepository.list("marketplace"),
+      needStatusOptions ? configOptionRepository.list("status") : Promise.resolve([]),
+      needTaskTypeOptions ? configOptionRepository.list("task_type") : Promise.resolve([]),
+      needMarketplaceOptions ? configOptionRepository.list("marketplace") : Promise.resolve([]),
     ]);
 
     if (status !== undefined && !statusOptions.some((o) => o.value === status)) {
