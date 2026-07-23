@@ -3,7 +3,13 @@ import { login, ApiError, CurrentUser } from "./api";
 import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
 
-export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) => void }) {
+export default function Login({
+  onLoggedIn,
+  sessionExpired,
+}: {
+  onLoggedIn: (user: CurrentUser) => void;
+  sessionExpired?: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -34,6 +40,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: (user: CurrentUser) 
           <BrandLogo height={46} />
         </div>
         <p className="subtitle">Task Dashboard</p>
+        {sessionExpired && <p className="error">Your session expired. Please log in again.</p>}
         <input
           type="email"
           placeholder="Email"

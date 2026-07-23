@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CurrentUser, fetchCurrentUser, logout } from "./api";
+import { CurrentUser, fetchCurrentUser, logout, setUnauthorizedHandler } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
 import Employees from "./Employees";
@@ -21,12 +21,26 @@ export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [view, setView] = useState<View>("tasks");
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser().then((currentUser) => {
       setUser(currentUser);
       setCheckingSession(false);
     });
+  }, []);
+
+  // Registered once for the whole app's lifetime: any authenticated API call
+  // that comes back 401 (session expired or invalidated since this screen
+  // loaded) drops back to the login screen instead of leaving every panel
+  // stuck showing a dead-end "(401) Try again" that can never succeed until
+  // the user manually logs out and back in.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setSessionExpired(true);
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   if (checkingSession) {
@@ -38,7 +52,7 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login onLoggedIn={setUser} />;
+    return <Login onLoggedIn={(loggedInUser) => { setSessionExpired(false); setUser(loggedInUser); }} sessionExpired={sessionExpired} />;
   }
 
   const canSeeClients = user.role === "admin" || user.role === "manager";
@@ -46,6 +60,7 @@ export default function App() {
 
   async function handleLogout() {
     await logout();
+    setSessionExpired(false);
     setUser(null);
   }
 

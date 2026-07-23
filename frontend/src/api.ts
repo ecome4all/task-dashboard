@@ -9,12 +9,19 @@ export class ApiError extends Error {
   }
 }
 
+// Called whenever a 401 comes back from anywhere except /auth/login (see
+// below) — i.e. a previously-valid session just expired or was invalidated.
+// App.tsx registers this once, to drop back to the login screen instead of
+// leaving every screen stuck on a dead-end "(401) Try again" that can never
+// actually succeed until the user manually logs out and back in.
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  onUnauthorized = handler;
+}
+
 // Network failures (offline, DNS, CORS) throw before a Response even exists —
 // wrapped here so every caller sees the same ApiError shape either way.
-// 401 is deliberately generic here ("not authorized") rather than assuming
-// "session expired" — that interpretation is only right for already-logged-in
-// routes, not for /auth/login itself, where 401 means "wrong password".
-// Callers that need to tell those apart check err.status themselves.
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -24,6 +31,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
+    // A 401 from the login route itself just means "wrong password" — there's
+    // no session yet to treat as expired (login() handles that case itself).
+    // A 401 from anywhere else only happens once requireAuth, which already
+    // let the user load this screen, starts rejecting the same cookie — i.e.
+    // the session expired or was invalidated since.
+    if (res.status === 401 && path !== "/api/auth/login") {
+      onUnauthorized?.();
+    }
     throw new ApiError(`Something went wrong (${res.status}). Try again.`, res.status);
   }
 
