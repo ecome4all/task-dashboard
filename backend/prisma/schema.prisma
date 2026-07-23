@@ -30,6 +30,9 @@ model Task {
   marketplace String?
   // started | submitted | waiting_for_amazon | waiting_for_client | again_submitted | done
   status      String    @default("started")
+  // Set by an admin or manager only (see requireRole check in tasks.ts) —
+  // members can't set their own due dates.
+  dueDate     DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   doneAt      DateTime?

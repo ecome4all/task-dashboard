@@ -59,6 +59,7 @@ export interface Task {
   taskType: TaskType | null;
   marketplace: Marketplace | null;
   status: TaskStatus;
+  dueDate: string | null;
   createdAt: string;
   updatedAt: string;
   doneAt: string | null;
@@ -70,7 +71,7 @@ export function fetchTasks(): Promise<Task[]> {
 
 export function updateTask(
   id: string,
-  changes: Partial<Pick<Task, "assignee" | "status" | "taskType" | "marketplace">>
+  changes: Partial<Pick<Task, "assignee" | "status" | "taskType" | "marketplace" | "dueDate">>
 ): Promise<Task> {
   return request(`/api/tasks/${id}`, {
     method: "PATCH",

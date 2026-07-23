@@ -120,7 +120,7 @@ export default function App() {
         </header>
 
         <section className="view">
-          {view === "tasks" && <Dashboard />}
+          {view === "tasks" && <Dashboard user={user} />}
           {view === "reports" && <ReportLinks />}
           {view === "employees" && <Employees user={user} />}
           {view === "clients" && <Clients />}

@@ -23,6 +23,7 @@ export interface UpdateTaskInput {
   taskType?: string;
   marketplace?: string;
   status?: TaskStatus;
+  dueDate?: Date | null;
 }
 
 export const taskRepository = {

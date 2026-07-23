@@ -90,19 +90,28 @@ button, input, select { font: inherit; color: inherit; }
   padding: 8px 10px; font-size: 13px; color: var(--text);
 }
 
-.table-scroll { overflow-x: auto; }
-table.data-table { width: 100%; border-collapse: collapse; }
-table.data-table th, table.data-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+/* table-layout: fixed splits columns evenly instead of growing past the
+   page — combined with the wrapping below, long unbroken content (a
+   WhatsApp group id, a full timestamp) wraps onto more lines within its
+   own column instead of forcing the whole table wider than the screen. */
+table.data-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+table.data-table th, table.data-table td {
+  text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 13px;
+  white-space: normal; overflow-wrap: anywhere; vertical-align: top;
+}
 table.data-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text); opacity: 0.55; font-weight: 700; }
 table.data-table tr:last-child td { border-bottom: none; }
+
+/* ---- pagination ---- */
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 0 0; }
+.pagination-info { font-size: 12px; color: var(--text); opacity: 0.6; }
 
 .add-employee { display: flex; gap: 8px; }
 
 /* ---- searchable select ---- */
 /* Renders through a portal at document.body with fixed positioning (see
-   SearchableSelect.tsx) so it can escape the Task table's horizontal
-   scroll container without being clipped. */
-.searchable-select-trigger { min-width: 150px; text-align: left; cursor: pointer; }
+   SearchableSelect.tsx) so it isn't clipped by a narrow table column. */
+.searchable-select-trigger { width: 100%; text-align: left; cursor: pointer; white-space: normal; overflow-wrap: anywhere; }
 .searchable-select-panel {
   position: fixed; z-index: 100; min-width: 200px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;

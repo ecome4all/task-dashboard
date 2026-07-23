@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { taskRepository } from "../repositories/taskRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
+import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+
+const DUE_DATE_ROLES = ["admin", "manager"];
 
 // "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending on
 // the task's own marketplace column — falls back to a generic word when the
@@ -29,7 +32,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
   });
 
   router.patch("/:id", async (req, res) => {
-    const { assignee, status, taskType, marketplace } = req.body;
+    const { assignee, status, taskType, marketplace, dueDate } = req.body;
 
     const [statusOptions, taskTypeOptions, marketplaceOptions] = await Promise.all([
       configOptionRepository.list("status"),
@@ -50,7 +53,34 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       return;
     }
 
-    const task = await taskRepository.update(req.params.id, { assignee, status, taskType, marketplace });
+    let parsedDueDate: Date | null | undefined;
+    if (dueDate !== undefined) {
+      // Only an admin or manager can set a task's due date — members can
+      // edit everything else on a task, but not this.
+      const employee = await employeeRepository.findById(req.employeeId!);
+      if (!employee || !DUE_DATE_ROLES.includes(employee.role)) {
+        res.status(403).json({ error: "only an admin or manager can set the due date" });
+        return;
+      }
+      if (dueDate === null) {
+        parsedDueDate = null;
+      } else {
+        const parsed = new Date(dueDate);
+        if (Number.isNaN(parsed.getTime())) {
+          res.status(400).json({ error: "invalid dueDate" });
+          return;
+        }
+        parsedDueDate = parsed;
+      }
+    }
+
+    const task = await taskRepository.update(req.params.id, {
+      assignee,
+      status,
+      taskType,
+      marketplace,
+      dueDate: parsedDueDate,
+    });
 
     // Every status change is announced back to the group it came from, not
     // just "done" — the client wants visibility into the whole pipeline.

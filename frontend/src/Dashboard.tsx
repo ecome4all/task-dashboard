@@ -5,6 +5,7 @@ import {
   Marketplace,
   Employee,
   ConfigOption,
+  CurrentUser,
   ApiError,
   fetchTasks,
   updateTask,
@@ -27,11 +28,18 @@ const STATUS_PILL: Record<string, string> = {
   done: "pill-good",
 };
 
+const PAGE_SIZE = 10;
+
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
 
-export default function Dashboard() {
+// Turns a Task.dueDate ISO string into the yyyy-mm-dd shape <input type="date"> needs.
+function toDateInputValue(dueDate: string | null): string {
+  return dueDate ? dueDate.slice(0, 10) : "";
+}
+
+export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [statusOptions, setStatusOptions] = useState<ConfigOption[]>([]);
@@ -40,6 +48,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [page, setPage] = useState(1);
+
+  const canSetDueDate = user.role === "admin" || user.role === "manager";
 
   async function load() {
     setLoading(true);
@@ -125,9 +136,24 @@ export default function Dashboard() {
     }
   }
 
+  async function handleDueDateChange(task: Task, value: string) {
+    setActionError("");
+    try {
+      const updated = await updateTask(task.id, { dueDate: value ? new Date(value).toISOString() : null });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
   if (loading) return <Spinner label="Loading tasks…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
+
+  const pageCount = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pagedTasks = tasks.slice(pageStart, pageStart + PAGE_SIZE);
 
   return (
     <>
@@ -139,7 +165,6 @@ export default function Dashboard() {
           <span className="panel-sub">{tasks.length} total</span>
         </div>
         <div className="panel-body">
-          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -152,13 +177,14 @@ export default function Dashboard() {
                 <th>Type</th>
                 <th>Employee</th>
                 <th>Status</th>
+                <th>Due Date</th>
                 <th>Created</th>
                 <th>Updated</th>
                 <th>Completed</th>
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {pagedTasks.map((task) => (
                 <tr key={task.id}>
                   <td>{task.description}</td>
                   <td>{task.clientName ?? "—"}</td>
@@ -206,6 +232,18 @@ export default function Dashboard() {
                       />
                     </div>
                   </td>
+                  <td>
+                    {canSetDueDate ? (
+                      <input
+                        className="field-input"
+                        type="date"
+                        value={toDateInputValue(task.dueDate)}
+                        onChange={(e) => handleDueDateChange(task, e.target.value)}
+                      />
+                    ) : (
+                      task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "—"
+                    )}
+                  </td>
                   <td>{new Date(task.createdAt).toLocaleString()}</td>
                   <td>{new Date(task.updatedAt).toLocaleString()}</td>
                   <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
@@ -213,7 +251,29 @@ export default function Dashboard() {
               ))}
             </tbody>
           </table>
-          </div>
+
+          {pageCount > 1 && (
+            <div className="pagination">
+              <span className="pagination-info">
+                {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, tasks.length)} of {tasks.length}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                Prev
+              </button>
+              <span className="pagination-info">Page {currentPage} of {pageCount}</span>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage >= pageCount}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>
