@@ -7,6 +7,7 @@ import {
   fetchUnrecognizedSenders,
   createClient,
   updateClient,
+  deleteClient,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
@@ -80,6 +81,19 @@ export default function Clients() {
     try {
       const updated = await updateClient(client.id, { active });
       setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleDelete(client: Client) {
+    if (!window.confirm(`Delete ${client.name}? This can't be undone — use Deactivate instead if you might want them back.`)) {
+      return;
+    }
+    setActionError("");
+    try {
+      await deleteClient(client.id);
+      setClients((prev) => prev.filter((c) => c.id !== client.id));
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -210,6 +224,7 @@ export default function Clients() {
                 <th>Phone</th>
                 <th>WhatsApp Group</th>
                 <th>Active</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -247,6 +262,11 @@ export default function Clients() {
                       onClick={() => handleActiveToggle(client, !client.active)}
                     >
                       {client.active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(client)}>
+                      Delete
                     </button>
                   </td>
                 </tr>

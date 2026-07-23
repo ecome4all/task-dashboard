@@ -213,6 +213,11 @@ export function updateClient(
   });
 }
 
+// Permanent — unlike updateClient(id, { active: false }), which is reversible.
+export function deleteClient(id: string): Promise<void> {
+  return request(`/api/clients/${id}`, { method: "DELETE" });
+}
+
 export interface ReportLink {
   id: string;
   description: string;

@@ -67,6 +67,14 @@ export const clientRepository = {
     });
   },
 
+  // Hard delete, unlike the active/inactive toggle above — nothing else
+  // references a Client by foreign key (Task.clientName is just a text
+  // snapshot taken at intake time, not a relation), so this is a clean
+  // delete with no orphaned rows to worry about elsewhere.
+  delete(id: string) {
+    return prisma.client.delete({ where: { id } });
+  },
+
   // Every WhatsApp group chat_id already linked to a client — used to work
   // out which chats seen on incoming messages are still unrecognized.
   linkedGroupIds() {

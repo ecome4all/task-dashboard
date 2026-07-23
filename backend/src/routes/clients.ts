@@ -89,6 +89,14 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     res.json(client);
   });
 
+  // Hard delete — separate from the active/inactive toggle in PATCH above,
+  // which is the reversible default. This is for actually removing a
+  // mistaken or duplicate entry, not routine offboarding.
+  router.delete("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
+    await clientRepository.delete(req.params.id);
+    res.status(204).send();
+  });
+
   // The message text itself is composed on the frontend (the account manager
   // picks which fields to include and sees a live preview there) — this route
   // only exists because sending WhatsApp messages needs server-side API keys.
