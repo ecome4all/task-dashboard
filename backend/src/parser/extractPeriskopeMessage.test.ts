@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { extractPeriskopeMessage } from "./extractPeriskopeMessage";
 
 function messageCreated(data: unknown) {
-  return { event: "message.created", data, org_id: "org-1", timestamp: 1720000000 };
+  return { event_type: "message.created", data, id: "delivery-1", org_id: "org-1", previous_attributes: {} };
 }
 
 describe("extractPeriskopeMessage", () => {
@@ -61,10 +61,11 @@ describe("extractPeriskopeMessage", () => {
 
   it("ignores other event types (e.g. delivery/read receipts)", () => {
     const payload = {
-      event: "message.ack.updated",
+      event_type: "message.ack.updated",
       data: { chat_id: "919876543210@c.us", body: "task: x", from_me: false },
+      id: "delivery-1",
       org_id: "org-1",
-      timestamp: 1720000000,
+      previous_attributes: {},
     };
 
     expect(extractPeriskopeMessage(payload)).toBeNull();
