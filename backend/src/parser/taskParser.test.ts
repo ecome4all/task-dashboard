@@ -39,4 +39,15 @@ describe("parseTaskMessage", () => {
   it("does not match task: appearing mid-message, only at the start", () => {
     expect(parseTaskMessage("please see task: below")).toBeNull();
   });
+
+  it("accepts - and = as the separator, not just :", () => {
+    expect(parseTaskMessage("task- fix listing price")).toEqual({ description: "fix listing price" });
+    expect(parseTaskMessage("task=fix listing price")).toEqual({ description: "fix listing price" });
+  });
+
+  it("accepts a space before the separator", () => {
+    expect(parseTaskMessage("task : fix listing price")).toEqual({ description: "fix listing price" });
+    expect(parseTaskMessage("task - fix listing price")).toEqual({ description: "fix listing price" });
+    expect(parseTaskMessage("task = fix listing price")).toEqual({ description: "fix listing price" });
+  });
 });

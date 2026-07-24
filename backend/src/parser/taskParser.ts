@@ -1,4 +1,8 @@
-const TASK_PREFIX = /^task:\s*/i;
+// Accepts "task" followed by any of : - = as the separator, with optional
+// whitespace on either side -- covers "task:", "task :", "task-", "task -",
+// "task=", "task =", etc. People type this by hand on a phone keyboard and
+// don't all reach for the same punctuation.
+const TASK_PREFIX = /^task\s*[:\-=]\s*/i;
 
 export interface ParsedTask {
   description: string;
