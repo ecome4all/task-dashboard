@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statusLabel, composeSendUpdateMessage } from "./taskMessages";
+import { statusLabel, composeSendUpdateMessage, changedFieldsSince, buildSnapshot } from "./taskMessages";
 
 const STATUS_LABELS = { started: "Started", waiting_for_marketplace: "Waiting for Marketplace", done: "Done" };
 const MARKETPLACE_LABELS = { flipkart: "Flipkart", amazon: "Amazon" };
@@ -75,5 +75,50 @@ describe("composeSendUpdateMessage", () => {
     expect(message).toBe(
       "Update on task: Fix listing price for SKU123.\nMarketplace is not set, type is not set, assigned to no one yet and due by Not set."
     );
+  });
+});
+
+describe("changedFieldsSince / buildSnapshot", () => {
+  const task = {
+    status: "done",
+    marketplace: "flipkart",
+    taskType: null as string | null,
+    assignee: "Priya",
+    dueDate: null as Date | null,
+    createdAt: new Date("2026-07-20T00:00:00Z"),
+  };
+
+  it("with no snapshot yet, reports every field that already has a value", () => {
+    expect(changedFieldsSince(task, null)).toEqual(["status", "marketplace", "assignee", "createdAt"]);
+  });
+
+  it("skips fields that were never set (still null) even with no snapshot", () => {
+    // taskType and dueDate are null above and correctly excluded from the
+    // previous assertion — nothing to report on a field that's never had a
+    // real value.
+    expect(changedFieldsSince(task, null)).not.toContain("taskType");
+    expect(changedFieldsSince(task, null)).not.toContain("dueDate");
+  });
+
+  it("reports nothing once the snapshot matches current values", () => {
+    const snapshot = buildSnapshot(task);
+    expect(changedFieldsSince(task, snapshot)).toEqual([]);
+  });
+
+  it("reports only the fields that actually changed since the snapshot", () => {
+    const snapshot = buildSnapshot(task);
+    const updated = { ...task, assignee: "Rahul" };
+    expect(changedFieldsSince(updated, snapshot)).toEqual(["assignee"]);
+  });
+
+  it("reports a newly-set field that was previously unset", () => {
+    const snapshot = buildSnapshot(task);
+    const updated = { ...task, dueDate: new Date("2026-07-25T00:00:00Z") };
+    expect(changedFieldsSince(updated, snapshot)).toEqual(["dueDate"]);
+  });
+
+  it("never re-reports createdAt after the first send, since it can't change", () => {
+    const snapshot = buildSnapshot(task);
+    expect(changedFieldsSince(task, snapshot)).not.toContain("createdAt");
   });
 });

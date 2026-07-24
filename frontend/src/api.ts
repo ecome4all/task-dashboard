@@ -63,6 +63,8 @@ export type TaskStatus = string;
 export type TaskType = string;
 export type Marketplace = string;
 
+export type SendableTaskField = "status" | "marketplace" | "taskType" | "assignee" | "dueDate" | "createdAt";
+
 export interface Task {
   id: string;
   source: string;
@@ -78,6 +80,11 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   doneAt: string | null;
+  // Fields changed since the last WhatsApp send (manual or automatic) for
+  // this task — computed server-side, since "what's already been told to
+  // the client" is shared across whoever's using the dashboard, not
+  // per-browser state.
+  pendingSendFields: SendableTaskField[];
 }
 
 export function fetchTasks(): Promise<Task[]> {
@@ -95,13 +102,12 @@ export function updateTask(
   });
 }
 
-export type SendableTaskField = "status" | "marketplace" | "taskType" | "assignee" | "dueDate" | "createdAt";
-
 // Manual WhatsApp send for anything other than the automatic status-change
-// notification -- one field or a mix of several, whenever it's worth telling
-// a client about something on a task.
-export function sendTaskUpdate(id: string, fields: SendableTaskField[]): Promise<{ sent: boolean }> {
-  return postJson(`/api/tasks/${id}/send-update`, { fields });
+// notification. No field picking -- the backend works out what's changed
+// since the last send for this task (see Task.pendingSendFields) and sends
+// exactly that, as one message.
+export function sendTaskUpdate(id: string): Promise<{ sent: boolean; fields: SendableTaskField[] }> {
+  return postJson(`/api/tasks/${id}/send-update`, {});
 }
 
 export interface Employee {

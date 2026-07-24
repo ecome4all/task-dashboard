@@ -36,6 +36,12 @@ model Task {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   doneAt      DateTime?
+  // Snapshot of status/marketplace/taskType/assignee/dueDate/createdAt as of
+  // the last successful WhatsApp send (manual "Send" click, or an automatic
+  // status-change notification) — lets the Send button compare current
+  // values against this to work out what's actually new, with no manual
+  // field picking. Null means nothing's ever been sent for this task yet.
+  sentSnapshot Json?
 
   @@index([tenantId, status])
 }

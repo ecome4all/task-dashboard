@@ -53,4 +53,13 @@ export const taskRepository = {
       },
     });
   },
+
+  // Overwrites the "what's already been told to the client" snapshot the
+  // Send button diffs against — used both after a manual send (the full
+  // current snapshot) and after an automatic status-change notification
+  // (just that one field merged in, so a later manual send doesn't restate
+  // something already announced).
+  updateSnapshot(id: string, snapshot: Record<string, string | null>) {
+    return prisma.task.update({ where: { id }, data: { sentSnapshot: snapshot } });
+  },
 };

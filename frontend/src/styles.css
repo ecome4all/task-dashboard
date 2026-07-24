@@ -154,18 +154,6 @@ table.data-table tr:last-child td { border-bottom: none; }
 .searchable-select-option:hover, .searchable-select-option.selected { background: var(--bg-alt); }
 .searchable-select-empty { padding: 7px 9px; font-size: 12px; opacity: 0.6; }
 
-/* ---- send update popover ---- */
-.send-update-panel {
-  position: fixed; z-index: 100; width: 260px;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: var(--shadow); padding: 10px;
-}
-.send-update-title { font-size: 12.5px; font-weight: 600; color: var(--text-h); margin-bottom: 8px; }
-.send-update-fields { list-style: none; margin: 0 0 10px; padding: 0; max-height: 220px; overflow-y: auto; }
-.send-update-fields li { padding: 4px 0; }
-.send-update-fields label { display: flex; align-items: baseline; gap: 6px; font-size: 13px; cursor: pointer; }
-.send-update-field-label { font-weight: 600; }
-
 /* ---- loading / error ---- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.7s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }

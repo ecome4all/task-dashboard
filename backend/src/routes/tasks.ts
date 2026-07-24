@@ -3,22 +3,25 @@ import { taskRepository } from "../repositories/taskRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
-import { statusLabel, composeSendUpdateMessage } from "../services/taskMessages";
+import { statusLabel, composeSendUpdateMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
-
-// Fields a manual "Send Update" can include — separate from the automatic
-// status-change notification below, for anything else worth telling a
-// client about (a marketplace decision, who's on it, a due date, etc.),
-// alone or mixed together in one message.
-const SENDABLE_FIELDS = ["status", "marketplace", "taskType", "assignee", "dueDate", "createdAt"];
 
 export function createTasksRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.get("/", async (_req, res) => {
     const tasks = await taskRepository.list();
-    res.json(tasks);
+    // The Send button needs to know, per task, whether anything's changed
+    // since the last send — computed here rather than trusting the client
+    // to track it, since staff on different devices/sessions share one
+    // "what's already been told to the client" snapshot.
+    res.json(
+      tasks.map((task) => ({
+        ...task,
+        pendingSendFields: changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null),
+      }))
+    );
   });
 
   router.patch("/:id", async (req, res) => {
@@ -91,6 +94,10 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     // outage) must not fail the request or crash the server — an uncaught
     // rejection here would take down the whole process, not just this one
     // notification.
+    // Tracks what the response's pendingSendFields should reflect -- starts
+    // as the snapshot already on the task, and gets the status field merged
+    // in below on a successful automatic send, without needing a re-fetch.
+    let currentSnapshot = task.sentSnapshot as TaskSnapshot | null;
     if (status !== undefined) {
       try {
         const whatsapp = resolveAdapterForSource(task.source, channels);
@@ -100,28 +107,33 @@ export function createTasksRouter(channels: WhatsAppChannels) {
           task.sourceRef,
           `Task: ${task.description}\nUpdate: ${statusLabel(status, task.marketplace, statusLabels, marketplaceLabels)}`
         );
+        // Merge just the status field into the existing snapshot, so a
+        // later manual Send doesn't restate a status change that was
+        // already announced automatically here.
+        currentSnapshot = { ...currentSnapshot, status: task.status };
+        await taskRepository.updateSnapshot(task.id, currentSnapshot);
       } catch (err) {
         console.error("Failed to send WhatsApp status update:", err);
       }
     }
 
-    res.json(task);
+    res.json({ ...task, pendingSendFields: changedFieldsSince(task, currentSnapshot) });
   });
 
   // Manual send: unlike the automatic status-change notification above,
-  // this is for telling a client about anything else on a task — one field
-  // or several at once — whenever staff decides it's worth a message, not
-  // tied to any particular edit.
+  // this is for telling a client about anything else on a task. No field
+  // picking — it automatically works out what's changed since the last
+  // send (manual or automatic) for this task and sends exactly that.
   router.post("/:id/send-update", async (req, res) => {
-    const { fields } = req.body;
-    if (!Array.isArray(fields) || fields.length === 0 || !fields.every((f) => SENDABLE_FIELDS.includes(f))) {
-      res.status(400).json({ error: `fields must be a non-empty array of: ${SENDABLE_FIELDS.join(", ")}` });
-      return;
-    }
-
     const task = await taskRepository.findById(req.params.id);
     if (!task) {
       res.status(404).json({ error: "task not found" });
+      return;
+    }
+
+    const fields = changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null);
+    if (fields.length === 0) {
+      res.status(400).json({ error: "Nothing new to send since the last update." });
       return;
     }
 
@@ -142,7 +154,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
 
     const message = composeSendUpdateMessage({
       description: task.description,
-      fields: fields as string[],
+      fields,
       status: task.status,
       marketplace: task.marketplace,
       taskType: task.taskType,
@@ -163,7 +175,8 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       return;
     }
 
-    res.json({ sent: true });
+    await taskRepository.updateSnapshot(task.id, buildSnapshot(task));
+    res.json({ sent: true, fields });
   });
 
   return router;

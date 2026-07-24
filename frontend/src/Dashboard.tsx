@@ -6,7 +6,6 @@ import {
   Employee,
   ConfigOption,
   CurrentUser,
-  SendableTaskField,
   ApiError,
   fetchTasks,
   updateTask,
@@ -17,7 +16,6 @@ import {
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
-import SendUpdatePopover, { SendableField } from "./SendUpdatePopover";
 
 // Only used for the handful of statuses this frontend knows to color —
 // anything an admin adds beyond these falls back to "neutral", since
@@ -53,6 +51,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [actionError, setActionError] = useState("");
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
+  const [justSentTaskId, setJustSentTaskId] = useState<string | null>(null);
 
   const canSetDueDate = user.role === "admin" || user.role === "manager";
 
@@ -147,28 +147,21 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     return applyTaskChange(task, { dueDate: isoDate }, { dueDate: isoDate });
   }
 
-  // What the "Send" popover offers for a given task, with each field's
-  // current value shown inline so staff pick from what's actually there,
-  // not an abstract field name.
-  function sendableFieldsFor(task: Task): SendableField[] {
-    return [
-      { key: "status", label: "Status", value: statusLabel(task.status, task.marketplace) },
-      { key: "marketplace", label: "Marketplace", value: (task.marketplace && marketplaceLabels[task.marketplace]) || "Not set" },
-      { key: "taskType", label: "Type", value: (task.taskType && taskTypeLabels[task.taskType]) || "Not set" },
-      { key: "assignee", label: "Employee", value: task.assignee || "Unassigned" },
-      { key: "dueDate", label: "Due Date", value: task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "Not set" },
-      { key: "createdAt", label: "Created", value: new Date(task.createdAt).toLocaleDateString() },
-    ];
-  }
-
-  async function handleSendUpdate(task: Task, fields: SendableTaskField[]): Promise<boolean> {
+  // No field picking — the backend works out what's changed since the
+  // last send for this task (Task.pendingSendFields) and sends exactly
+  // that. The button is only enabled when there's something to send.
+  async function handleSendUpdate(task: Task) {
     setActionError("");
+    setSendingTaskId(task.id);
     try {
-      await sendTaskUpdate(task.id, fields);
-      return true;
+      await sendTaskUpdate(task.id);
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, pendingSendFields: [] } : t)));
+      setJustSentTaskId(task.id);
+      setTimeout(() => setJustSentTaskId((id) => (id === task.id ? null : id)), 1500);
     } catch (err) {
       setActionError(errorMessage(err));
-      return false;
+    } finally {
+      setSendingTaskId(null);
     }
   }
 
@@ -286,10 +279,13 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   <td>{new Date(task.updatedAt).toLocaleString()}</td>
                   <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
                   <td>
-                    <SendUpdatePopover
-                      fields={sendableFieldsFor(task)}
-                      onSend={(fields) => handleSendUpdate(task, fields)}
-                    />
+                    <button
+                      className={`btn btn-sm ${task.pendingSendFields.length > 0 ? "btn-primary" : "btn-ghost"}`}
+                      disabled={task.pendingSendFields.length === 0 || sendingTaskId === task.id}
+                      onClick={() => handleSendUpdate(task)}
+                    >
+                      {sendingTaskId === task.id ? "Sending…" : justSentTaskId === task.id ? "Sent ✓" : "Send"}
+                    </button>
                   </td>
                 </tr>
               ))}
