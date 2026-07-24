@@ -68,7 +68,7 @@ export type TaskStatus = string;
 export type TaskType = string;
 export type Marketplace = string;
 
-export type SendableTaskField = "status" | "marketplace" | "taskType" | "assignee" | "dueDate" | "createdAt";
+export type SendableTaskField = "status" | "marketplace" | "assignee" | "dueDate";
 
 export interface Task {
   id: string;

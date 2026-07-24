@@ -3,7 +3,7 @@ import { taskRepository } from "../repositories/taskRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
-import { statusLabel, composeSendUpdateMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
+import { composeSendUpdateMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
@@ -89,6 +89,8 @@ export function createTasksRouter(channels: WhatsAppChannels) {
 
     // Every status change is announced back to the group it came from, not
     // just "done" — the client wants visibility into the whole pipeline.
+    // Uses the same composer as the manual Send button, just forced to the
+    // single "status" field, so both message paths stay worded identically.
     // This send is best-effort: the status update itself is already saved
     // above, and a WhatsApp failure (network blip, bad chat_id, Periskope
     // outage) must not fail the request or crash the server — an uncaught
@@ -103,10 +105,17 @@ export function createTasksRouter(channels: WhatsAppChannels) {
         const whatsapp = resolveAdapterForSource(task.source, channels);
         const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
         const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
-        await whatsapp.sendMessage(
-          task.sourceRef,
-          `Task: ${task.description}\nUpdate: ${statusLabel(status, task.marketplace, statusLabels, marketplaceLabels)}`
-        );
+        const message = composeSendUpdateMessage({
+          description: task.description,
+          fields: ["status"],
+          status: task.status,
+          marketplace: task.marketplace,
+          assignee: task.assignee,
+          dueDate: task.dueDate,
+          statusLabels,
+          marketplaceLabels,
+        });
+        await whatsapp.sendMessage(task.sourceRef, message);
         // Merge just the status field into the existing snapshot, so a
         // later manual Send doesn't restate a status change that was
         // already announced automatically here.
@@ -138,18 +147,15 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     }
 
     const needStatusOptions = fields.includes("status");
-    const needTaskTypeOptions = fields.includes("taskType");
     // The "Waiting for <marketplace>" status label depends on the
     // marketplace list too, even if marketplace itself isn't being sent.
     const needMarketplaceOptions = fields.includes("marketplace") || needStatusOptions;
 
-    const [statusOptions, taskTypeOptions, marketplaceOptions] = await Promise.all([
+    const [statusOptions, marketplaceOptions] = await Promise.all([
       needStatusOptions ? configOptionRepository.list("status") : Promise.resolve([]),
-      needTaskTypeOptions ? configOptionRepository.list("task_type") : Promise.resolve([]),
       needMarketplaceOptions ? configOptionRepository.list("marketplace") : Promise.resolve([]),
     ]);
     const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
-    const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
     const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
 
     const message = composeSendUpdateMessage({
@@ -157,13 +163,10 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       fields,
       status: task.status,
       marketplace: task.marketplace,
-      taskType: task.taskType,
       assignee: task.assignee,
       dueDate: task.dueDate,
-      createdAt: task.createdAt,
       statusLabels,
       marketplaceLabels,
-      taskTypeLabels,
     });
 
     try {

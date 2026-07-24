@@ -19,18 +19,21 @@ export function formatDate(date: Date | null): string {
   return date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Not set";
 }
 
-// Fields the Send button can report on — the same six the message composer
-// below knows how to phrase.
-export const SENDABLE_FIELDS = ["status", "marketplace", "taskType", "assignee", "dueDate", "createdAt"] as const;
+// Fields any WhatsApp update (automatic status notification, or the manual
+// Send button) can report on. Deliberately excludes:
+//   - the task's creation date — the client already gets an automatic
+//     "✅ Got it, logged" message when a task is first created (see
+//     taskIntake.ts), so restating when it was created is redundant.
+//   - task type — an internal triage category with no meaning to the
+//     client receiving the message.
+export const SENDABLE_FIELDS = ["status", "marketplace", "assignee", "dueDate"] as const;
 export type SendableField = (typeof SENDABLE_FIELDS)[number];
 
 export interface TaskSnapshotSource {
   status: string;
   marketplace: string | null;
-  taskType: string | null;
   assignee: string | null;
   dueDate: Date | null;
-  createdAt: Date;
 }
 
 // Stored as Task.sentSnapshot (JSON) after every send — what the *next*
@@ -40,10 +43,8 @@ export type TaskSnapshot = Partial<Record<SendableField, string | null>>;
 function fieldValue(task: TaskSnapshotSource, field: SendableField): string | null {
   if (field === "status") return task.status;
   if (field === "marketplace") return task.marketplace;
-  if (field === "taskType") return task.taskType;
   if (field === "assignee") return task.assignee;
-  if (field === "dueDate") return task.dueDate ? task.dueDate.toISOString() : null;
-  return task.createdAt.toISOString(); // createdAt
+  return task.dueDate ? task.dueDate.toISOString() : null; // dueDate
 }
 
 // A full snapshot of every sendable field's current value — saved after a
@@ -67,17 +68,12 @@ export function changedFieldsSince(task: TaskSnapshotSource, snapshot: TaskSnaps
   });
 }
 
-// Joins clause fragments into one natural sentence — "X", "X and Y", or
-// "X, Y and Z" — rather than a structured field-by-field list, so sending
-// several fields at once still reads like a single message, not a report.
+// Joins clause fragments into one sentence — "X", "X and Y", or "X, Y and
+// Z" — so reporting several fields at once still reads as one message.
 function joinClauses(clauses: string[]): string {
   if (clauses.length <= 1) return clauses[0] ?? "";
   if (clauses.length === 2) return `${clauses[0]} and ${clauses[1]}`;
   return `${clauses.slice(0, -1).join(", ")} and ${clauses[clauses.length - 1]}`;
-}
-
-function capitalize(s: string): string {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
 export interface ComposeSendUpdateMessageInput {
@@ -85,33 +81,28 @@ export interface ComposeSendUpdateMessageInput {
   fields: SendableField[];
   status: string;
   marketplace: string | null;
-  taskType: string | null;
   assignee: string | null;
   dueDate: Date | null;
-  createdAt: Date;
   statusLabels: Record<string, string>;
   marketplaceLabels: Record<string, string>;
-  taskTypeLabels: Record<string, string>;
 }
 
-// The manual "Send Update" message — any mix of fields, clubbed into one
-// natural sentence instead of a structured list.
+// The single template both the automatic status-change notification and
+// the manual Send button use — one or more fields, clubbed into one
+// sentence, always naming the task first so a client whose WhatsApp
+// group/chat covers more than one task knows which one it's about.
 export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): string {
   const clauses: string[] = [];
   for (const field of input.fields) {
     if (field === "status") {
-      clauses.push(`status is ${statusLabel(input.status, input.marketplace, input.statusLabels, input.marketplaceLabels)}`);
+      clauses.push(`task status changed to ${statusLabel(input.status, input.marketplace, input.statusLabels, input.marketplaceLabels)}`);
     } else if (field === "marketplace") {
-      clauses.push(`marketplace is ${(input.marketplace && input.marketplaceLabels[input.marketplace]) || "not set"}`);
-    } else if (field === "taskType") {
-      clauses.push(`type is ${(input.taskType && input.taskTypeLabels[input.taskType]) || "not set"}`);
+      clauses.push(`marketplace set to ${(input.marketplace && input.marketplaceLabels[input.marketplace]) || "not set"}`);
     } else if (field === "assignee") {
       clauses.push(`assigned to ${input.assignee || "no one yet"}`);
-    } else if (field === "dueDate") {
-      clauses.push(`due by ${formatDate(input.dueDate)}`);
     } else {
-      clauses.push(`created on ${formatDate(input.createdAt)}`); // createdAt
+      clauses.push(`due date set to ${formatDate(input.dueDate)}`); // dueDate
     }
   }
-  return `Update on task: ${input.description}.\n${capitalize(joinClauses(clauses))}.`;
+  return `"${input.description}" — ${joinClauses(clauses)}.`;
 }
