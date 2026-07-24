@@ -40,11 +40,21 @@ export interface TaskSnapshotSource {
 // send compares against to work out what's actually new.
 export type TaskSnapshot = Partial<Record<SendableField, string | null>>;
 
+// "started" is every task's default status, not something anyone actively
+// chose — worth showing on the board, but not worth telling a client about
+// (there's nothing to report yet). Marketplace/assignee/dueDate have no such
+// default; they're simply null until someone picks a value.
+const DEFAULT_VALUES: Partial<Record<SendableField, string>> = { status: "started" };
+
 function fieldValue(task: TaskSnapshotSource, field: SendableField): string | null {
   if (field === "status") return task.status;
   if (field === "marketplace") return task.marketplace;
   if (field === "assignee") return task.assignee;
   return task.dueDate ? task.dueDate.toISOString() : null; // dueDate
+}
+
+function isMeaningfulValue(field: SendableField, value: string | null): value is string {
+  return value !== null && value !== DEFAULT_VALUES[field];
 }
 
 // A full snapshot of every sendable field's current value — saved after a
@@ -56,13 +66,13 @@ export function buildSnapshot(task: TaskSnapshotSource): TaskSnapshot {
 }
 
 // What the Send button actually sends: fields that differ from the last
-// snapshot (or, with no snapshot yet, any field that already has a real
-// value worth mentioning) — no manual picking, just what's new since the
-// last time someone hit Send for this task.
+// snapshot (or, with no snapshot yet, any field that already has a real,
+// non-default value worth mentioning) — no manual picking, just what's new
+// since the last time someone hit Send for this task.
 export function changedFieldsSince(task: TaskSnapshotSource, snapshot: TaskSnapshot | null): SendableField[] {
   return SENDABLE_FIELDS.filter((field) => {
     const current = fieldValue(task, field);
-    if (current === null) return false;
+    if (!isMeaningfulValue(field, current)) return false;
     const previous = snapshot ? snapshot[field] ?? null : null;
     return current !== previous;
   });

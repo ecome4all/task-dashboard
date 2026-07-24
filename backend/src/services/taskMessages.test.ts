@@ -122,4 +122,14 @@ describe("changedFieldsSince / buildSnapshot", () => {
     const updated = { ...task, dueDate: new Date("2026-07-25T00:00:00Z") };
     expect(changedFieldsSince(updated, snapshot)).toEqual(["dueDate"]);
   });
+
+  it("never reports status while it's still sitting at the default 'started' -- nothing's actually happened yet", () => {
+    const freshTask = { status: "started", marketplace: "amazon", assignee: "Jayvant", dueDate: null as Date | null };
+    expect(changedFieldsSince(freshTask, null)).toEqual(["marketplace", "assignee"]);
+  });
+
+  it("does start reporting status once it moves off the default, even on the first-ever send", () => {
+    const freshTask = { status: "waiting_for_marketplace", marketplace: "amazon", assignee: null, dueDate: null as Date | null };
+    expect(changedFieldsSince(freshTask, null)).toEqual(["status", "marketplace"]);
+  });
 });
