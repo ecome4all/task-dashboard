@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import {
+  Client,
   ReportLink,
   ApiError,
+  fetchClients,
   sendClientUpdate,
   fetchReportLinks,
   createReportLink,
@@ -28,7 +30,13 @@ function parsed(value: string | undefined): number | undefined {
   return value.trim() !== "" && !Number.isNaN(n) ? n : undefined;
 }
 
-type ColumnKind = "text" | "currency" | "number";
+// "derivedPercent" columns (Acos, T.Acos, Ads Sales %, Organic Sales %) are
+// calculated from the other columns, never typed or pasted in directly —
+// they still take up a column slot (matching the client's own report
+// sheet, which has them in the same positions) so a row pasted straight
+// from that sheet lines up cell-for-cell, but the sheet's own value in
+// those cells is simply skipped over rather than stored.
+type ColumnKind = "text" | "currency" | "number" | "derivedPercent";
 
 interface ColumnDef {
   key: string;
@@ -37,26 +45,33 @@ interface ColumnDef {
   kind: ColumnKind;
 }
 
-const RAW_FIELDS: ColumnDef[] = [
-  { key: "adSpend", label: "Ad Spend", emoji: "💰", kind: "currency" },
-  { key: "adOrders", label: "Ad Orders", emoji: "🛒", kind: "number" },
-  { key: "adSales", label: "Ad Sales", emoji: "📈", kind: "currency" },
-  { key: "totalOrders", label: "Total Orders", emoji: "📦", kind: "number" },
-  { key: "totalSales", label: "Total Sales", emoji: "💵", kind: "currency" },
-  { key: "activeListings", label: "Active Listings", emoji: "✅", kind: "number" },
-  { key: "oosListings", label: "Out of Stock", emoji: "⚠️", kind: "number" },
-  { key: "inactiveListings", label: "Inactive Listings", emoji: "🚫", kind: "number" },
+// Matches the client's own report spreadsheet column-for-column (see
+// "report fields.txt"): mobile number and client name lead, then the
+// product identifier, then the metrics in the same order and positions
+// (including the calculated Acos/T.Acos/% columns) their sheet has them in.
+const COLUMNS: ColumnDef[] = [
+  { key: "phone", label: "Phone", kind: "text" },
+  { key: "clientName", label: "Client Name", kind: "text" },
+  { key: "asin", label: "ASIN", kind: "text" },
+  { key: "productName", label: "Name", kind: "text" },
+  { key: "adSpend", label: "Spend", emoji: "💰", kind: "currency" },
+  { key: "adOrders", label: "Order", emoji: "🛒", kind: "number" },
+  { key: "adSales", label: "Sales", emoji: "📈", kind: "currency" },
+  { key: "acos", label: "Acos", emoji: "🎯", kind: "derivedPercent" },
+  { key: "totalOrders", label: "T.Order", emoji: "📦", kind: "number" },
+  { key: "totalSales", label: "T.Sales", emoji: "💵", kind: "currency" },
+  { key: "tAcos", label: "T.Acos", emoji: "📊", kind: "derivedPercent" },
+  { key: "adsSalesPct", label: "Ads Sales %", emoji: "🟢", kind: "derivedPercent" },
+  { key: "organicSalesPct", label: "Organic Sales %", emoji: "🌿", kind: "derivedPercent" },
+  { key: "rating", label: "Rating", emoji: "⭐", kind: "number" },
+  { key: "reviews", label: "Reviews", emoji: "📝", kind: "number" },
+  { key: "fbaUnits", label: "FBA Units", emoji: "📥", kind: "number" },
 ];
 
-// Client name and phone lead, exactly like the client's own spreadsheet has
-// them as its first two columns — everything else follows in the same
-// order as RAW_FIELDS, so a whole row copied from that sheet lines up
-// cell-for-cell with this table.
-const COLUMNS: ColumnDef[] = [
-  { key: "clientName", label: "Client Name", kind: "text" },
-  { key: "phone", label: "Phone", kind: "text" },
-  ...RAW_FIELDS,
-];
+const COLUMN_WIDTH: Record<string, number> = {
+  phone: 125, clientName: 140, asin: 105, productName: 130,
+  rating: 65, reviews: 75,
+};
 
 interface ClientRow {
   id: string;
@@ -72,6 +87,27 @@ function rowStatusLabel(status: RowStatus | undefined): string {
   return "";
 }
 
+// The four calculated columns, worked out the same way regardless of
+// where they're used (a single row's message, or that row's read-only
+// table cells).
+function deriveValues(rawValues: Record<string, number | undefined>): Record<string, number | undefined> {
+  const acos = rawValues.adSpend !== undefined && rawValues.adSales ? rawValues.adSpend / rawValues.adSales : undefined;
+  const tAcos =
+    rawValues.adSpend !== undefined && rawValues.totalSales ? rawValues.adSpend / rawValues.totalSales : undefined;
+  const adsSalesPct =
+    rawValues.adSales !== undefined && rawValues.totalSales ? rawValues.adSales / rawValues.totalSales : undefined;
+  const organicSalesPct = adsSalesPct !== undefined ? 1 - adsSalesPct : undefined;
+  return { acos, tAcos, adsSalesPct, organicSalesPct };
+}
+
+function rawValuesFor(row: ClientRow): Record<string, number | undefined> {
+  const out: Record<string, number | undefined> = {};
+  for (const col of COLUMNS) {
+    if (col.kind === "currency" || col.kind === "number") out[col.key] = parsed(row.data[col.key]);
+  }
+  return out;
+}
+
 interface SharedMessageInput {
   period: string;
   highlights: string;
@@ -79,43 +115,31 @@ interface SharedMessageInput {
   attachedLink?: ReportLink;
 }
 
-// One message per row, built from that row's own numbers plus whatever's
-// shared across the whole batch (period, highlights, attached link) — the
-// same template the single-client composer used to build, just parameterized
-// per row instead of off top-level state.
+// One message per row (one product), built from that row's own numbers
+// plus whatever's shared across the whole batch (period, highlights,
+// attached link).
 function composeMessage(row: ClientRow, shared: SharedMessageInput): string {
-  const rawValues: Record<string, number | undefined> = {};
-  for (const field of RAW_FIELDS) rawValues[field.key] = parsed(row.data[field.key]);
-
-  const acos = rawValues.adSpend !== undefined && rawValues.adSales ? rawValues.adSpend / rawValues.adSales : undefined;
-  const tAcos =
-    rawValues.adSpend !== undefined && rawValues.totalSales ? rawValues.adSpend / rawValues.totalSales : undefined;
-  const adsSalesPct =
-    rawValues.adSales !== undefined && rawValues.totalSales ? rawValues.adSales / rawValues.totalSales : undefined;
-  const organicSalesPct = adsSalesPct !== undefined ? 1 - adsSalesPct : undefined;
-
-  const derivedFields: { label: string; emoji: string; value: number | undefined }[] = [
-    { label: "ACOS", emoji: "🎯", value: acos },
-    { label: "Total ACOS", emoji: "📊", value: tAcos },
-    { label: "Ads Sales %", emoji: "🟢", value: adsSalesPct },
-    { label: "Organic Sales %", emoji: "🌿", value: organicSalesPct },
-  ];
+  const rawValues = rawValuesFor(row);
+  const derived = deriveValues(rawValues);
 
   const name = row.data.clientName?.trim() || "there";
+  const asin = row.data.asin?.trim();
+  const productName = row.data.productName?.trim();
+
   const lines: string[] = [];
   lines.push(`📊 *Performance Update${shared.period.trim() ? ` — ${shared.period.trim()}` : ""}*`);
   lines.push(`Hi ${name}, here's your update:`);
+  if (productName || asin) {
+    lines.push(`🏷️ ${[productName, asin ? `ASIN: ${asin}` : null].filter(Boolean).join(" — ")}`);
+  }
   lines.push("");
 
-  for (const field of RAW_FIELDS) {
-    const value = rawValues[field.key];
+  for (const col of COLUMNS) {
+    if (col.kind === "text") continue;
+    const value = col.kind === "derivedPercent" ? derived[col.key] : rawValues[col.key];
     if (value === undefined) continue;
-    const formatted = field.kind === "currency" ? currency(value) : value.toLocaleString("en-IN");
-    lines.push(`${field.emoji} ${field.label}: ${formatted}`);
-  }
-  for (const field of derivedFields) {
-    if (field.value === undefined) continue;
-    lines.push(`${field.emoji} ${field.label}: ${percent(field.value)}`);
+    const formatted = col.kind === "currency" ? currency(value) : col.kind === "derivedPercent" ? percent(value) : value.toLocaleString("en-IN");
+    lines.push(`${col.emoji ? `${col.emoji} ` : ""}${col.label}: ${formatted}`);
   }
 
   if (shared.includeHighlights && shared.highlights.trim()) {
@@ -136,6 +160,7 @@ function composeMessage(row: ClientRow, shared: SharedMessageInput): string {
 }
 
 export default function ClientUpdate() {
+  const [clients, setClients] = useState<Client[]>([]);
   const [links, setLinks] = useState<ReportLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -161,7 +186,9 @@ export default function ClientUpdate() {
     setLoading(true);
     setLoadError("");
     try {
-      setLinks(await fetchReportLinks());
+      const [clientList, linkList] = await Promise.all([fetchClients(), fetchReportLinks()]);
+      setClients(clientList);
+      setLinks(linkList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -187,8 +214,27 @@ export default function ClientUpdate() {
     }
   }
 
+  // Typing a saved client's name or number auto-fills the other one (once,
+  // only into an empty cell) — the "lookup as you start typing" the report
+  // sheet has, backed by the same Clients directory the rest of the app
+  // uses. The <datalist> on each input supplies the suggestions as you type.
   function setCell(rowIndex: number, key: string, value: string) {
-    setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, data: { ...r.data, [key]: value } } : r)));
+    setRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== rowIndex) return r;
+        const data = { ...r.data, [key]: value };
+        const query = value.trim().toLowerCase();
+        if (key === "clientName" && !r.data.phone?.trim()) {
+          const match = clients.find((c) => c.name.toLowerCase() === query);
+          const phone = match?.whatsappGroupId ?? match?.phone;
+          if (phone) data.phone = phone;
+        } else if (key === "phone" && !r.data.clientName?.trim()) {
+          const match = clients.find((c) => c.whatsappGroupId === value.trim() || c.phone === value.trim());
+          if (match) data.clientName = match.name;
+        }
+        return { ...r, data };
+      })
+    );
   }
 
   function addRow() {
@@ -204,10 +250,13 @@ export default function ClientUpdate() {
   // spreadsheet block — rows down the sheet, columns across it — and gets
   // distributed starting at the cell it landed in, growing the grid with
   // extra rows if the pasted block has more rows than currently exist.
-  // Client Name/Phone are kept as plain text; every numeric column strips
-  // anything that isn't a digit/decimal point/minus sign, since a
-  // spreadsheet cell is often formatted with a currency symbol or a
-  // thousands comma that a plain number input can't parse.
+  // Text columns are kept as plain text; numeric columns strip anything
+  // that isn't a digit/decimal point/minus sign, since a spreadsheet cell
+  // is often formatted with a currency symbol or a thousands comma that a
+  // plain number input can't parse. Calculated columns (Acos, T.Acos, Ads
+  // Sales %, Organic Sales %) still occupy their slot so later columns
+  // don't shift, but whatever value is in that cell is discarded — we
+  // always work those out ourselves.
   function handleGridPaste(e: React.ClipboardEvent<HTMLInputElement>, rowIndex: number, colIndex: number) {
     const text = e.clipboardData.getData("text");
     if (!/\t|\r\n|\r|\n/.test(text)) return;
@@ -223,7 +272,7 @@ export default function ClientUpdate() {
         const data = { ...next[targetIndex].data };
         cells.forEach((raw, c) => {
           const column = COLUMNS[colIndex + c];
-          if (!column) return;
+          if (!column || column.kind === "derivedPercent") return;
           const value = column.kind === "text" ? raw.trim() : raw.replace(/[^0-9.-]/g, "").trim();
           if (value !== "") data[column.key] = value;
         });
@@ -304,15 +353,23 @@ export default function ClientUpdate() {
     <>
       {sendError && <ErrorBanner message={sendError} onRetry={() => setSendError("")} />}
 
+      <datalist id="known-client-names">
+        {clients.map((c) => <option key={c.id} value={c.name} />)}
+      </datalist>
+      <datalist id="known-client-phones">
+        {clients.map((c) => <option key={c.id} value={c.whatsappGroupId ?? c.phone ?? ""} />)}
+      </datalist>
+
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Send client update</span>
-          <span className="panel-sub">One row per client, sent as a batch over WhatsApp</span>
+          <span className="panel-sub">One row per product, sent as a batch over WhatsApp</span>
         </div>
         <p className="tip">
-          💡 Paste your whole client table at once — copy from Client Name through to Inactive Listings in your
-          spreadsheet and drop it into the first cell below. It fills every row and column in order, adding rows as
-          needed.
+          💡 Paste a whole block straight from your report spreadsheet, starting at Phone — it fills every row and
+          column in order (adding rows as needed) and skips over Acos/T.Acos/Ads Sales %/Organic Sales %, since
+          those are calculated here automatically. Typing a saved client's name or number also fills in the other
+          one for you.
         </p>
         <div className="panel-body">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -349,33 +406,43 @@ export default function ClientUpdate() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr key={row.id}>
-                    {COLUMNS.map((col, colIndex) => (
-                      <td key={col.key}>
-                        <input
-                          className="field-input"
-                          type={col.kind === "text" ? "text" : "number"}
-                          value={row.data[col.key] ?? ""}
-                          onChange={(e) => setCell(rowIndex, col.key, e.target.value)}
-                          onPaste={(e) => handleGridPaste(e, rowIndex, colIndex)}
+                {rows.map((row, rowIndex) => {
+                  const derived = deriveValues(rawValuesFor(row));
+                  return (
+                    <tr key={row.id}>
+                      {COLUMNS.map((col, colIndex) => (
+                        <td key={col.key}>
+                          {col.kind === "derivedPercent" ? (
+                            <span className="panel-sub">
+                              {derived[col.key] !== undefined ? percent(derived[col.key]!) : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              className="field-input"
+                              type={col.kind === "text" ? "text" : "number"}
+                              list={col.key === "clientName" ? "known-client-names" : col.key === "phone" ? "known-client-phones" : undefined}
+                              value={row.data[col.key] ?? ""}
+                              onChange={(e) => setCell(rowIndex, col.key, e.target.value)}
+                              onPaste={(e) => handleGridPaste(e, rowIndex, colIndex)}
+                              disabled={sendingAll}
+                              style={{ width: COLUMN_WIDTH[col.key] ?? 85 }}
+                            />
+                          )}
+                        </td>
+                      ))}
+                      <td className="panel-sub">{rowStatusLabel(rowStatus[row.id])}</td>
+                      <td>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeRow(rowIndex)}
                           disabled={sendingAll}
-                          style={{ width: col.key === "clientName" ? 140 : col.key === "phone" ? 130 : 95 }}
-                        />
+                        >
+                          Remove
+                        </button>
                       </td>
-                    ))}
-                    <td className="panel-sub">{rowStatusLabel(rowStatus[row.id])}</td>
-                    <td>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => removeRow(rowIndex)}
-                        disabled={sendingAll}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
