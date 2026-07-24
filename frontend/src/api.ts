@@ -178,12 +178,20 @@ export function logout(): Promise<void> {
   return request("/api/auth/logout", { method: "POST" });
 }
 
+export interface ClientWhatsappGroup {
+  id: string;
+  groupId: string;
+  groupName: string | null;
+}
+
 export interface Client {
   id: string;
   name: string;
   phone: string | null;
-  whatsappGroupId: string | null;
-  whatsappGroupName: string | null;
+  // A client can be in more than one WhatsApp group (e.g. separate regional
+  // or purpose-specific groups) — Send Report lets staff pick which one a
+  // given message actually goes to when there's more than one.
+  whatsappGroups: ClientWhatsappGroup[];
   notes: string | null;
   active: boolean;
 }
@@ -231,13 +239,27 @@ export function sendClientUpdate(
 
 export function updateClient(
   id: string,
-  changes: Partial<Pick<Client, "name" | "phone" | "whatsappGroupId" | "whatsappGroupName" | "notes" | "active">>
+  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
 ): Promise<Client> {
   return request(`/api/clients/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
+}
+
+// Adds one more WhatsApp group to a client — a client can have several.
+// Throws (409) if this chat_id is already linked to some client.
+export function addClientWhatsappGroup(
+  clientId: string,
+  groupId: string,
+  groupName?: string
+): Promise<ClientWhatsappGroup> {
+  return postJson(`/api/clients/${clientId}/groups`, { groupId, groupName });
+}
+
+export function removeClientWhatsappGroup(clientId: string, groupRowId: string): Promise<void> {
+  return request(`/api/clients/${clientId}/groups/${groupRowId}`, { method: "DELETE" });
 }
 
 // Permanent — unlike updateClient(id, { active: false }), which is reversible.

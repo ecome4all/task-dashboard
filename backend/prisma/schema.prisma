@@ -60,20 +60,33 @@ model Employee {
 // just whatever name comes in on the WhatsApp source and isn't linked here).
 // Lets report-sends pick a saved phone number instead of retyping it.
 model Client {
+  id             String                @id @default(cuid())
+  tenantId       String                @default("default")
+  name           String
+  phone          String?
+  notes          String?
+  active         Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  whatsappGroups ClientWhatsappGroup[]
+}
+
+// One of possibly several WhatsApp groups a client's tasks come from (whapi
+// chat_id, e.g. "919001524054-1380436383@g.us"), and its display name at the
+// time it was linked. Manually assigned by staff from the groups seen on
+// incoming tasks — never auto-matched. A client with any groups linked sends
+// client updates to one of them (picked at send time) instead of `phone`;
+// @@unique on groupId keeps one group from being linked to two clients at once.
+model ClientWhatsappGroup {
   id        String   @id @default(cuid())
   tenantId  String   @default("default")
-  name      String
-  phone     String?
-  // The WhatsApp group this client's tasks actually come from (whapi chat_id,
-  // e.g. "919001524054-1380436383@g.us"), and its display name at the time it
-  // was linked. Manually assigned by staff from the groups seen on incoming
-  // tasks — never auto-matched. When set, this is the send target for
-  // client updates / report links instead of `phone`.
-  whatsappGroupId   String?
-  whatsappGroupName String?
-  notes     String?
-  active    Boolean  @default(true)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  groupId   String
+  groupName String?
   createdAt DateTime @default(now())
+
+  @@unique([tenantId, groupId])
+  @@index([clientId])
 }
 
 // A task: message from a chat_id that isn't tied to any active Client yet —

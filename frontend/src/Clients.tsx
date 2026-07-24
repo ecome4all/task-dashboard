@@ -11,6 +11,8 @@ import {
   createClient,
   updateClient,
   deleteClient,
+  addClientWhatsappGroup,
+  removeClientWhatsappGroup,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
@@ -34,6 +36,8 @@ export default function Clients() {
   const [newPhone, setNewPhone] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
   const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
+  const [newGroupId, setNewGroupId] = useState<Record<string, string>>({});
+  const [newGroupName, setNewGroupName] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -115,11 +119,31 @@ export default function Clients() {
     }
   }
 
-  async function handleUnlinkGroup(client: Client) {
+  async function handleUnlinkGroup(client: Client, groupRowId: string) {
     setActionError("");
     try {
-      const updated = await updateClient(client.id, { whatsappGroupId: null, whatsappGroupName: null });
-      setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+      await removeClientWhatsappGroup(client.id, groupRowId);
+      setClients((prev) =>
+        prev.map((c) =>
+          c.id === client.id ? { ...c, whatsappGroups: c.whatsappGroups.filter((g) => g.id !== groupRowId) } : c
+        )
+      );
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleAddGroup(client: Client) {
+    const groupId = (newGroupId[client.id] ?? "").trim();
+    if (!groupId) return;
+    setActionError("");
+    try {
+      const group = await addClientWhatsappGroup(client.id, groupId, newGroupName[client.id]?.trim());
+      setClients((prev) =>
+        prev.map((c) => (c.id === client.id ? { ...c, whatsappGroups: [...c.whatsappGroups, group] } : c))
+      );
+      setNewGroupId((prev) => ({ ...prev, [client.id]: "" }));
+      setNewGroupName((prev) => ({ ...prev, [client.id]: "" }));
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -130,11 +154,10 @@ export default function Clients() {
     if (!clientId) return;
     setActionError("");
     try {
-      const updated = await updateClient(clientId, {
-        whatsappGroupId: sender.chatId,
-        whatsappGroupName: sender.chatName ?? sender.chatId,
-      });
-      setClients((prev) => prev.map((c) => (c.id === clientId ? updated : c)));
+      const group = await addClientWhatsappGroup(clientId, sender.chatId, sender.chatName ?? undefined);
+      setClients((prev) =>
+        prev.map((c) => (c.id === clientId ? { ...c, whatsappGroups: [...c.whatsappGroups, group] } : c))
+      );
       setUnrecognizedSenders((prev) => prev.filter((s) => s.chatId !== sender.chatId));
     } catch (err) {
       setActionError(errorMessage(err));
@@ -300,7 +323,7 @@ export default function Clients() {
               <tr>
                 <th>Name</th>
                 <th>Phone</th>
-                <th>WhatsApp Group</th>
+                <th>WhatsApp Groups</th>
                 <th>Active</th>
                 <th>Actions</th>
               </tr>
@@ -320,19 +343,41 @@ export default function Clients() {
                     />
                   </td>
                   <td>
-                    {client.whatsappGroupId ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {client.whatsappGroups.length === 0 && (
+                      <span className="panel-sub">Not linked</span>
+                    )}
+                    {client.whatsappGroups.map((group) => (
+                      <div key={group.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                         <div>
-                          <div>{client.whatsappGroupName ?? "—"}</div>
-                          <div className="panel-sub">{client.whatsappGroupId}</div>
+                          <div>{group.groupName ?? "—"}</div>
+                          <div className="panel-sub">{group.groupId}</div>
                         </div>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(client)}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(client, group.id)}>
                           Unlink
                         </button>
                       </div>
-                    ) : (
-                      <span className="panel-sub">Not linked</span>
-                    )}
+                    ))}
+                    <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Group id"
+                        value={newGroupId[client.id] ?? ""}
+                        onChange={(e) => setNewGroupId((prev) => ({ ...prev, [client.id]: e.target.value }))}
+                        style={{ width: 110, fontSize: 12 }}
+                      />
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Group name"
+                        value={newGroupName[client.id] ?? ""}
+                        onChange={(e) => setNewGroupName((prev) => ({ ...prev, [client.id]: e.target.value }))}
+                        style={{ width: 110, fontSize: 12 }}
+                      />
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleAddGroup(client)}>
+                        + Add
+                      </button>
+                    </div>
                   </td>
                   <td>
                     <button

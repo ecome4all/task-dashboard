@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { clientRepository } from "../repositories/clientRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { requireRole } from "../auth/requireRole";
@@ -79,7 +80,7 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { name, phone, whatsappGroupId, whatsappGroupName, notes, active } = req.body;
+    const { name, phone, notes, active } = req.body;
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       res.status(400).json({ error: "name must be a non-empty string" });
       return;
@@ -91,8 +92,6 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     const client = await clientRepository.update(req.params.id, {
       ...(name !== undefined && { name: name.trim() }),
       ...(phone !== undefined && { phone }),
-      ...(whatsappGroupId !== undefined && { whatsappGroupId }),
-      ...(whatsappGroupName !== undefined && { whatsappGroupName }),
       ...(notes !== undefined && { notes }),
       ...(active !== undefined && { active }),
     });
@@ -104,6 +103,39 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   // mistaken or duplicate entry, not routine offboarding.
   router.delete("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
     await clientRepository.delete(req.params.id);
+    res.status(204).send();
+  });
+
+  // Links one more WhatsApp group to a client — a client can be in several
+  // (e.g. separate regional or purpose-specific groups), so this adds
+  // rather than replaces. Used both by the Clients screen's own "Add group"
+  // form and by "Link" on the Unrecognized Senders screen.
+  router.post("/:id/groups", requireRole(...MANAGE_ROLES), async (req, res) => {
+    const { groupId, groupName } = req.body;
+    if (typeof groupId !== "string" || !groupId.trim()) {
+      res.status(400).json({ error: "groupId is required" });
+      return;
+    }
+    try {
+      const group = await clientRepository.addGroup(
+        req.params.id,
+        groupId.trim(),
+        typeof groupName === "string" && groupName.trim() ? groupName.trim() : null
+      );
+      res.status(201).json(group);
+    } catch (err) {
+      // P2002: unique constraint on (tenantId, groupId) — this chat_id is
+      // already linked to some client (maybe this one, maybe another).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        res.status(409).json({ error: "This WhatsApp group is already linked to a client." });
+        return;
+      }
+      throw err;
+    }
+  });
+
+  router.delete("/:id/groups/:groupRowId", requireRole(...MANAGE_ROLES), async (req, res) => {
+    await clientRepository.removeGroup(req.params.groupRowId);
     res.status(204).send();
   });
 
