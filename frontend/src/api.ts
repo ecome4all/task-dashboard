@@ -33,10 +33,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     // A 401 from the login route itself just means "wrong password" — there's
     // no session yet to treat as expired (login() handles that case itself).
-    // A 401 from anywhere else only happens once requireAuth, which already
-    // let the user load this screen, starts rejecting the same cookie — i.e.
-    // the session expired or was invalidated since.
-    if (res.status === 401 && path !== "/api/auth/login") {
+    // A 401 from /auth/me is the normal, unremarkable result of checking
+    // "is anyone logged in?" on a fresh visit that was never logged in in
+    // the first place — App.tsx's initial mount already handles that by
+    // just showing the login screen, with no "your session expired" framing
+    // (fetchCurrentUser() below swallows this 401 itself). A 401 from
+    // anywhere else only happens once requireAuth, having already let the
+    // user load this screen, starts rejecting the same cookie — i.e. an
+    // actual previously-valid session expired or was invalidated since.
+    if (res.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/me") {
       onUnauthorized?.();
     }
     throw new ApiError(`Something went wrong (${res.status}). Try again.`, res.status);
