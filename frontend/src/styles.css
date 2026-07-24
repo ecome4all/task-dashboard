@@ -65,11 +65,51 @@ button, input, select { font: inherit; color: inherit; }
 .credit-logo .work { color: #9a9a9a; font-weight: 400; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 18px 28px; border-bottom: 1px solid var(--border); }
-.topbar .who { font-size: 16px; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--border); }
+.topbar .who { font-size: 16px; margin-right: auto; }
 .topbar .who .name { font-weight: 600; color: var(--text-h); }
 .topbar .who .role { color: var(--text); opacity: 0.6; margin-left: 8px; font-size: 14px; }
 .view { padding: 24px 28px 48px; max-width: 1600px; }
+
+/* Only shown below the mobile breakpoint (see media query) — opens the
+   sidebar as a slide-in overlay instead of it always taking up a column. */
+.nav-toggle {
+  display: none; border: 1px solid var(--border); background: var(--bg);
+  border-radius: 8px; width: 38px; height: 38px; font-size: 18px; cursor: pointer;
+  align-items: center; justify-content: center; flex-shrink: 0;
+}
+.sidebar-backdrop { display: none; }
+
+/* ---- mobile layout ---- */
+/* The sidebar is a fixed-position column on desktop; below this width it
+   becomes a slide-in overlay (off-screen by default, toggled via the
+   hamburger button in the topbar) so the page content gets the full
+   screen width instead of losing a chunk of it to an always-visible nav
+   column that doesn't fit alongside a phone-width table anyway. */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 200; width: 240px;
+    transform: translateX(-100%); transition: transform 0.18s ease; box-shadow: var(--shadow);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 150;
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .nav-toggle { display: inline-flex; }
+  .topbar { padding: 14px 16px; }
+  .topbar .who { font-size: 14px; }
+  .topbar .who .role { display: none; } /* name alone is enough at this width */
+  .view { padding: 16px 16px 32px; }
+  .panel-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+
+  /* Forms (Add client, Add employee, etc.) stack instead of needing a
+     horizontal scroll to reach the later fields — unlike a data table,
+     scrolling sideways to find a text input is just awkward, not a
+     reasonable trade-off. */
+  .add-employee { flex-direction: column; }
+  .add-employee input, .add-employee button, .add-employee select { width: 100%; }
+}
 
 /* ---- buttons ---- */
 .btn { border: none; border-radius: 8px; padding: 10px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
@@ -99,7 +139,12 @@ button, input, select { font: inherit; color: inherit; }
 .panel-head { padding: 16px 18px 4px; display: flex; align-items: baseline; justify-content: space-between; }
 .panel-title { font-weight: 600; font-size: 14.5px; color: var(--text-h); }
 .panel-sub { font-size: 12px; color: var(--text); opacity: 0.6; }
-.panel-body { padding: 12px 18px 18px; }
+/* overflow-x: auto is a no-op on desktop (nothing's wider than the panel
+   there — table-layout: auto plus wrapping keeps it that way) but is what
+   lets a wide table scroll horizontally within its own panel on a narrow
+   phone screen, instead of forcing the whole page wider or crushing every
+   column unreadably thin. */
+.panel-body { padding: 12px 18px 18px; overflow-x: auto; }
 
 .field-input, select.field-select {
   border: 1px solid var(--border); background: var(--bg); border-radius: 8px;

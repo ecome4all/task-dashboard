@@ -51,7 +51,12 @@ export default function SearchableSelect({
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
       triggerRectRef.current = rect;
-      setPanelPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 200) });
+      const width = Math.max(rect.width, 200);
+      // Clamped to stay within the viewport horizontally — on a narrow
+      // phone screen, a trigger near the right edge would otherwise open
+      // the panel partly off-screen.
+      const left = Math.min(Math.max(rect.left, 8), window.innerWidth - width - 8);
+      setPanelPos({ top: rect.bottom + 4, left, width });
     }
     setOpen(true);
   }

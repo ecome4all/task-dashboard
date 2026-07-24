@@ -22,6 +22,7 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [view, setView] = useState<View>("tasks");
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser().then((currentUser) => {
@@ -64,23 +65,32 @@ export default function App() {
     setUser(null);
   }
 
+  // Closes the slide-in nav after picking a view — on desktop the sidebar
+  // is always visible so this is a no-op there (mobileNavOpen never got
+  // set to true in the first place).
+  function selectView(newView: View) {
+    setView(newView);
+    setMobileNavOpen(false);
+  }
+
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {mobileNavOpen && <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={`sidebar ${mobileNavOpen ? "open" : ""}`}>
         <div className="brand">
           <BrandLogo height={26} />
         </div>
         <nav className="nav">
           <button
             className={`nav-item ${view === "tasks" ? "active" : ""}`}
-            onClick={() => setView("tasks")}
+            onClick={() => selectView("tasks")}
           >
             Tasks
           </button>
           {canSeeEmployees && (
             <button
               className={`nav-item ${view === "employees" ? "active" : ""}`}
-              onClick={() => setView("employees")}
+              onClick={() => selectView("employees")}
             >
               Employees
             </button>
@@ -88,7 +98,7 @@ export default function App() {
           {canSeeClients && (
             <button
               className={`nav-item ${view === "clients" ? "active" : ""}`}
-              onClick={() => setView("clients")}
+              onClick={() => selectView("clients")}
             >
               Clients
             </button>
@@ -96,7 +106,7 @@ export default function App() {
           {canSeeClients && (
             <button
               className={`nav-item ${view === "client-update" ? "active" : ""}`}
-              onClick={() => setView("client-update")}
+              onClick={() => selectView("client-update")}
             >
               Send Report
             </button>
@@ -104,7 +114,7 @@ export default function App() {
           {canSeeEmployees && (
             <button
               className={`nav-item ${view === "settings" ? "active" : ""}`}
-              onClick={() => setView("settings")}
+              onClick={() => selectView("settings")}
             >
               Settings
             </button>
@@ -117,6 +127,13 @@ export default function App() {
 
       <div className="main">
         <header className="topbar">
+          <button
+            className="nav-toggle"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open menu"
+          >
+            ☰
+          </button>
           <div className="who">
             <span className="name">{user.name}</span>
             <span className="role">{ROLE_LABEL[user.role]}</span>
