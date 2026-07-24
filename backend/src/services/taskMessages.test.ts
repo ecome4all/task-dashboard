@@ -48,20 +48,20 @@ describe("composeSendUpdateMessage", () => {
     expect(message).toBe('"hello just testing" — due date set to 25 Jul 2026.');
   });
 
-  it("phrases an assignee change as 'assigned to'", () => {
+  it("phrases an assignee change as 'is now assigned to'", () => {
     const message = composeSendUpdateMessage({ ...base, fields: ["assignee"] });
-    expect(message).toBe('"hello just testing" — assigned to Test Member.');
+    expect(message).toBe('"hello just testing" — is now assigned to Test Member.');
   });
 
   it("joins two fields with 'and'", () => {
     const message = composeSendUpdateMessage({ ...base, fields: ["marketplace", "assignee"] });
-    expect(message).toBe('"hello just testing" — marketplace set to Meesho and assigned to Test Member.');
+    expect(message).toBe('"hello just testing" — marketplace set to Meesho and is now assigned to Test Member.');
   });
 
   it("joins three or more fields with commas and 'and' before the last", () => {
     const message = composeSendUpdateMessage({ ...base, fields: ["marketplace", "assignee", "dueDate"] });
     expect(message).toBe(
-      '"hello just testing" — marketplace set to Meesho, assigned to Test Member and due date set to 25 Jul 2026.'
+      '"hello just testing" — marketplace set to Meesho, is now assigned to Test Member and due date set to 25 Jul 2026.'
     );
   });
 
@@ -83,7 +83,7 @@ describe("composeSendUpdateMessage", () => {
       fields: ["marketplace", "assignee", "dueDate"],
     });
     expect(message).toBe(
-      '"hello just testing" — marketplace set to not set, assigned to no one yet and due date set to Not set.'
+      '"hello just testing" — marketplace set to not set, is now assigned to no one yet and due date set to Not set.'
     );
   });
 });

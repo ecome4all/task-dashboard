@@ -99,7 +99,7 @@ export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): 
     } else if (field === "marketplace") {
       clauses.push(`marketplace set to ${(input.marketplace && input.marketplaceLabels[input.marketplace]) || "not set"}`);
     } else if (field === "assignee") {
-      clauses.push(`assigned to ${input.assignee || "no one yet"}`);
+      clauses.push(`is now assigned to ${input.assignee || "no one yet"}`);
     } else {
       clauses.push(`due date set to ${formatDate(input.dueDate)}`); // dueDate
     }
