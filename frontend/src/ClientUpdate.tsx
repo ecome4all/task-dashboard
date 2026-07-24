@@ -117,6 +117,30 @@ export default function ClientUpdate() {
     setIncluded((prev) => (key in prev ? prev : { ...prev, [key]: true }));
   }
 
+  // The source is a horizontal spreadsheet (column headers along the top,
+  // one data row underneath) — copying that row onto the clipboard comes
+  // tab-separated. Pasting it into one field fills it and every field after
+  // it in order, so the row doesn't need to be transposed into a column by
+  // hand first. A column copied instead (newline-separated) works the same
+  // way. Strips anything that isn't a digit/decimal point/minus sign per
+  // value, since a spreadsheet cell is often formatted with a currency
+  // symbol or a thousands comma that a plain number input can't parse.
+  // Blank cells are skipped rather than removed, so a gap in the middle of
+  // the row (e.g. no value for Out of Stock) doesn't shift every value
+  // after it into the wrong field.
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>, startIndex: number) {
+    e.preventDefault();
+    const values = e.clipboardData
+      .getData("text")
+      .split(/\r\n|\r|\n|\t/)
+      .map((v) => v.replace(/[^0-9.-]/g, "").trim());
+    values.forEach((v, i) => {
+      if (v === "") return;
+      const field = RAW_FIELDS[startIndex + i];
+      if (field) setValue(field.key, v);
+    });
+  }
+
   const rawValues = useMemo(() => {
     const out: Record<string, number | undefined> = {};
     for (const field of RAW_FIELDS) out[field.key] = parsed(values[field.key] ?? "");
@@ -230,6 +254,7 @@ export default function ClientUpdate() {
           <span className="panel-title">Send client update</span>
           <span className="panel-sub">Pick the fields to share, then send over WhatsApp</span>
         </div>
+        <p className="tip">💡 Copy a row of numbers straight from your spreadsheet and paste it into the first field below — it fills the rest in order, no need to rearrange anything first.</p>
         <div className="panel-body" style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 340px", minWidth: 300 }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -287,7 +312,7 @@ export default function ClientUpdate() {
                 </tr>
               </thead>
               <tbody>
-                {RAW_FIELDS.map((field) => (
+                {RAW_FIELDS.map((field, index) => (
                   <tr key={field.key}>
                     <td>
                       <input
@@ -303,6 +328,7 @@ export default function ClientUpdate() {
                         type="number"
                         value={values[field.key] ?? ""}
                         onChange={(e) => setValue(field.key, e.target.value)}
+                        onPaste={(e) => handlePaste(e, index)}
                         style={{ width: 110 }}
                       />
                     </td>
