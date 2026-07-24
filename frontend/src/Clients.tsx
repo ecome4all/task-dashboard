@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Client,
   UnrecognizedSender,
+  Task,
   ApiError,
   fetchAllClients,
   fetchUnrecognizedSenders,
+  fetchTasks,
   createClient,
   updateClient,
   deleteClient,
@@ -16,9 +18,17 @@ function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
 
+interface ClientSummaryRow {
+  name: string;
+  total: number;
+  pending: number;
+  done: number;
+}
+
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([]);
   const [unrecognizedSenders, setUnrecognizedSenders] = useState<UnrecognizedSender[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
@@ -31,9 +41,14 @@ export default function Clients() {
     setLoading(true);
     setLoadError("");
     try {
-      const [clientList, senders] = await Promise.all([fetchAllClients(), fetchUnrecognizedSenders()]);
+      const [clientList, senders, taskList] = await Promise.all([
+        fetchAllClients(),
+        fetchUnrecognizedSenders(),
+        fetchTasks(),
+      ]);
       setClients(clientList);
       setUnrecognizedSenders(senders);
+      setTasks(taskList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -129,9 +144,48 @@ export default function Clients() {
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
+  const clientSummary: ClientSummaryRow[] = Object.values(
+    tasks.reduce<Record<string, ClientSummaryRow>>((acc, t) => {
+      const name = t.clientName ?? "No Client";
+      const row = (acc[name] ??= { name, total: 0, pending: 0, done: 0 });
+      row.total += 1;
+      if (t.status === "done") row.done += 1;
+      else row.pending += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.total - a.total);
+
   return (
     <>
       {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError("")} />}
+
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Client Summary</span>
+        </div>
+        <div className="panel-body">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Total</th>
+                <th>Pending</th>
+                <th>Done</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clientSummary.map((row) => (
+                <tr key={row.name}>
+                  <td>{row.name}</td>
+                  <td>{row.total}</td>
+                  <td>{row.pending}</td>
+                  <td>{row.done}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="panel">
         <div className="panel-head">

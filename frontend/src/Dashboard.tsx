@@ -42,13 +42,6 @@ function toDateInputValue(dueDate: string | null): string {
   return dueDate ? dueDate.slice(0, 10) : "";
 }
 
-interface ClientSummaryRow {
-  name: string;
-  total: number;
-  pending: number;
-  done: number;
-}
-
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -189,48 +182,9 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const pageStart = (currentPage - 1) * PAGE_SIZE;
   const pagedTasks = filteredTasks.slice(pageStart, pageStart + PAGE_SIZE);
 
-  const clientSummary: ClientSummaryRow[] = Object.values(
-    tasks.reduce<Record<string, ClientSummaryRow>>((acc, t) => {
-      const name = t.clientName ?? "No Client";
-      const row = (acc[name] ??= { name, total: 0, pending: 0, done: 0 });
-      row.total += 1;
-      if (t.status === "done") row.done += 1;
-      else row.pending += 1;
-      return acc;
-    }, {})
-  ).sort((a, b) => b.total - a.total);
-
   return (
     <>
       {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError("")} />}
-
-      <div className="panel">
-        <div className="panel-head">
-          <span className="panel-title">Client Summary</span>
-        </div>
-        <div className="panel-body">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Total</th>
-                <th>Pending</th>
-                <th>Done</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clientSummary.map((row) => (
-                <tr key={row.name}>
-                  <td>{row.name}</td>
-                  <td>{row.total}</td>
-                  <td>{row.pending}</td>
-                  <td>{row.done}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       <div className="panel">
         <div className="panel-head">
