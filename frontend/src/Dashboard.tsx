@@ -6,15 +6,18 @@ import {
   Employee,
   ConfigOption,
   CurrentUser,
+  SendableTaskField,
   ApiError,
   fetchTasks,
   updateTask,
   fetchEmployees,
   fetchConfigOptions,
+  sendTaskUpdate,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
+import SendUpdatePopover, { SendableField } from "./SendUpdatePopover";
 
 // Only used for the handful of statuses this frontend knows to color —
 // anything an admin adds beyond these falls back to "neutral", since
@@ -88,6 +91,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   }, []);
 
   const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
+  const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
 
   // "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending
   // on the task's own marketplace column — same rule the backend uses when
@@ -148,6 +152,31 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   function handleDueDateChange(task: Task, value: string) {
     const isoDate = value ? new Date(value).toISOString() : null;
     return applyTaskChange(task, { dueDate: isoDate }, { dueDate: isoDate });
+  }
+
+  // What the "Send" popover offers for a given task, with each field's
+  // current value shown inline so staff pick from what's actually there,
+  // not an abstract field name.
+  function sendableFieldsFor(task: Task): SendableField[] {
+    return [
+      { key: "status", label: "Status", value: statusLabel(task.status, task.marketplace) },
+      { key: "marketplace", label: "Marketplace", value: (task.marketplace && marketplaceLabels[task.marketplace]) || "Not set" },
+      { key: "taskType", label: "Type", value: (task.taskType && taskTypeLabels[task.taskType]) || "Not set" },
+      { key: "assignee", label: "Employee", value: task.assignee || "Unassigned" },
+      { key: "dueDate", label: "Due Date", value: task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "Not set" },
+      { key: "createdAt", label: "Created", value: new Date(task.createdAt).toLocaleDateString() },
+    ];
+  }
+
+  async function handleSendUpdate(task: Task, fields: SendableTaskField[]): Promise<boolean> {
+    setActionError("");
+    try {
+      await sendTaskUpdate(task.id, fields);
+      return true;
+    } catch (err) {
+      setActionError(errorMessage(err));
+      return false;
+    }
   }
 
   if (loading) return <Spinner label="Loading tasks…" />;
@@ -241,6 +270,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Due Date</th>
                 <th>Updated</th>
                 <th>Completed</th>
+                <th>Send</th>
               </tr>
             </thead>
             <tbody>
@@ -301,6 +331,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   </td>
                   <td>{new Date(task.updatedAt).toLocaleString()}</td>
                   <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
+                  <td>
+                    <SendUpdatePopover
+                      fields={sendableFieldsFor(task)}
+                      onSend={(fields) => handleSendUpdate(task, fields)}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -6,6 +6,24 @@ import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAd
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
+// Fields a manual "Send Update" can include — separate from the automatic
+// status-change notification below, for anything else worth telling a
+// client about (a marketplace decision, who's on it, a due date, etc.),
+// alone or mixed together in one message.
+const SENDABLE_FIELDS = ["status", "marketplace", "taskType", "assignee", "dueDate", "createdAt"];
+const SENDABLE_FIELD_LABEL: Record<string, string> = {
+  status: "Status",
+  marketplace: "Marketplace",
+  taskType: "Type",
+  assignee: "Employee",
+  dueDate: "Due Date",
+  createdAt: "Created",
+};
+
+function formatDate(date: Date | null): string {
+  return date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Not set";
+}
+
 // "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending on
 // the task's own marketplace column — falls back to a generic word when the
 // marketplace hasn't been triaged yet, or its label can't be found (e.g. it
@@ -116,6 +134,63 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     }
 
     res.json(task);
+  });
+
+  // Manual send: unlike the automatic status-change notification above,
+  // this is for telling a client about anything else on a task — one field
+  // or several at once — whenever staff decides it's worth a message, not
+  // tied to any particular edit.
+  router.post("/:id/send-update", async (req, res) => {
+    const { fields } = req.body;
+    if (!Array.isArray(fields) || fields.length === 0 || !fields.every((f) => SENDABLE_FIELDS.includes(f))) {
+      res.status(400).json({ error: `fields must be a non-empty array of: ${SENDABLE_FIELDS.join(", ")}` });
+      return;
+    }
+
+    const task = await taskRepository.findById(req.params.id);
+    if (!task) {
+      res.status(404).json({ error: "task not found" });
+      return;
+    }
+
+    const needStatusOptions = fields.includes("status");
+    const needTaskTypeOptions = fields.includes("taskType");
+    // The "Waiting for <marketplace>" status label depends on the
+    // marketplace list too, even if marketplace itself isn't being sent.
+    const needMarketplaceOptions = fields.includes("marketplace") || needStatusOptions;
+
+    const [statusOptions, taskTypeOptions, marketplaceOptions] = await Promise.all([
+      needStatusOptions ? configOptionRepository.list("status") : Promise.resolve([]),
+      needTaskTypeOptions ? configOptionRepository.list("task_type") : Promise.resolve([]),
+      needMarketplaceOptions ? configOptionRepository.list("marketplace") : Promise.resolve([]),
+    ]);
+    const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
+    const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
+    const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
+
+    const lines = [`Task: ${task.description}`];
+    for (const field of fields as string[]) {
+      let value: string;
+      if (field === "status") value = statusLabel(task.status, task.marketplace, statusLabels, marketplaceLabels);
+      else if (field === "marketplace") value = (task.marketplace && marketplaceLabels[task.marketplace]) || "Not set";
+      else if (field === "taskType") value = (task.taskType && taskTypeLabels[task.taskType]) || "Not set";
+      else if (field === "assignee") value = task.assignee || "Unassigned";
+      else if (field === "dueDate") value = formatDate(task.dueDate);
+      else value = formatDate(task.createdAt); // createdAt
+
+      lines.push(`${SENDABLE_FIELD_LABEL[field]}: ${value}`);
+    }
+
+    try {
+      const whatsapp = resolveAdapterForSource(task.source, channels);
+      await whatsapp.sendMessage(task.sourceRef, lines.join("\n"));
+    } catch (err) {
+      console.error("Failed to send manual task update:", err);
+      res.status(502).json({ error: "Couldn't send the message. Try again." });
+      return;
+    }
+
+    res.json({ sent: true });
   });
 
   return router;

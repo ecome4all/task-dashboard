@@ -95,6 +95,15 @@ export function updateTask(
   });
 }
 
+export type SendableTaskField = "status" | "marketplace" | "taskType" | "assignee" | "dueDate" | "createdAt";
+
+// Manual WhatsApp send for anything other than the automatic status-change
+// notification -- one field or a mix of several, whenever it's worth telling
+// a client about something on a task.
+export function sendTaskUpdate(id: string, fields: SendableTaskField[]): Promise<{ sent: boolean }> {
+  return postJson(`/api/tasks/${id}/send-update`, { fields });
+}
+
 export interface Employee {
   id: string;
   name: string;
