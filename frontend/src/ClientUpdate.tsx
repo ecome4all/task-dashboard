@@ -46,12 +46,17 @@ interface ColumnDef {
 }
 
 // Matches the client's own report spreadsheet column-for-column (see
-// "report fields.txt"): mobile number and client name lead, then the
-// product identifier, then the metrics in the same order and positions
-// (including the calculated Acos/T.Acos/% columns) their sheet has them in.
+// "report fields.txt") from ASIN onward: product identifier, then the
+// metrics in the same order and positions (including the calculated
+// Acos/T.Acos/% columns) their sheet has them in. Phone/Client Name (typed
+// via lookup, not pasted) and Start/End Date (typed per row -- the sheet's
+// own paste block has no date columns) sit before ASIN specifically so
+// pasting a block starting at ASIN is never affected by them.
 const COLUMNS: ColumnDef[] = [
   { key: "phone", label: "Phone", kind: "text" },
   { key: "clientName", label: "Client Name", kind: "text" },
+  { key: "startDate", label: "Start Date", emoji: "📅", kind: "text" },
+  { key: "endDate", label: "End Date", emoji: "📅", kind: "text" },
   { key: "asin", label: "ASIN", kind: "text" },
   { key: "productName", label: "Name", kind: "text" },
   { key: "adSpend", label: "Spend", emoji: "💰", kind: "currency" },
@@ -69,7 +74,7 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 const COLUMN_WIDTH: Record<string, number> = {
-  phone: 125, clientName: 140, asin: 105, productName: 130,
+  phone: 125, clientName: 140, startDate: 100, endDate: 100, asin: 105, productName: 130,
   rating: 65, reviews: 75,
 };
 
@@ -149,7 +154,10 @@ interface SharedMessageInput {
 
 // One message per row (one product), built from that row's own numbers
 // plus whatever's shared across the whole batch (period, highlights,
-// attached link).
+// attached link). A row's own Start/End Date -- the reporting period for
+// that specific SKU, which can differ row to row -- takes priority over
+// the shared Period field, which only applies as a fallback when a row has
+// no dates of its own set.
 function composeMessage(row: ClientRow, shared: SharedMessageInput): string {
   const rawValues = rawValuesFor(row);
   const derived = deriveValues(rawValues);
@@ -157,9 +165,12 @@ function composeMessage(row: ClientRow, shared: SharedMessageInput): string {
   const name = row.data.clientName?.trim() || "there";
   const asin = row.data.asin?.trim();
   const productName = row.data.productName?.trim();
+  const startDate = row.data.startDate?.trim();
+  const endDate = row.data.endDate?.trim();
+  const period = startDate && endDate ? `${startDate} – ${endDate}` : startDate || endDate || shared.period.trim();
 
   const lines: string[] = [];
-  lines.push(`📊 *Performance Update${shared.period.trim() ? ` — ${shared.period.trim()}` : ""}*`);
+  lines.push(`📊 *Performance Update${period ? ` — ${period}` : ""}*`);
   lines.push(`Hi ${name}, here's your update:`);
   if (productName || asin) {
     lines.push(`🏷️ ${[productName, asin ? `ASIN: ${asin}` : null].filter(Boolean).join(" — ")}`);
@@ -436,17 +447,18 @@ export default function ClientUpdate() {
           <span className="panel-sub">One row per product, sent as a batch over WhatsApp</span>
         </div>
         <p className="tip">
-          💡 Type to search for the client under Phone or Client Name — the other one fills in for you. Then paste a
-          whole block straight from your report spreadsheet starting at ASIN — it fills every row and column in
-          order from there (adding rows as needed) and skips over Acos/T.Acos/Ads Sales %/Organic Sales %, since
-          those are calculated here automatically.
+          💡 Type to search for the client under Phone or Client Name — the other one fills in for you. Set Start
+          Date/End Date per row for that SKU's own reporting period. Then paste a whole block straight from your
+          report spreadsheet starting at ASIN — it fills every row and column in order from there (adding rows as
+          needed) and skips over Acos/T.Acos/Ads Sales %/Organic Sales %, since those are calculated here
+          automatically.
         </p>
         <div className="panel-body">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <input
               className="field-input"
               type="text"
-              placeholder="Period (e.g. Week of 1–7 July)"
+              placeholder="Fallback period, used only if a row has no Start/End Date (e.g. Week of 1–7 July)"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
               style={{ flex: "1 1 220px" }}
@@ -512,7 +524,13 @@ export default function ClientUpdate() {
                               className="field-input"
                               type={col.kind === "text" ? "text" : "number"}
                               list={col.key === "clientName" ? "known-client-names" : col.key === "phone" ? "known-client-phones" : undefined}
-                              placeholder={col.key === "clientName" || col.key === "phone" ? "Type to search" : undefined}
+                              placeholder={
+                                col.key === "clientName" || col.key === "phone"
+                                  ? "Type to search"
+                                  : col.key === "startDate" || col.key === "endDate"
+                                  ? "e.g. 1 Jul"
+                                  : undefined
+                              }
                               value={row.data[col.key] ?? ""}
                               onChange={(e) => setCell(rowIndex, col.key, e.target.value)}
                               onPaste={(e) => handleGridPaste(e, rowIndex, colIndex)}
