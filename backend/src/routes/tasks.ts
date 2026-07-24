@@ -3,6 +3,7 @@ import { taskRepository } from "../repositories/taskRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+import { statusLabel, composeSendUpdateMessage } from "../services/taskMessages";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
@@ -11,35 +12,6 @@ const DUE_DATE_ROLES = ["admin", "manager"];
 // client about (a marketplace decision, who's on it, a due date, etc.),
 // alone or mixed together in one message.
 const SENDABLE_FIELDS = ["status", "marketplace", "taskType", "assignee", "dueDate", "createdAt"];
-const SENDABLE_FIELD_LABEL: Record<string, string> = {
-  status: "Status",
-  marketplace: "Marketplace",
-  taskType: "Type",
-  assignee: "Employee",
-  dueDate: "Due Date",
-  createdAt: "Created",
-};
-
-function formatDate(date: Date | null): string {
-  return date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Not set";
-}
-
-// "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending on
-// the task's own marketplace column — falls back to a generic word when the
-// marketplace hasn't been triaged yet, or its label can't be found (e.g. it
-// was since deactivated). Status/marketplace labels come from ConfigOption,
-// not hardcoded, so admins can rename or add options without a code change.
-function statusLabel(
-  status: string,
-  marketplace: string | null,
-  statusLabels: Record<string, string>,
-  marketplaceLabels: Record<string, string>
-): string {
-  if (status === "waiting_for_marketplace") {
-    return `Waiting for ${(marketplace && marketplaceLabels[marketplace]) || "Marketplace"}`;
-  }
-  return statusLabels[status] ?? status;
-}
 
 export function createTasksRouter(channels: WhatsAppChannels) {
   const router = Router();
@@ -168,22 +140,23 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
     const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
 
-    const lines = [`Task: ${task.description}`];
-    for (const field of fields as string[]) {
-      let value: string;
-      if (field === "status") value = statusLabel(task.status, task.marketplace, statusLabels, marketplaceLabels);
-      else if (field === "marketplace") value = (task.marketplace && marketplaceLabels[task.marketplace]) || "Not set";
-      else if (field === "taskType") value = (task.taskType && taskTypeLabels[task.taskType]) || "Not set";
-      else if (field === "assignee") value = task.assignee || "Unassigned";
-      else if (field === "dueDate") value = formatDate(task.dueDate);
-      else value = formatDate(task.createdAt); // createdAt
-
-      lines.push(`${SENDABLE_FIELD_LABEL[field]}: ${value}`);
-    }
+    const message = composeSendUpdateMessage({
+      description: task.description,
+      fields: fields as string[],
+      status: task.status,
+      marketplace: task.marketplace,
+      taskType: task.taskType,
+      assignee: task.assignee,
+      dueDate: task.dueDate,
+      createdAt: task.createdAt,
+      statusLabels,
+      marketplaceLabels,
+      taskTypeLabels,
+    });
 
     try {
       const whatsapp = resolveAdapterForSource(task.source, channels);
-      await whatsapp.sendMessage(task.sourceRef, lines.join("\n"));
+      await whatsapp.sendMessage(task.sourceRef, message);
     } catch (err) {
       console.error("Failed to send manual task update:", err);
       res.status(502).json({ error: "Couldn't send the message. Try again." });
