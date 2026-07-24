@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import {
-  Client,
   ReportLink,
   ApiError,
-  fetchClients,
   sendClientUpdate,
   fetchReportLinks,
   createReportLink,
@@ -24,19 +22,22 @@ function percent(n: number): string {
   return (n * 100).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + "%";
 }
 
-function parsed(value: string): number | undefined {
+function parsed(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
   const n = Number(value);
   return value.trim() !== "" && !Number.isNaN(n) ? n : undefined;
 }
 
-interface RawFieldDef {
+type ColumnKind = "text" | "currency" | "number";
+
+interface ColumnDef {
   key: string;
   label: string;
-  emoji: string;
-  kind: "currency" | "number";
+  emoji?: string;
+  kind: ColumnKind;
 }
 
-const RAW_FIELDS: RawFieldDef[] = [
+const RAW_FIELDS: ColumnDef[] = [
   { key: "adSpend", label: "Ad Spend", emoji: "💰", kind: "currency" },
   { key: "adOrders", label: "Ad Orders", emoji: "🛒", kind: "number" },
   { key: "adSales", label: "Ad Sales", emoji: "📈", kind: "currency" },
@@ -47,20 +48,106 @@ const RAW_FIELDS: RawFieldDef[] = [
   { key: "inactiveListings", label: "Inactive Listings", emoji: "🚫", kind: "number" },
 ];
 
+// Client name and phone lead, exactly like the client's own spreadsheet has
+// them as its first two columns — everything else follows in the same
+// order as RAW_FIELDS, so a whole row copied from that sheet lines up
+// cell-for-cell with this table.
+const COLUMNS: ColumnDef[] = [
+  { key: "clientName", label: "Client Name", kind: "text" },
+  { key: "phone", label: "Phone", kind: "text" },
+  ...RAW_FIELDS,
+];
+
+interface ClientRow {
+  id: string;
+  data: Record<string, string>;
+}
+
+type RowStatus = "sending" | "sent" | "failed";
+
+function rowStatusLabel(status: RowStatus | undefined): string {
+  if (status === "sending") return "Sending…";
+  if (status === "sent") return "Sent ✓";
+  if (status === "failed") return "Failed ✗";
+  return "";
+}
+
+interface SharedMessageInput {
+  period: string;
+  highlights: string;
+  includeHighlights: boolean;
+  attachedLink?: ReportLink;
+}
+
+// One message per row, built from that row's own numbers plus whatever's
+// shared across the whole batch (period, highlights, attached link) — the
+// same template the single-client composer used to build, just parameterized
+// per row instead of off top-level state.
+function composeMessage(row: ClientRow, shared: SharedMessageInput): string {
+  const rawValues: Record<string, number | undefined> = {};
+  for (const field of RAW_FIELDS) rawValues[field.key] = parsed(row.data[field.key]);
+
+  const acos = rawValues.adSpend !== undefined && rawValues.adSales ? rawValues.adSpend / rawValues.adSales : undefined;
+  const tAcos =
+    rawValues.adSpend !== undefined && rawValues.totalSales ? rawValues.adSpend / rawValues.totalSales : undefined;
+  const adsSalesPct =
+    rawValues.adSales !== undefined && rawValues.totalSales ? rawValues.adSales / rawValues.totalSales : undefined;
+  const organicSalesPct = adsSalesPct !== undefined ? 1 - adsSalesPct : undefined;
+
+  const derivedFields: { label: string; emoji: string; value: number | undefined }[] = [
+    { label: "ACOS", emoji: "🎯", value: acos },
+    { label: "Total ACOS", emoji: "📊", value: tAcos },
+    { label: "Ads Sales %", emoji: "🟢", value: adsSalesPct },
+    { label: "Organic Sales %", emoji: "🌿", value: organicSalesPct },
+  ];
+
+  const name = row.data.clientName?.trim() || "there";
+  const lines: string[] = [];
+  lines.push(`📊 *Performance Update${shared.period.trim() ? ` — ${shared.period.trim()}` : ""}*`);
+  lines.push(`Hi ${name}, here's your update:`);
+  lines.push("");
+
+  for (const field of RAW_FIELDS) {
+    const value = rawValues[field.key];
+    if (value === undefined) continue;
+    const formatted = field.kind === "currency" ? currency(value) : value.toLocaleString("en-IN");
+    lines.push(`${field.emoji} ${field.label}: ${formatted}`);
+  }
+  for (const field of derivedFields) {
+    if (field.value === undefined) continue;
+    lines.push(`${field.emoji} ${field.label}: ${percent(field.value)}`);
+  }
+
+  if (shared.includeHighlights && shared.highlights.trim()) {
+    lines.push("");
+    lines.push(`✨ Highlights:`);
+    lines.push(shared.highlights.trim());
+  }
+
+  if (shared.attachedLink) {
+    lines.push("");
+    lines.push(`📎 ${shared.attachedLink.description}`);
+    lines.push(shared.attachedLink.url);
+  }
+
+  lines.push("");
+  lines.push("— Team Ecom4all");
+  return lines.join("\n");
+}
+
 export default function ClientUpdate() {
-  const [clients, setClients] = useState<Client[]>([]);
   const [links, setLinks] = useState<ReportLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [sendError, setSendError] = useState("");
-  const [sent, setSent] = useState(false);
-  const [sending, setSending] = useState(false);
 
-  const [clientId, setClientId] = useState("");
-  const [phone, setPhone] = useState("");
+  const nextRowId = useRef(1);
+  const [rows, setRows] = useState<ClientRow[]>([{ id: "row-0", data: {} }]);
+  const [rowStatus, setRowStatus] = useState<Record<string, RowStatus>>({});
+  const [sendingAll, setSendingAll] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
   const [period, setPeriod] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [included, setIncluded] = useState<Record<string, boolean>>({});
   const [highlights, setHighlights] = useState("");
   const [includeHighlights, setIncludeHighlights] = useState(true);
   const [attachedLinkId, setAttachedLinkId] = useState("");
@@ -74,9 +161,7 @@ export default function ClientUpdate() {
     setLoading(true);
     setLoadError("");
     try {
-      const [clientList, linkList] = await Promise.all([fetchClients(), fetchReportLinks()]);
-      setClients(clientList);
-      setLinks(linkList);
+      setLinks(await fetchReportLinks());
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -102,146 +187,116 @@ export default function ClientUpdate() {
     }
   }
 
-  function handleClientChange(id: string) {
-    setClientId(id);
-    const client = clients.find((c) => c.id === id);
-    // Prefer the client's linked WhatsApp group — that's the channel their
-    // tasks actually come in on — and only fall back to a 1:1 phone number
-    // if no group has been linked yet.
-    setPhone(client?.whatsappGroupId ?? client?.phone ?? "");
+  function setCell(rowIndex: number, key: string, value: string) {
+    setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, data: { ...r.data, [key]: value } } : r)));
   }
 
-  function setValue(key: string, value: string) {
-    setValues((prev) => ({ ...prev, [key]: value }));
-    // Default a field to included the first time it gets a value.
-    setIncluded((prev) => (key in prev ? prev : { ...prev, [key]: true }));
+  function addRow() {
+    setRows((prev) => [...prev, { id: `row-${nextRowId.current++}`, data: {} }]);
   }
 
-  // The source is a horizontal spreadsheet (column headers along the top,
-  // one data row underneath) — copying that row onto the clipboard comes
-  // tab-separated. Pasting it into one field fills it and every field after
-  // it in order, so the row doesn't need to be transposed into a column by
-  // hand first. A column copied instead (newline-separated) works the same
-  // way. Strips anything that isn't a digit/decimal point/minus sign per
-  // value, since a spreadsheet cell is often formatted with a currency
-  // symbol or a thousands comma that a plain number input can't parse.
-  // Blank cells are skipped rather than removed, so a gap in the middle of
-  // the row (e.g. no value for Out of Stock) doesn't shift every value
-  // after it into the wrong field.
-  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>, startIndex: number) {
+  function removeRow(rowIndex: number) {
+    setRows((prev) => prev.filter((_, i) => i !== rowIndex));
+  }
+
+  // A single cell pasted normally (typing, or one value) is left to the
+  // browser's default paste. Anything with a tab or a line break is a
+  // spreadsheet block — rows down the sheet, columns across it — and gets
+  // distributed starting at the cell it landed in, growing the grid with
+  // extra rows if the pasted block has more rows than currently exist.
+  // Client Name/Phone are kept as plain text; every numeric column strips
+  // anything that isn't a digit/decimal point/minus sign, since a
+  // spreadsheet cell is often formatted with a currency symbol or a
+  // thousands comma that a plain number input can't parse.
+  function handleGridPaste(e: React.ClipboardEvent<HTMLInputElement>, rowIndex: number, colIndex: number) {
+    const text = e.clipboardData.getData("text");
+    if (!/\t|\r\n|\r|\n/.test(text)) return;
     e.preventDefault();
-    const values = e.clipboardData
-      .getData("text")
-      .split(/\r\n|\r|\n|\t/)
-      .map((v) => v.replace(/[^0-9.-]/g, "").trim());
-    values.forEach((v, i) => {
-      if (v === "") return;
-      const field = RAW_FIELDS[startIndex + i];
-      if (field) setValue(field.key, v);
+
+    const pastedRows = text.split(/\r\n|\r|\n/).map((line) => line.split("\t"));
+
+    setRows((prev) => {
+      const next = [...prev];
+      pastedRows.forEach((cells, r) => {
+        const targetIndex = rowIndex + r;
+        while (next.length <= targetIndex) next.push({ id: `row-${nextRowId.current++}`, data: {} });
+        const data = { ...next[targetIndex].data };
+        cells.forEach((raw, c) => {
+          const column = COLUMNS[colIndex + c];
+          if (!column) return;
+          const value = column.kind === "text" ? raw.trim() : raw.replace(/[^0-9.-]/g, "").trim();
+          if (value !== "") data[column.key] = value;
+        });
+        next[targetIndex] = { ...next[targetIndex], data };
+      });
+      return next;
     });
   }
 
-  const rawValues = useMemo(() => {
-    const out: Record<string, number | undefined> = {};
-    for (const field of RAW_FIELDS) out[field.key] = parsed(values[field.key] ?? "");
-    return out;
-  }, [values]);
+  const attachedLink = links.find((l) => l.id === attachedLinkId);
 
-  const acos = rawValues.adSpend !== undefined && rawValues.adSales ? rawValues.adSpend / rawValues.adSales : undefined;
-  const tAcos =
-    rawValues.adSpend !== undefined && rawValues.totalSales ? rawValues.adSpend / rawValues.totalSales : undefined;
-  const adsSalesPct =
-    rawValues.adSales !== undefined && rawValues.totalSales ? rawValues.adSales / rawValues.totalSales : undefined;
-  const organicSalesPct = adsSalesPct !== undefined ? 1 - adsSalesPct : undefined;
+  const readyRows = useMemo(
+    () => rows.filter((r) => r.data.clientName?.trim() && r.data.phone?.trim()),
+    [rows]
+  );
 
-  const derivedFields: { key: string; label: string; emoji: string; value: number | undefined }[] = [
-    { key: "acos", label: "ACOS", emoji: "🎯", value: acos },
-    { key: "tAcos", label: "Total ACOS", emoji: "📊", value: tAcos },
-    { key: "adsSalesPct", label: "Ads Sales %", emoji: "🟢", value: adsSalesPct },
-    { key: "organicSalesPct", label: "Organic Sales %", emoji: "🌿", value: organicSalesPct },
-  ];
+  const previewMessage = readyRows.length
+    ? composeMessage(readyRows[0], { period, highlights, includeHighlights, attachedLink })
+    : "";
 
-  function toggleIncluded(key: string) {
-    setIncluded((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }));
-  }
-
-  const isIncluded = (key: string) => included[key] ?? true;
-
-  const message = useMemo(() => {
-    const client = clients.find((c) => c.id === clientId);
-    const lines: string[] = [];
-    lines.push(`📊 *Performance Update${period.trim() ? ` — ${period.trim()}` : ""}*`);
-    lines.push(`Hi ${client?.name ?? "there"}, here's your update:`);
-    lines.push("");
-
-    for (const field of RAW_FIELDS) {
-      const value = rawValues[field.key];
-      if (value === undefined || !isIncluded(field.key)) continue;
-      const formatted = field.kind === "currency" ? currency(value) : value.toLocaleString("en-IN");
-      lines.push(`${field.emoji} ${field.label}: ${formatted}`);
-    }
-    for (const field of derivedFields) {
-      if (field.value === undefined || !isIncluded(field.key)) continue;
-      lines.push(`${field.emoji} ${field.label}: ${percent(field.value)}`);
-    }
-
-    if (includeHighlights && highlights.trim()) {
-      lines.push("");
-      lines.push(`✨ Highlights:`);
-      lines.push(highlights.trim());
-    }
-
-    const attachedLink = links.find((l) => l.id === attachedLinkId);
-    if (attachedLink) {
-      lines.push("");
-      lines.push(`📎 ${attachedLink.description}`);
-      lines.push(attachedLink.url);
-    }
-
-    lines.push("");
-    lines.push("— Team Ecom4all");
-    return lines.join("\n");
-  }, [clients, clientId, period, rawValues, included, includeHighlights, highlights, links, attachedLinkId]);
-
-  async function handleSend() {
-    if (!clientId || !phone.trim()) {
-      setSendError("Pick a client with a phone number first.");
+  async function handleSendAll() {
+    if (readyRows.length === 0) {
+      setSendError("Add at least one row with a client name and phone number first.");
       return;
     }
     setSendError("");
-    setSent(false);
-    setSending(true);
-    try {
-      await sendClientUpdate(clientId, { phone: phone.trim(), channel: "whapi", message });
-      setSent(true);
-      // The link's own send already happened as part of the message above —
-      // this just records it for the "Last sent" column. A failure here
-      // shouldn't undo the "Sent" state above, since the update itself did go out.
-      if (attachedLinkId) {
-        try {
-          const updated = await markReportLinkSent(attachedLinkId);
-          setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
-        } catch (err) {
-          console.error("Failed to record report link as sent:", err);
-        }
+    setSendingAll(true);
+    setProgress({ done: 0, total: readyRows.length });
+    setRowStatus({});
+
+    for (let i = 0; i < readyRows.length; i++) {
+      const row = readyRows[i];
+      setRowStatus((prev) => ({ ...prev, [row.id]: "sending" }));
+      try {
+        const message = composeMessage(row, { period, highlights, includeHighlights, attachedLink });
+        await sendClientUpdate(row.id, { phone: row.data.phone.trim(), channel: "whapi", message });
+        setRowStatus((prev) => ({ ...prev, [row.id]: "sent" }));
+      } catch (err) {
+        setRowStatus((prev) => ({ ...prev, [row.id]: "failed" }));
+        setSendError(`Failed to send to ${row.data.clientName || row.data.phone}: ${errorMessage(err)}`);
       }
-    } catch (err) {
-      setSendError(errorMessage(err));
-    } finally {
-      setSending(false);
+      setProgress({ done: i + 1, total: readyRows.length });
+      // 5 seconds between sends, but no point waiting after the last one.
+      if (i < readyRows.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
     }
+
+    if (attachedLink) {
+      try {
+        const updated = await markReportLinkSent(attachedLink.id);
+        setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } catch (err) {
+        console.error("Failed to record report link as sent:", err);
+      }
+    }
+
+    setSendingAll(false);
+    setProgress(null);
   }
 
-  // wa.me needs digits only (country code, no +, spaces, or dashes).
-  const waLink = `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(message)}`;
+  // wa.me needs digits only (country code, no +, spaces, or dashes) — a
+  // manual fallback for just the previewed (first) client.
+  const firstPhone = readyRows[0]?.data.phone ?? "";
+  const waLink = `https://wa.me/${firstPhone.replace(/\D/g, "")}?text=${encodeURIComponent(previewMessage)}`;
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(message);
+    await navigator.clipboard.writeText(previewMessage);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (loading) return <Spinner label="Loading clients…" />;
+  if (loading) return <Spinner label="Loading…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
@@ -252,162 +307,150 @@ export default function ClientUpdate() {
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Send client update</span>
-          <span className="panel-sub">Pick the fields to share, then send over WhatsApp</span>
+          <span className="panel-sub">One row per client, sent as a batch over WhatsApp</span>
         </div>
-        <p className="tip">💡 Copy a row of numbers straight from your spreadsheet and paste it into the first field below — it fills the rest in order, no need to rearrange anything first.</p>
-        <div className="panel-body" style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 340px", minWidth: 300 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <select
-                className="field-select"
-                value={clientId}
-                onChange={(e) => handleClientChange(e.target.value)}
-                style={{ flex: 1 }}
-              >
-                <option value="">Select client…</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>{client.name}</option>
-                ))}
-              </select>
-            </div>
-            <input
-              className="field-input"
-              type="text"
-              placeholder="Client phone or WhatsApp group"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={{ width: "100%", marginBottom: 4 }}
-            />
-            {clients.find((c) => c.id === clientId)?.whatsappGroupId && (
-              <p className="panel-sub" style={{ marginTop: 0, marginBottom: 10 }}>
-                Sending to this client's linked WhatsApp group.
-              </p>
-            )}
+        <p className="tip">
+          💡 Paste your whole client table at once — copy from Client Name through to Inactive Listings in your
+          spreadsheet and drop it into the first cell below. It fills every row and column in order, adding rows as
+          needed.
+        </p>
+        <div className="panel-body">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <input
               className="field-input"
               type="text"
               placeholder="Period (e.g. Week of 1–7 July)"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
-              style={{ width: "100%", marginBottom: 10 }}
+              style={{ flex: "1 1 220px" }}
             />
             <select
               className="field-select"
               value={attachedLinkId}
               onChange={(e) => setAttachedLinkId(e.target.value)}
-              style={{ width: "100%", marginBottom: 16 }}
+              style={{ flex: "1 1 260px" }}
             >
               <option value="">Attach a saved report link (optional)…</option>
               {links.map((link) => (
                 <option key={link.id} value={link.id}>{link.description}</option>
               ))}
             </select>
+          </div>
 
+          <div style={{ overflowX: "auto" }}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ width: 28 }}></th>
-                  <th>Field</th>
-                  <th>Value</th>
+                  {COLUMNS.map((col) => (
+                    <th key={col.key}>{col.emoji ? `${col.emoji} ` : ""}{col.label}</th>
+                  ))}
+                  <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {RAW_FIELDS.map((field, index) => (
-                  <tr key={field.key}>
+                {rows.map((row, rowIndex) => (
+                  <tr key={row.id}>
+                    {COLUMNS.map((col, colIndex) => (
+                      <td key={col.key}>
+                        <input
+                          className="field-input"
+                          type={col.kind === "text" ? "text" : "number"}
+                          value={row.data[col.key] ?? ""}
+                          onChange={(e) => setCell(rowIndex, col.key, e.target.value)}
+                          onPaste={(e) => handleGridPaste(e, rowIndex, colIndex)}
+                          disabled={sendingAll}
+                          style={{ width: col.key === "clientName" ? 140 : col.key === "phone" ? 130 : 95 }}
+                        />
+                      </td>
+                    ))}
+                    <td className="panel-sub">{rowStatusLabel(rowStatus[row.id])}</td>
                     <td>
-                      <input
-                        type="checkbox"
-                        checked={isIncluded(field.key)}
-                        onChange={() => toggleIncluded(field.key)}
-                      />
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => removeRow(rowIndex)}
+                        disabled={sendingAll}
+                      >
+                        Remove
+                      </button>
                     </td>
-                    <td>{field.emoji} {field.label}</td>
-                    <td>
-                      <input
-                        className="field-input"
-                        type="number"
-                        value={values[field.key] ?? ""}
-                        onChange={(e) => setValue(field.key, e.target.value)}
-                        onPaste={(e) => handlePaste(e, index)}
-                        style={{ width: 110 }}
-                      />
-                    </td>
-                  </tr>
-                ))}
-                {derivedFields.map((field) => (
-                  <tr key={field.key}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={isIncluded(field.key)}
-                        disabled={field.value === undefined}
-                        onChange={() => toggleIncluded(field.key)}
-                      />
-                    </td>
-                    <td>{field.emoji} {field.label}</td>
-                    <td className="panel-sub">{field.value !== undefined ? percent(field.value) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
-            <div style={{ marginTop: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={includeHighlights}
-                  onChange={(e) => setIncludeHighlights(e.target.checked)}
-                />
-                ✨ Highlights
-              </label>
-              <textarea
-                className="field-input"
-                value={highlights}
-                onChange={(e) => setHighlights(e.target.value)}
-                placeholder="Optional note, e.g. Strong week for Mini Case - 1, ACOS trending down."
-                style={{ width: "100%", minHeight: 60, resize: "vertical" }}
-              />
-            </div>
           </div>
 
-          <div style={{ flex: "1 1 320px", minWidth: 280 }}>
-            <div className="panel-sub" style={{ marginBottom: 6 }}>Preview</div>
-            <pre
-              style={{
-                whiteSpace: "pre-wrap",
-                background: "var(--bg-alt)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: 14,
-                fontSize: 13,
-                fontFamily: "inherit",
-                minHeight: 200,
-              }}
-            >
-              {message}
-            </pre>
-            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={handleSend} disabled={sending}>
-                {sending ? "Sending…" : "Send on WhatsApp"}
-              </button>
-              <button className="btn btn-ghost" onClick={handleCopy} type="button">
-                {copied ? "Copied ✓" : "Copy text"}
-              </button>
-              <a
-                className="btn btn-ghost"
-                href={waLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+          <button className="btn btn-ghost btn-sm" onClick={addRow} disabled={sendingAll} style={{ marginTop: 10 }}>
+            + Add row
+          </button>
+
+          <div style={{ marginTop: 16 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={includeHighlights}
+                onChange={(e) => setIncludeHighlights(e.target.checked)}
+              />
+              ✨ Highlights (shared across every message in this batch)
+            </label>
+            <textarea
+              className="field-input"
+              value={highlights}
+              onChange={(e) => setHighlights(e.target.value)}
+              placeholder="Optional note, e.g. Strong week for Mini Case - 1, ACOS trending down."
+              style={{ width: "100%", minHeight: 60, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ marginTop: 18, display: "flex", gap: 24, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 320px", minWidth: 280 }}>
+              <div className="panel-sub" style={{ marginBottom: 6 }}>Preview — first client</div>
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  background: "var(--bg-alt)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 14,
+                  fontSize: 13,
+                  fontFamily: "inherit",
+                  minHeight: 160,
+                }}
               >
-                Open in WhatsApp
-              </a>
+                {previewMessage || "Fill in at least one row's Client Name and Phone to see a preview."}
+              </pre>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-primary" onClick={handleSendAll} disabled={sendingAll || readyRows.length === 0}>
+                  {sendingAll
+                    ? `Sending ${progress?.done ?? 0} of ${progress?.total ?? readyRows.length}…`
+                    : `Send all (${readyRows.length})`}
+                </button>
+                <button className="btn btn-ghost" onClick={handleCopy} type="button" disabled={!previewMessage}>
+                  {copied ? "Copied ✓" : "Copy first message"}
+                </button>
+                <a
+                  className="btn btn-ghost"
+                  href={previewMessage ? waLink : undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-disabled={!previewMessage}
+                  style={{
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    pointerEvents: previewMessage ? "auto" : "none",
+                    opacity: previewMessage ? 1 : 0.5,
+                  }}
+                >
+                  Open first in WhatsApp
+                </a>
+              </div>
+              <p className="panel-sub" style={{ marginTop: 6 }}>
+                "Send all" goes out one message at a time, 5 seconds apart, so WhatsApp doesn't flag the batch as spam.
+                "Copy first message" / "Open first in WhatsApp" only cover the previewed client — handy for a one-off
+                manual send.
+              </p>
             </div>
-            <p className="panel-sub" style={{ marginTop: 6 }}>
-              "Send on WhatsApp" uses the API set up on the backend. "Copy text" or "Open in WhatsApp" work
-              right now without it — handy until that's configured, or for a one-off manual send.
-            </p>
-            {sent && <p style={{ color: "var(--good)", fontSize: 13, marginTop: 8 }}>Sent ✓</p>}
           </div>
         </div>
       </div>
