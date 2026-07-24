@@ -76,9 +76,41 @@ const COLUMN_WIDTH: Record<string, number> = {
 interface ClientRow {
   id: string;
   data: Record<string, string>;
+  // Which of the matched client's WhatsApp groups (by groupId) to send to,
+  // or "phone" to use the row's own Phone cell instead. Unset until the
+  // dropdown is touched, in which case the first group (or phone, if the
+  // matched client has none) is used as the default.
+  sendVia?: string;
 }
 
 type RowStatus = "sending" | "sent" | "failed";
+
+// A row's Client Name matched against the saved Clients directory, so its
+// WhatsApp groups can be offered as send targets.
+function matchedClientFor(row: ClientRow, clients: Client[]): Client | undefined {
+  const name = row.data.clientName?.trim().toLowerCase();
+  if (!name) return undefined;
+  return clients.find((c) => c.name.toLowerCase() === name);
+}
+
+interface SendTarget {
+  value: string;
+  label: string;
+}
+
+// Where a row's message actually goes: a specific group if the matched
+// client has one (or the row's own choice among several), otherwise the
+// row's own Phone cell.
+function sendTargetFor(row: ClientRow, clients: Client[]): SendTarget | undefined {
+  const groups = matchedClientFor(row, clients)?.whatsappGroups ?? [];
+  const phone = row.data.phone?.trim() ?? "";
+
+  if (groups.length === 0) return phone ? { value: phone, label: "Phone" } : undefined;
+  if (row.sendVia === "phone") return phone ? { value: phone, label: "Phone" } : undefined;
+
+  const chosen = groups.find((g) => g.groupId === row.sendVia) ?? groups[0];
+  return { value: chosen.groupId, label: chosen.groupName ?? chosen.groupId };
+}
 
 function rowStatusLabel(status: RowStatus | undefined): string {
   if (status === "sending") return "Sending…";
@@ -218,7 +250,11 @@ export default function ClientUpdate() {
   // only into an empty cell) — the "lookup as you start typing" the report
   // sheet has, backed by the same Clients directory the rest of the app
   // uses. The <datalist> on each input supplies the suggestions as you type.
+  // Editing any cell also clears that row's sent/failed status, since an
+  // edited row is no longer the same message that was (or wasn't) sent —
+  // it goes back into the next "Send all" batch.
   function setCell(rowIndex: number, key: string, value: string) {
+    const rowId = rows[rowIndex]?.id;
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== rowIndex) return r;
@@ -226,15 +262,28 @@ export default function ClientUpdate() {
         const query = value.trim().toLowerCase();
         if (key === "clientName" && !r.data.phone?.trim()) {
           const match = clients.find((c) => c.name.toLowerCase() === query);
-          const phone = match?.whatsappGroupId ?? match?.phone;
-          if (phone) data.phone = phone;
+          if (match?.phone) data.phone = match.phone;
         } else if (key === "phone" && !r.data.clientName?.trim()) {
-          const match = clients.find((c) => c.whatsappGroupId === value.trim() || c.phone === value.trim());
+          const match = clients.find((c) => c.phone === value.trim());
           if (match) data.clientName = match.name;
         }
         return { ...r, data };
       })
     );
+    clearRowStatus(rowId);
+  }
+
+  function clearRowStatus(rowId: string | undefined) {
+    if (!rowId) return;
+    setRowStatus((prev) => {
+      if (!(rowId in prev)) return prev;
+      const { [rowId]: _, ...rest } = prev;
+      return rest;
+    });
+  }
+
+  function setSendVia(rowIndex: number, value: string) {
+    setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, sendVia: value } : r)));
   }
 
   function addRow() {
@@ -263,12 +312,14 @@ export default function ClientUpdate() {
     e.preventDefault();
 
     const pastedRows = text.split(/\r\n|\r|\n/).map((line) => line.split("\t"));
+    const touchedRowIds: string[] = [];
 
     setRows((prev) => {
       const next = [...prev];
       pastedRows.forEach((cells, r) => {
         const targetIndex = rowIndex + r;
         while (next.length <= targetIndex) next.push({ id: `row-${nextRowId.current++}`, data: {} });
+        touchedRowIds.push(next[targetIndex].id);
         const data = { ...next[targetIndex].data };
         cells.forEach((raw, c) => {
           const column = COLUMNS[colIndex + c];
@@ -280,43 +331,61 @@ export default function ClientUpdate() {
       });
       return next;
     });
+    touchedRowIds.forEach(clearRowStatus);
   }
 
   const attachedLink = links.find((l) => l.id === attachedLinkId);
 
+  // Ready to send: has a client name and somewhere to actually send it
+  // (a matched client's group, or the row's own Phone cell).
   const readyRows = useMemo(
-    () => rows.filter((r) => r.data.clientName?.trim() && r.data.phone?.trim()),
-    [rows]
+    () => rows.filter((r) => r.data.clientName?.trim() && sendTargetFor(r, clients)),
+    [rows, clients]
+  );
+  // Excludes rows already marked "sent" — re-running "Send all" (e.g. after
+  // adding more rows or fixing a failed one) doesn't repeat anyone who
+  // already went out. Editing a row clears its "sent" status (see
+  // clearRowStatus), so a correction puts it back in the next batch.
+  const sendableRows = useMemo(
+    () => readyRows.filter((r) => rowStatus[r.id] !== "sent"),
+    [readyRows, rowStatus]
   );
 
-  const previewMessage = readyRows.length
-    ? composeMessage(readyRows[0], { period, highlights, includeHighlights, attachedLink })
+  const previewRow = sendableRows[0] ?? readyRows[0];
+  const previewMessage = previewRow
+    ? composeMessage(previewRow, { period, highlights, includeHighlights, attachedLink })
     : "";
 
   async function handleSendAll() {
-    if (readyRows.length === 0) {
-      setSendError("Add at least one row with a client name and phone number first.");
+    const targets = sendableRows;
+    if (targets.length === 0) {
+      setSendError(
+        readyRows.length === 0
+          ? "Add at least one row with a client name and somewhere to send it first."
+          : "Everything here has already been sent — edit a row to send it again."
+      );
       return;
     }
     setSendError("");
     setSendingAll(true);
-    setProgress({ done: 0, total: readyRows.length });
-    setRowStatus({});
+    setProgress({ done: 0, total: targets.length });
 
-    for (let i = 0; i < readyRows.length; i++) {
-      const row = readyRows[i];
+    for (let i = 0; i < targets.length; i++) {
+      const row = targets[i];
+      const target = sendTargetFor(row, clients);
+      if (!target) continue;
       setRowStatus((prev) => ({ ...prev, [row.id]: "sending" }));
       try {
         const message = composeMessage(row, { period, highlights, includeHighlights, attachedLink });
-        await sendClientUpdate(row.id, { phone: row.data.phone.trim(), channel: "whapi", message });
+        await sendClientUpdate(row.id, { phone: target.value, channel: "whapi", message });
         setRowStatus((prev) => ({ ...prev, [row.id]: "sent" }));
       } catch (err) {
         setRowStatus((prev) => ({ ...prev, [row.id]: "failed" }));
-        setSendError(`Failed to send to ${row.data.clientName || row.data.phone}: ${errorMessage(err)}`);
+        setSendError(`Failed to send to ${row.data.clientName || target.value}: ${errorMessage(err)}`);
       }
-      setProgress({ done: i + 1, total: readyRows.length });
+      setProgress({ done: i + 1, total: targets.length });
       // 5 seconds between sends, but no point waiting after the last one.
-      if (i < readyRows.length - 1) {
+      if (i < targets.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     }
@@ -335,9 +404,10 @@ export default function ClientUpdate() {
   }
 
   // wa.me needs digits only (country code, no +, spaces, or dashes) — a
-  // manual fallback for just the previewed (first) client.
-  const firstPhone = readyRows[0]?.data.phone ?? "";
-  const waLink = `https://wa.me/${firstPhone.replace(/\D/g, "")}?text=${encodeURIComponent(previewMessage)}`;
+  // manual fallback for just the previewed client, and only meaningful when
+  // that target is a phone number rather than a group id.
+  const previewTarget = previewRow ? sendTargetFor(previewRow, clients) : undefined;
+  const waLink = `https://wa.me/${(previewTarget?.value ?? "").replace(/\D/g, "")}?text=${encodeURIComponent(previewMessage)}`;
 
   async function handleCopy() {
     await navigator.clipboard.writeText(previewMessage);
@@ -357,7 +427,7 @@ export default function ClientUpdate() {
         {clients.map((c) => <option key={c.id} value={c.name} />)}
       </datalist>
       <datalist id="known-client-phones">
-        {clients.map((c) => <option key={c.id} value={c.whatsappGroupId ?? c.phone ?? ""} />)}
+        {clients.map((c) => <option key={c.id} value={c.phone ?? ""} />)}
       </datalist>
 
       <div className="panel">
@@ -366,10 +436,10 @@ export default function ClientUpdate() {
           <span className="panel-sub">One row per product, sent as a batch over WhatsApp</span>
         </div>
         <p className="tip">
-          💡 Paste a whole block straight from your report spreadsheet, starting at Phone — it fills every row and
-          column in order (adding rows as needed) and skips over Acos/T.Acos/Ads Sales %/Organic Sales %, since
-          those are calculated here automatically. Typing a saved client's name or number also fills in the other
-          one for you.
+          💡 Type to search for the client under Phone or Client Name — the other one fills in for you. Then paste a
+          whole block straight from your report spreadsheet starting at ASIN — it fills every row and column in
+          order from there (adding rows as needed) and skips over Acos/T.Acos/Ads Sales %/Organic Sales %, since
+          those are calculated here automatically.
         </p>
         <div className="panel-body">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -394,10 +464,11 @@ export default function ClientUpdate() {
             </select>
           </div>
 
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "scroll" }}>
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Send Via</th>
                   {COLUMNS.map((col) => (
                     <th key={col.key}>{col.emoji ? `${col.emoji} ` : ""}{col.label}</th>
                   ))}
@@ -408,8 +479,28 @@ export default function ClientUpdate() {
               <tbody>
                 {rows.map((row, rowIndex) => {
                   const derived = deriveValues(rawValuesFor(row));
+                  const groups = matchedClientFor(row, clients)?.whatsappGroups ?? [];
+                  const target = sendTargetFor(row, clients);
                   return (
                     <tr key={row.id}>
+                      <td>
+                        {groups.length === 0 ? (
+                          <span className="panel-sub">Phone</span>
+                        ) : (
+                          <select
+                            className="field-select"
+                            value={row.sendVia === "phone" ? "phone" : target?.value ?? groups[0].groupId}
+                            onChange={(e) => setSendVia(rowIndex, e.target.value)}
+                            disabled={sendingAll}
+                            style={{ width: 130, fontSize: 12 }}
+                          >
+                            {groups.map((g) => (
+                              <option key={g.id} value={g.groupId}>{g.groupName ?? g.groupId}</option>
+                            ))}
+                            <option value="phone">Phone number</option>
+                          </select>
+                        )}
+                      </td>
                       {COLUMNS.map((col, colIndex) => (
                         <td key={col.key}>
                           {col.kind === "derivedPercent" ? (
@@ -421,6 +512,7 @@ export default function ClientUpdate() {
                               className="field-input"
                               type={col.kind === "text" ? "text" : "number"}
                               list={col.key === "clientName" ? "known-client-names" : col.key === "phone" ? "known-client-phones" : undefined}
+                              placeholder={col.key === "clientName" || col.key === "phone" ? "Type to search" : undefined}
                               value={row.data[col.key] ?? ""}
                               onChange={(e) => setCell(rowIndex, col.key, e.target.value)}
                               onPaste={(e) => handleGridPaste(e, rowIndex, colIndex)}
@@ -471,7 +563,7 @@ export default function ClientUpdate() {
 
           <div style={{ marginTop: 18, display: "flex", gap: 24, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 320px", minWidth: 280 }}>
-              <div className="panel-sub" style={{ marginBottom: 6 }}>Preview — first client</div>
+              <div className="panel-sub" style={{ marginBottom: 6 }}>Preview — next to send</div>
               <pre
                 style={{
                   whiteSpace: "pre-wrap",
@@ -484,38 +576,36 @@ export default function ClientUpdate() {
                   minHeight: 160,
                 }}
               >
-                {previewMessage || "Fill in at least one row's Client Name and Phone to see a preview."}
+                {previewMessage || "Fill in at least one row's Client Name and a phone number (or matched WhatsApp group) to see a preview."}
               </pre>
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <button className="btn btn-primary" onClick={handleSendAll} disabled={sendingAll || readyRows.length === 0}>
+                <button className="btn btn-primary" onClick={handleSendAll} disabled={sendingAll || sendableRows.length === 0}>
                   {sendingAll
-                    ? `Sending ${progress?.done ?? 0} of ${progress?.total ?? readyRows.length}…`
-                    : `Send all (${readyRows.length})`}
+                    ? `Sending ${progress?.done ?? 0} of ${progress?.total ?? sendableRows.length}…`
+                    : sendableRows.length === 0 && readyRows.length > 0
+                    ? "All sent ✓"
+                    : `Send all (${sendableRows.length})`}
                 </button>
                 <button className="btn btn-ghost" onClick={handleCopy} type="button" disabled={!previewMessage}>
                   {copied ? "Copied ✓" : "Copy first message"}
                 </button>
-                <a
-                  className="btn btn-ghost"
-                  href={previewMessage ? waLink : undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-disabled={!previewMessage}
-                  style={{
-                    textDecoration: "none",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    pointerEvents: previewMessage ? "auto" : "none",
-                    opacity: previewMessage ? 1 : 0.5,
-                  }}
-                >
-                  Open first in WhatsApp
-                </a>
+                {previewTarget?.label === "Phone" && (
+                  <a
+                    className="btn btn-ghost"
+                    href={waLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                  >
+                    Open first in WhatsApp
+                  </a>
+                )}
               </div>
               <p className="panel-sub" style={{ marginTop: 6 }}>
-                "Send all" goes out one message at a time, 5 seconds apart, so WhatsApp doesn't flag the batch as spam.
-                "Copy first message" / "Open first in WhatsApp" only cover the previewed client — handy for a one-off
-                manual send.
+                "Send all" goes out one message at a time, 5 seconds apart, so WhatsApp doesn't flag the batch as spam,
+                and skips anything already marked Sent. "Copy first message" / "Open first in WhatsApp" only cover the
+                previewed row — handy for a one-off manual send ("Open in WhatsApp" only works for a phone target, not
+                a group).
               </p>
             </div>
           </div>
