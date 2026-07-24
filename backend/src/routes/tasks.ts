@@ -87,20 +87,22 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       dueDate: parsedDueDate,
     });
 
-    // Every status change is announced back to the group it came from, not
-    // just "done" — the client wants visibility into the whole pipeline.
-    // Uses the same composer as the manual Send button, just forced to the
-    // single "status" field, so both message paths stay worded identically.
-    // This send is best-effort: the status update itself is already saved
-    // above, and a WhatsApp failure (network blip, bad chat_id, Periskope
-    // outage) must not fail the request or crash the server — an uncaught
-    // rejection here would take down the whole process, not just this one
-    // notification.
+    // Only "done" is announced back to the group automatically — every
+    // other status change is just internal triage the client doesn't need
+    // pinged about. Uses the same composer as the manual Send button, just
+    // forced to the single "status" field, so both message paths stay
+    // worded identically. This send is best-effort: the status update
+    // itself is already saved above, and a WhatsApp failure (network blip,
+    // bad chat_id, Periskope outage) must not fail the request or crash the
+    // server — an uncaught rejection here would take down the whole
+    // process, not just this one notification.
     // Tracks what the response's pendingSendFields should reflect -- starts
     // as the snapshot already on the task, and gets the status field merged
     // in below on a successful automatic send, without needing a re-fetch.
+    // A non-"done" status change leaves the snapshot untouched, so it still
+    // shows up as pending on the manual Send button instead of being lost.
     let currentSnapshot = task.sentSnapshot as TaskSnapshot | null;
-    if (status !== undefined) {
+    if (status !== undefined && task.status === "done") {
       try {
         const whatsapp = resolveAdapterForSource(task.source, channels);
         const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
