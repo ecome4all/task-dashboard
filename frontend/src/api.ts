@@ -215,6 +215,13 @@ export function fetchUnrecognizedSenders(): Promise<UnrecognizedSender[]> {
   return request("/api/clients/unrecognized");
 }
 
+// Dismisses a sender from the Unrecognized Senders list without linking them
+// to a client. Not a permanent block — if this chat_id sends another
+// task: message later, it's logged fresh and reappears in the list.
+export function ignoreUnrecognizedSender(chatId: string): Promise<void> {
+  return request(`/api/clients/unrecognized/${encodeURIComponent(chatId)}`, { method: "DELETE" });
+}
+
 export function sendClientUpdate(
   id: string,
   data: { phone: string; channel: "whapi" | "official"; message: string }

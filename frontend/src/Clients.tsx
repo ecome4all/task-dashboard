@@ -6,6 +6,7 @@ import {
   ApiError,
   fetchAllClients,
   fetchUnrecognizedSenders,
+  ignoreUnrecognizedSender,
   fetchTasks,
   createClient,
   updateClient,
@@ -140,6 +141,23 @@ export default function Clients() {
     }
   }
 
+  async function handleIgnoreSender(sender: UnrecognizedSender) {
+    if (
+      !window.confirm(
+        `Ignore ${sender.chatName ?? sender.chatId}? This clears their logged messages from this list. If they message again later, they'll reappear here.`
+      )
+    ) {
+      return;
+    }
+    setActionError("");
+    try {
+      await ignoreUnrecognizedSender(sender.chatId);
+      setUnrecognizedSenders((prev) => prev.filter((s) => s.chatId !== sender.chatId));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
   if (loading) return <Spinner label="Loading clients…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
@@ -230,6 +248,7 @@ export default function Clients() {
                   <th>Messages</th>
                   <th>Last Seen</th>
                   <th>Assign To</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -256,6 +275,11 @@ export default function Clients() {
                           Link
                         </button>
                       </div>
+                    </td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleIgnoreSender(sender)}>
+                        Ignore
+                      </button>
                     </td>
                   </tr>
                 ))}

@@ -53,6 +53,16 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     res.json([...senders.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()));
   });
 
+  // Dismiss a sender from the Unrecognized Senders list without linking them
+  // to a client — e.g. a wrong number or a one-off message that was never
+  // going to become a real client. Clears their logged messages; if the
+  // same chat_id sends another task: message later, it's logged fresh and
+  // reappears here, so this isn't a permanent block.
+  router.delete("/unrecognized/:chatId", requireRole(...MANAGE_ROLES), async (req, res) => {
+    await unrecognizedMessageRepository.deleteBySourceRef(req.params.chatId);
+    res.status(204).send();
+  });
+
   router.post("/", requireRole(...MANAGE_ROLES), async (req, res) => {
     const { name, phone, notes } = req.body;
     if (typeof name !== "string" || !name.trim()) {
