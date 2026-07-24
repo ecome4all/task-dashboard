@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { SendableTaskField } from "./api";
 
@@ -33,6 +33,7 @@ export default function SendUpdatePopover({
   const [panelPos, setPanelPos] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRectRef = useRef<DOMRect | null>(null);
 
   function close() {
     setOpen(false);
@@ -42,9 +43,26 @@ export default function SendUpdatePopover({
 
   function openPanel() {
     const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) setPanelPos({ top: rect.bottom + 4, left: rect.right - 260 });
+    if (rect) {
+      triggerRectRef.current = rect;
+      setPanelPos({ top: rect.bottom + 4, left: rect.right - 260 });
+    }
     setOpen(true);
   }
+
+  // Same reasoning as SearchableSelect's identical effect: flip the panel
+  // above the trigger once its real height is known, if a row near the
+  // bottom of the page would otherwise open it off the edge of the viewport.
+  useLayoutEffect(() => {
+    if (!open || !panelRef.current || !triggerRectRef.current) return;
+    const trigger = triggerRectRef.current;
+    const panelHeight = panelRef.current.getBoundingClientRect().height;
+    const spaceBelow = window.innerHeight - trigger.bottom;
+    const spaceAbove = trigger.top;
+    if (spaceBelow < panelHeight + 8 && spaceAbove > panelHeight + 8) {
+      setPanelPos((prev) => ({ ...prev, top: trigger.top - panelHeight - 4 }));
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,7 +132,7 @@ export default function SendUpdatePopover({
               ))}
             </ul>
             <button
-              className="btn btn-primary btn-sm"
+              className={`btn btn-sm ${selectedKeys.length === 0 ? "btn-ghost" : "btn-primary"}`}
               disabled={selectedKeys.length === 0 || sending}
               onClick={handleSend}
             >

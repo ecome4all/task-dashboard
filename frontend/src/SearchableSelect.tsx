@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export interface SearchableSelectOption {
@@ -40,6 +40,7 @@ export default function SearchableSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRectRef = useRef<DOMRect | null>(null);
 
   function close() {
     setOpen(false);
@@ -49,10 +50,27 @@ export default function SearchableSelect({
   function openPanel() {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
+      triggerRectRef.current = rect;
       setPanelPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 200) });
     }
     setOpen(true);
   }
+
+  // A row near the bottom of the page would otherwise open the panel
+  // straight off the bottom of the viewport. Once the panel's actually
+  // rendered (so its real height is known), flip it to sit above the
+  // trigger instead — but only if there's room above; otherwise leave it
+  // below rather than clip it a different way.
+  useLayoutEffect(() => {
+    if (!open || !panelRef.current || !triggerRectRef.current) return;
+    const trigger = triggerRectRef.current;
+    const panelHeight = panelRef.current.getBoundingClientRect().height;
+    const spaceBelow = window.innerHeight - trigger.bottom;
+    const spaceAbove = trigger.top;
+    if (spaceBelow < panelHeight + 8 && spaceAbove > panelHeight + 8) {
+      setPanelPos((prev) => ({ ...prev, top: trigger.top - panelHeight - 4 }));
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
