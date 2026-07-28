@@ -34,6 +34,8 @@ export default function Clients() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newClientGroupId, setNewClientGroupId] = useState("");
+  const [newClientGroupName, setNewClientGroupName] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
   const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
   const [newGroupId, setNewGroupId] = useState<Record<string, string>>({});
@@ -71,10 +73,24 @@ export default function Clients() {
     if (!name) return;
     setActionError("");
     try {
-      const client = await createClient({ name, phone: newPhone.trim() || undefined });
+      let client = await createClient({ name, phone: newPhone.trim() || undefined });
+      const groupId = newClientGroupId.trim();
+      // Group is optional and added as a second step right after create —
+      // if it fails (e.g. already linked to another client), the client
+      // itself still gets created rather than losing the whole submission.
+      if (groupId) {
+        try {
+          const group = await addClientWhatsappGroup(client.id, groupId, newClientGroupName.trim() || undefined);
+          client = { ...client, whatsappGroups: [...client.whatsappGroups, group] };
+        } catch (err) {
+          setActionError(errorMessage(err));
+        }
+      }
       setClients((prev) => [...prev, client].sort((a, b) => a.name.localeCompare(b.name)));
       setNewName("");
       setNewPhone("");
+      setNewClientGroupId("");
+      setNewClientGroupName("");
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -248,6 +264,22 @@ export default function Clients() {
               placeholder="Phone (optional)"
               value={newPhone}
               onChange={(e) => setNewPhone(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              className="field-input"
+              type="text"
+              placeholder="Group id (optional)"
+              value={newClientGroupId}
+              onChange={(e) => setNewClientGroupId(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              className="field-input"
+              type="text"
+              placeholder="Group name (optional)"
+              value={newClientGroupName}
+              onChange={(e) => setNewClientGroupName(e.target.value)}
               style={{ flex: 1 }}
             />
             <button className="btn btn-primary" type="submit">Add</button>
