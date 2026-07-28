@@ -31,14 +31,29 @@ const STATUS_COLOR: Record<string, string> = {
 
 const PAGE_SIZE = 10;
 
-// Sentinel for the Type filter's "Not Set" chip — distinct from `null`
-// (which means "no type filter applied, show everything").
+// Sentinel shared by the Type/Marketplace/Employee filters' "Not Set" /
+// "Unassigned" option — distinct from `null` (which means "no filter
+// applied, show everything").
 const UNSET_TYPE = "__unset__";
+const UNSET_MARKETPLACE = "__unset__";
+const UNASSIGNED = "__unset__";
 
 function matchesTypeFilter(task: Task, filter: string | null): boolean {
   if (filter === null) return true;
   if (filter === UNSET_TYPE) return !task.taskType;
   return task.taskType === filter;
+}
+
+function matchesMarketplaceFilter(task: Task, filter: string | null): boolean {
+  if (filter === null) return true;
+  if (filter === UNSET_MARKETPLACE) return !task.marketplace;
+  return task.marketplace === filter;
+}
+
+function matchesEmployeeFilter(task: Task, filter: string | null): boolean {
+  if (filter === null) return true;
+  if (filter === UNASSIGNED) return !task.assignee;
+  return task.assignee === filter;
 }
 
 function errorMessage(err: unknown): string {
@@ -62,6 +77,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string | null>(null);
+  const [employeeFilter, setEmployeeFilter] = useState<string | null>(null);
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const [justSentTaskId, setJustSentTaskId] = useState<string | null>(null);
 
@@ -117,6 +134,16 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   function selectTypeFilter(type: string) {
     setTypeFilter(type || null);
+    setPage(1);
+  }
+
+  function selectMarketplaceFilter(marketplace: string) {
+    setMarketplaceFilter(marketplace || null);
+    setPage(1);
+  }
+
+  function selectEmployeeFilter(employee: string) {
+    setEmployeeFilter(employee || null);
     setPage(1);
   }
 
@@ -186,7 +213,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
   const filteredTasks = tasks.filter(
-    (t) => (!statusFilter || t.status === statusFilter) && matchesTypeFilter(t, typeFilter)
+    (t) =>
+      (!statusFilter || t.status === statusFilter) &&
+      matchesTypeFilter(t, typeFilter) &&
+      matchesMarketplaceFilter(t, marketplaceFilter) &&
+      matchesEmployeeFilter(t, employeeFilter)
   );
   const pageCount = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -221,17 +252,41 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 </button>
               ))}
             </div>
-            <select
-              className="field-select"
-              value={typeFilter ?? ""}
-              onChange={(e) => selectTypeFilter(e.target.value)}
-            >
-              <option value="">All Types</option>
-              {taskTypeOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-              <option value={UNSET_TYPE}>Not Set</option>
-            </select>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <select
+                className="field-select"
+                value={marketplaceFilter ?? ""}
+                onChange={(e) => selectMarketplaceFilter(e.target.value)}
+              >
+                <option value="">All Marketplaces</option>
+                {marketplaceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+                <option value={UNSET_MARKETPLACE}>Unset</option>
+              </select>
+              <select
+                className="field-select"
+                value={employeeFilter ?? ""}
+                onChange={(e) => selectEmployeeFilter(e.target.value)}
+              >
+                <option value="">All Employees</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.name}>{employee.name}</option>
+                ))}
+                <option value={UNASSIGNED}>Unassigned</option>
+              </select>
+              <select
+                className="field-select"
+                value={typeFilter ?? ""}
+                onChange={(e) => selectTypeFilter(e.target.value)}
+              >
+                <option value="">All Types</option>
+                {taskTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+                <option value={UNSET_TYPE}>Not Set</option>
+              </select>
+            </div>
           </div>
 
           <table className="data-table">
