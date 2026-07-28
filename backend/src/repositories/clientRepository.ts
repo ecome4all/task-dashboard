@@ -8,6 +8,7 @@ const PUBLIC_FIELDS = {
   phone: true,
   notes: true,
   active: true,
+  reportSheetUrl: true,
   whatsappGroups: { select: { id: true, groupId: true, groupName: true } },
 } as const;
 
@@ -48,10 +49,27 @@ export const clientRepository = {
     });
   },
 
-  update(id: string, changes: { name?: string; phone?: string; notes?: string; active?: boolean }) {
+  update(
+    id: string,
+    changes: { name?: string; phone?: string; notes?: string; active?: boolean; reportSheetUrl?: string | null }
+  ) {
     return prisma.client.update({
       where: { id },
       data: { ...changes, phone: changes.phone ? normalizePhone(changes.phone) : changes.phone },
+      select: PUBLIC_FIELDS,
+    });
+  },
+
+  findById(id: string) {
+    return prisma.client.findFirst({ where: { id, tenantId: TENANT_ID }, select: PUBLIC_FIELDS });
+  },
+
+  // Active clients with a report sheet linked — what the Weekly Reports
+  // screen loads to know who to pull this week's numbers for.
+  listWithReportSheet() {
+    return prisma.client.findMany({
+      where: { tenantId: TENANT_ID, active: true, reportSheetUrl: { not: null } },
+      orderBy: { name: "asc" },
       select: PUBLIC_FIELDS,
     });
   },

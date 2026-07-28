@@ -37,6 +37,7 @@ export default function Clients() {
   const [newClientGroupId, setNewClientGroupId] = useState("");
   const [newClientGroupName, setNewClientGroupName] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
+  const [reportSheetDrafts, setReportSheetDrafts] = useState<Record<string, string>>({});
   const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
   const [newGroupId, setNewGroupId] = useState<Record<string, string>>({});
   const [newGroupName, setNewGroupName] = useState<Record<string, string>>({});
@@ -106,6 +107,22 @@ export default function Clients() {
     setActionError("");
     try {
       const updated = await updateClient(client.id, { phone });
+      setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleReportSheetSave(client: Client) {
+    const reportSheetUrl = reportSheetDrafts[client.id] ?? client.reportSheetUrl ?? "";
+    setReportSheetDrafts((prev) => {
+      const { [client.id]: _, ...rest } = prev;
+      return rest;
+    });
+    if (reportSheetUrl === (client.reportSheetUrl ?? "")) return;
+    setActionError("");
+    try {
+      const updated = await updateClient(client.id, { reportSheetUrl });
       setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
     } catch (err) {
       setActionError(errorMessage(err));
@@ -356,6 +373,7 @@ export default function Clients() {
                 <th>Name</th>
                 <th>Phone</th>
                 <th>WhatsApp Groups</th>
+                <th>Report Sheet</th>
                 <th>Active</th>
                 <th>Actions</th>
               </tr>
@@ -410,6 +428,17 @@ export default function Clients() {
                         + Add
                       </button>
                     </div>
+                  </td>
+                  <td>
+                    <input
+                      className="field-input"
+                      type="text"
+                      value={reportSheetDrafts[client.id] ?? client.reportSheetUrl ?? ""}
+                      placeholder="No sheet saved"
+                      onChange={(e) => setReportSheetDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
+                      onBlur={() => handleReportSheetSave(client)}
+                      style={{ width: 180 }}
+                    />
                   </td>
                   <td>
                     <button

@@ -4,6 +4,7 @@ import { clientRepository } from "../repositories/clientRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
+import { buildWeeklyReportPreview } from "../services/weeklyReportPreview";
 
 // Same audience as report-links: admins and managers are the ones who
 // send reports to clients, so they're the ones who maintain the directory.
@@ -80,7 +81,7 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { name, phone, notes, active } = req.body;
+    const { name, phone, notes, active, reportSheetUrl } = req.body;
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       res.status(400).json({ error: "name must be a non-empty string" });
       return;
@@ -94,6 +95,7 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       ...(phone !== undefined && { phone }),
       ...(notes !== undefined && { notes }),
       ...(active !== undefined && { active }),
+      ...(reportSheetUrl !== undefined && { reportSheetUrl: reportSheetUrl?.trim() || null }),
     });
     res.json(client);
   });
@@ -137,6 +139,32 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   router.delete("/:id/groups/:groupRowId", requireRole(...MANAGE_ROLES), async (req, res) => {
     await clientRepository.removeGroup(req.params.groupRowId);
     res.status(204).send();
+  });
+
+  // Live-reads this client's linked Google Sheet for the current week's
+  // numbers — no persisted snapshot, so it's always in sync with whatever's
+  // currently in the sheet. See services/weeklyReportPreview.ts for how
+  // "current period" is matched across the known tabs.
+  router.get("/:id/weekly-report-preview", requireRole(...MANAGE_ROLES), async (req, res) => {
+    const client = await clientRepository.findById(req.params.id);
+    if (!client) {
+      res.status(404).json({ error: "client not found" });
+      return;
+    }
+    if (!client.reportSheetUrl) {
+      res.status(400).json({ error: "No report sheet linked for this client." });
+      return;
+    }
+
+    try {
+      const preview = await buildWeeklyReportPreview(client.reportSheetUrl, new Date());
+      res.json(preview);
+    } catch (err) {
+      console.error(`Failed to read report sheet for client ${client.id}:`, err);
+      res.status(502).json({
+        error: "Couldn't read this client's report sheet. Check it's shared with the service account and the link is correct.",
+      });
+    }
   });
 
   // The message text itself is composed on the frontend (the account manager

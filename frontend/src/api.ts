@@ -194,6 +194,10 @@ export interface Client {
   whatsappGroups: ClientWhatsappGroup[];
   notes: string | null;
   active: boolean;
+  // Google Sheet the client tracks their own performance numbers in — see
+  // fetchWeeklyReportPreview. Read-only from this app; nothing here writes
+  // to it.
+  reportSheetUrl: string | null;
 }
 
 export function fetchClients(): Promise<Client[]> {
@@ -239,7 +243,7 @@ export function sendClientUpdate(
 
 export function updateClient(
   id: string,
-  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
+  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active" | "reportSheetUrl">>
 ): Promise<Client> {
   return request(`/api/clients/${id}`, {
     method: "PATCH",
@@ -260,6 +264,31 @@ export function addClientWhatsappGroup(
 
 export function removeClientWhatsappGroup(clientId: string, groupRowId: string): Promise<void> {
   return request(`/api/clients/${clientId}/groups/${groupRowId}`, { method: "DELETE" });
+}
+
+export interface ReportField {
+  label: string;
+  value: string;
+}
+
+export interface ReportSection {
+  // e.g. "Weekly — July, Week 2" or "Daily — 2026-07-08" — which tab/period
+  // this block of fields came from.
+  source: string;
+  fields: ReportField[];
+}
+
+export interface WeeklyReportPreview {
+  week: number;
+  month: string;
+  sections: ReportSection[];
+}
+
+// Live-reads this client's linked Google Sheet for the current week's
+// numbers (see Client.reportSheetUrl) — no caching, always reflects
+// whatever's currently in the sheet.
+export function fetchWeeklyReportPreview(clientId: string): Promise<WeeklyReportPreview> {
+  return request(`/api/clients/${clientId}/weekly-report-preview`);
 }
 
 // Permanent — unlike updateClient(id, { active: false }), which is reversible.

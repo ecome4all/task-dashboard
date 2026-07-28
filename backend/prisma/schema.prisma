@@ -68,6 +68,12 @@ model Client {
   active         Boolean               @default(true)
   createdAt      DateTime              @default(now())
   whatsappGroups ClientWhatsappGroup[]
+  // Google Sheet the client (or Ecom4all staff, on the client's behalf)
+  // maintains their own performance numbers in — read-only from this app's
+  // side via a service account the sheet is shared with (see
+  // services/googleSheets.ts). Whole-account tracker, not per-SKU: no ASIN
+  // column, every row is a time period (a week or a date).
+  reportSheetUrl String?
 }
 
 // One of possibly several WhatsApp groups a client's tasks come from (whapi

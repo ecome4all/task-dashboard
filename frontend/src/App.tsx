@@ -5,6 +5,7 @@ import Dashboard from "./Dashboard";
 import Employees from "./Employees";
 import Clients from "./Clients";
 import ClientUpdate from "./ClientUpdate";
+import WeeklyReports from "./WeeklyReports";
 import Settings from "./Settings";
 import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
@@ -15,7 +16,7 @@ const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   member: "Member",
 };
 
-type View = "tasks" | "employees" | "clients" | "client-update" | "settings";
+type View = "tasks" | "employees" | "clients" | "client-update" | "weekly-reports" | "settings";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -111,6 +112,14 @@ export default function App() {
               Send Report
             </button>
           )}
+          {canSeeClients && (
+            <button
+              className={`nav-item ${view === "weekly-reports" ? "active" : ""}`}
+              onClick={() => selectView("weekly-reports")}
+            >
+              Weekly Reports
+            </button>
+          )}
           {canSeeEmployees && (
             <button
               className={`nav-item ${view === "settings" ? "active" : ""}`}
@@ -146,6 +155,7 @@ export default function App() {
           {view === "employees" && <Employees user={user} />}
           {view === "clients" && <Clients />}
           {view === "client-update" && <ClientUpdate />}
+          {view === "weekly-reports" && <WeeklyReports />}
           {view === "settings" && <Settings />}
         </section>
       </div>
