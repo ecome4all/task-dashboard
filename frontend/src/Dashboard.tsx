@@ -31,6 +31,16 @@ const STATUS_COLOR: Record<string, string> = {
 
 const PAGE_SIZE = 10;
 
+// Sentinel for the Type filter's "Not Set" chip — distinct from `null`
+// (which means "no type filter applied, show everything").
+const UNSET_TYPE = "__unset__";
+
+function matchesTypeFilter(task: Task, filter: string | null): boolean {
+  if (filter === null) return true;
+  if (filter === UNSET_TYPE) return !task.taskType;
+  return task.taskType === filter;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
@@ -51,6 +61,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [actionError, setActionError] = useState("");
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const [justSentTaskId, setJustSentTaskId] = useState<string | null>(null);
 
@@ -101,6 +112,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   function selectStatusFilter(status: string | null) {
     setStatusFilter(status);
+    setPage(1);
+  }
+
+  function selectTypeFilter(type: string) {
+    setTypeFilter(type || null);
     setPage(1);
   }
 
@@ -169,7 +185,9 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
 
-  const filteredTasks = statusFilter ? tasks.filter((t) => t.status === statusFilter) : tasks;
+  const filteredTasks = tasks.filter(
+    (t) => (!statusFilter || t.status === statusFilter) && matchesTypeFilter(t, typeFilter)
+  );
   const pageCount = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
@@ -185,22 +203,35 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
           <span className="panel-sub">{filteredTasks.length} shown of {tasks.length} total</span>
         </div>
         <div className="panel-body">
-          <div className="filter-chips">
-            <button
-              className={`chip ${statusFilter === null ? "active" : ""}`}
-              onClick={() => selectStatusFilter(null)}
-            >
-              All <span className="chip-count">{tasks.length}</span>
-            </button>
-            {statusOptions.map((option) => (
+          <div className="filter-chips" style={{ alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <button
-                key={option.value}
-                className={`chip ${statusFilter === option.value ? "active" : ""}`}
-                onClick={() => selectStatusFilter(option.value)}
+                className={`chip ${statusFilter === null ? "active" : ""}`}
+                onClick={() => selectStatusFilter(null)}
               >
-                {option.label} <span className="chip-count">{tasks.filter((t) => t.status === option.value).length}</span>
+                All <span className="chip-count">{tasks.length}</span>
               </button>
-            ))}
+              {statusOptions.map((option) => (
+                <button
+                  key={option.value}
+                  className={`chip ${statusFilter === option.value ? "active" : ""}`}
+                  onClick={() => selectStatusFilter(option.value)}
+                >
+                  {option.label} <span className="chip-count">{tasks.filter((t) => t.status === option.value).length}</span>
+                </button>
+              ))}
+            </div>
+            <select
+              className="field-select"
+              value={typeFilter ?? ""}
+              onChange={(e) => selectTypeFilter(e.target.value)}
+            >
+              <option value="">All Types</option>
+              {taskTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+              <option value={UNSET_TYPE}>Not Set</option>
+            </select>
           </div>
 
           <table className="data-table">
@@ -209,6 +240,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Task</th>
                 <th>Client</th>
                 <th>Source</th>
+                <th>WhatsApp Group</th>
                 <th>Marketplace</th>
                 <th>Type</th>
                 <th>Employee</th>
@@ -226,6 +258,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   <td>{task.description}</td>
                   <td>{task.clientName ?? "—"}</td>
                   <td>{task.source}</td>
+                  <td>{task.chatName ?? "—"}</td>
                   <td>
                     <SearchableSelect
                       value={task.marketplace ?? ""}
