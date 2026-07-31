@@ -6,7 +6,11 @@ import { employeeRepository } from "../repositories/employeeRepository";
 // deactivation) takes effect immediately instead of on next login.
 export function requireRole(...allowedRoles: string[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const employee = req.employeeId ? await employeeRepository.findById(req.employeeId) : null;
+    // requireAuth runs first on every /api route and has already fetched
+    // this row fresh, so reuse it rather than querying the same primary key
+    // twice per request. Falls back to its own lookup if this middleware is
+    // ever mounted somewhere requireAuth didn't run.
+    const employee = req.employee ?? (req.employeeId ? await employeeRepository.findById(req.employeeId) : null);
 
     if (!employee || !employee.active || !allowedRoles.includes(employee.role)) {
       res.status(403).json({ error: "insufficient permissions" });
