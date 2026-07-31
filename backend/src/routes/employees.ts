@@ -27,13 +27,21 @@ export function createEmployeesRouter() {
   });
 
   router.patch("/:id", requireRole("admin"), async (req, res) => {
-    const { role, active } = req.body;
+    const { role, active, phone, name } = req.body;
+    if (name !== undefined && (typeof name !== "string" || !name.trim())) {
+      res.status(400).json({ error: "name can't be empty" });
+      return;
+    }
     if (role !== undefined && !ROLES.includes(role)) {
       res.status(400).json({ error: "invalid role" });
       return;
     }
     if (active !== undefined && typeof active !== "boolean") {
       res.status(400).json({ error: "active must be a boolean" });
+      return;
+    }
+    if (phone !== undefined && typeof phone !== "string") {
+      res.status(400).json({ error: "phone must be text" });
       return;
     }
     // Without this, an admin could demote or deactivate their own only
@@ -43,7 +51,31 @@ export function createEmployeesRouter() {
       return;
     }
 
-    const employee = await employeeRepository.updateRoleAndActive(req.params.id, { role, active });
+    // Renaming is its own operation, not just another column: it has to
+    // carry the person's existing tasks over to the new name (see
+    // employeeRepository.rename). Done first so a request that changes both
+    // name and role doesn't half-apply if the name turns out to clash.
+    if (name !== undefined) {
+      const newName = name.trim();
+      const clash = await employeeRepository.findByName(newName, req.params.id);
+      if (clash) {
+        res.status(409).json({
+          error: `${clash.name} already uses that name. Tasks record who they're for by name, so two people can't share one.`,
+        });
+        return;
+      }
+
+      const renamed = await employeeRepository.rename(req.params.id, newName);
+      if (!renamed) {
+        res.status(404).json({ error: "employee not found" });
+        return;
+      }
+      console.log(
+        `[employees] renamed to "${newName}" — moved ${renamed.tasksMoved} task(s) and ${renamed.repeatsMoved} repeat(s)`
+      );
+    }
+
+    const employee = await employeeRepository.update(req.params.id, { role, active, phone });
     res.json(employee);
   });
 

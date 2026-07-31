@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import {
   Client,
   ReportField,
+  ReportKind,
+  REPORT_KIND_LABEL,
   WeeklyReportPreview,
   ApiError,
   fetchClients,
-  fetchWeeklyReportPreview,
+  fetchReportPreview,
   sendClientUpdate,
 } from "./api";
 import Spinner from "./Spinner";
@@ -54,12 +56,20 @@ function isIncluded(state: ClientReportState, source: string, field: ReportField
   return state.included[fieldKey(source, field)] ?? true;
 }
 
-function composeMessage(state: ClientReportState): string {
+// The heading each report leads with. The daily one is dated rather than
+// week-numbered, since "Week 3" on a single day's numbers reads oddly.
+function reportHeading(kind: ReportKind, preview: WeeklyReportPreview): string {
+  if (kind === "daily") return `📊 *Daily Update — ${new Date().toLocaleDateString()}*`;
+  if (kind === "weekly_sku") return `📦 *SKU Update — ${preview.month}, Week ${preview.week}*`;
+  return `📊 *Performance Update — ${preview.month}, Week ${preview.week}*`;
+}
+
+function composeMessage(state: ClientReportState, kind: ReportKind): string {
   const { client, preview } = state;
   if (!preview) return "";
 
   const lines: string[] = [];
-  lines.push(`📊 *Performance Update — ${preview.month}, Week ${preview.week}*`);
+  lines.push(reportHeading(kind, preview));
   lines.push(`Hi ${client.name}, here's your update:`);
 
   for (const section of preview.sections) {
@@ -76,6 +86,7 @@ function composeMessage(state: ClientReportState): string {
 }
 
 export default function WeeklyReports() {
+  const [kind, setKind] = useState<ReportKind>("weekly_sales");
   const [states, setStates] = useState<ClientReportState[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -106,7 +117,7 @@ export default function WeeklyReports() {
       await Promise.all(
         clients.map(async (client) => {
           try {
-            const preview = await fetchWeeklyReportPreview(client.id);
+            const preview = await fetchReportPreview(client.id, kind);
             setStates((prev) =>
               prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, preview } : s))
             );
@@ -123,9 +134,12 @@ export default function WeeklyReports() {
     }
   }
 
+  // Reloads whenever the report is switched — each report reads a different
+  // tab of the sheet, so the previews and the composed messages all change.
   useEffect(() => {
     load();
-  }, []);
+    setRowStatus({});
+  }, [kind]);
 
   function toggleField(clientId: string, source: string, field: ReportField) {
     setStates((prev) =>
@@ -174,7 +188,7 @@ export default function WeeklyReports() {
       if (!target) continue;
       setRowStatus((prev) => ({ ...prev, [state.client.id]: "sending" }));
       try {
-        const message = composeMessage(state);
+        const message = composeMessage(state, kind);
         await sendClientUpdate(state.client.id, { phone: target.value, channel: "whapi", message });
         setRowStatus((prev) => ({ ...prev, [state.client.id]: "sent" }));
       } catch (err) {
@@ -201,14 +215,29 @@ export default function WeeklyReports() {
 
       <div className="panel">
         <div className="panel-head">
-          <span className="panel-title">Weekly Reports</span>
+          <span className="panel-title">Reports</span>
           <span className="panel-sub">Read live from each client's linked Google Sheet</span>
         </div>
         <p className="tip">
-          💡 Pulls this week's numbers straight from each client's report sheet — nothing to paste. Untick anything
+          💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Untick anything
           that shouldn't go out, then Send All. A client with no sheet linked (see Clients) won't show up here.
+          Each report reads its own tab of the sheet: <strong>Daily</strong>, <strong>Weekly</strong> and{" "}
+          <strong>SKU</strong>.
         </p>
         <div className="panel-body">
+          <div className="filter-chips">
+            {(Object.keys(REPORT_KIND_LABEL) as ReportKind[]).map((option) => (
+              <button
+                key={option}
+                className={`chip ${kind === option ? "active" : ""}`}
+                onClick={() => setKind(option)}
+                disabled={sendingAll}
+              >
+                {REPORT_KIND_LABEL[option]}
+              </button>
+            ))}
+          </div>
+
           {states.length === 0 && (
             <p className="panel-sub">No clients have a report sheet linked yet — add one on the Clients screen.</p>
           )}
@@ -229,7 +258,7 @@ export default function WeeklyReports() {
           {states.map((state) => {
             const groups = state.client.whatsappGroups;
             const target = sendTargetFor(state);
-            const message = composeMessage(state);
+            const message = composeMessage(state, kind);
             return (
               <div key={state.client.id} className="panel" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
                 <div className="panel-head">

@@ -90,6 +90,84 @@ export interface Task {
   // the client" is shared across whoever's using the dashboard, not
   // per-browser state.
   pendingSendFields: SendableTaskField[];
+  // How many notes this task has. The notes themselves are only fetched
+  // when a row is actually opened — see fetchTaskNotes.
+  noteCount: number;
+}
+
+export interface TaskNote {
+  id: string;
+  taskId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
+// Oldest first — a note thread reads top to bottom.
+export function fetchTaskNotes(taskId: string): Promise<TaskNote[]> {
+  return request(`/api/tasks/${taskId}/notes`);
+}
+
+export function addTaskNote(taskId: string, body: string): Promise<TaskNote> {
+  return postJson(`/api/tasks/${taskId}/notes`, { body });
+}
+
+// Only the person who wrote a note (or an admin) can remove it — enforced
+// server-side too, not just by hiding the button.
+export function deleteTaskNote(taskId: string, noteId: string): Promise<void> {
+  return request(`/api/tasks/${taskId}/notes/${noteId}`, { method: "DELETE" });
+}
+
+export type Frequency = "daily" | "weekly" | "monthly";
+
+export const FREQUENCY_LABEL: Record<Frequency, string> = {
+  daily: "Every day",
+  weekly: "Every week",
+  monthly: "Every month",
+};
+
+export interface RecurringTask {
+  id: string;
+  source: string;
+  sourceRef: string;
+  chatName: string | null;
+  description: string;
+  clientName: string | null;
+  assignee: string | null;
+  taskType: string | null;
+  marketplace: string | null;
+  frequency: Frequency;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+export function fetchRecurringTasks(): Promise<RecurringTask[]> {
+  return request("/api/recurring-tasks");
+}
+
+// "Repeat this" on a task: copies that task's details into a standalone
+// repeat, so editing or deleting the original later changes nothing.
+export function createRecurringTask(taskId: string, frequency: Frequency): Promise<RecurringTask> {
+  return postJson("/api/recurring-tasks", { taskId, frequency });
+}
+
+export function updateRecurringTask(
+  id: string,
+  changes: { active?: boolean; frequency?: Frequency }
+): Promise<RecurringTask> {
+  return request(`/api/recurring-tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+export function deleteRecurringTask(id: string): Promise<void> {
+  return request(`/api/recurring-tasks/${id}`, { method: "DELETE" });
 }
 
 export function fetchTasks(): Promise<Task[]> {
@@ -120,6 +198,9 @@ export interface Employee {
   name: string;
   role: "admin" | "manager" | "member";
   active: boolean;
+  // WhatsApp number for the daily "your open work" reminder. Empty means
+  // this employee just doesn't get reminders.
+  phone: string | null;
 }
 
 export function fetchEmployees(): Promise<Employee[]> {
@@ -135,9 +216,13 @@ export function createEmployee(name: string): Promise<Employee> {
   return postJson("/api/employees", { name });
 }
 
+// Renaming moves the person's existing tasks to the new name server-side —
+// Task.assignee holds a name, not an id, so a rename that didn't cascade
+// would orphan all their work. Fails with 409 if another employee already
+// uses that name, since two people sharing one makes assignment ambiguous.
 export function updateEmployee(
   id: string,
-  changes: Partial<Pick<Employee, "role" | "active">>
+  changes: Partial<Pick<Employee, "name" | "role" | "active" | "phone">>
 ): Promise<Employee> {
   return request(`/api/employees/${id}`, {
     method: "PATCH",
@@ -194,10 +279,25 @@ export interface Client {
   whatsappGroups: ClientWhatsappGroup[];
   notes: string | null;
   active: boolean;
+  createdAt: string;
   // Google Sheet the client tracks their own performance numbers in — see
   // fetchWeeklyReportPreview. Read-only from this app; nothing here writes
   // to it.
   reportSheetUrl: string | null;
+}
+
+export interface ClientOverview {
+  client: Client;
+  // Every task ever logged for this client, newest first — matched on the
+  // client's name, their linked WhatsApp groups and their phone (see the
+  // backend's taskRepository.listForClient), so a rename doesn't hide old
+  // work. Same shape as fetchTasks() returns.
+  tasks: Task[];
+}
+
+// Everything the Client Details screen shows, in one round trip.
+export function fetchClientOverview(id: string): Promise<ClientOverview> {
+  return request(`/api/clients/${id}/overview`);
 }
 
 export function fetchClients(): Promise<Client[]> {
@@ -291,6 +391,23 @@ export function fetchWeeklyReportPreview(clientId: string): Promise<WeeklyReport
   return request(`/api/clients/${clientId}/weekly-report-preview`);
 }
 
+// The three reports that can be sent to a client, each read from its own tab
+// of that client's sheet: "Daily", "Weekly" and "SKU".
+export type ReportKind = "daily" | "weekly_sales" | "weekly_sku";
+
+export const REPORT_KIND_LABEL: Record<ReportKind, string> = {
+  daily: "Daily Report",
+  weekly_sales: "Weekly Sales Report",
+  weekly_sku: "Weekly SKU Report",
+};
+
+// One specific report, rather than every tab at once like
+// fetchWeeklyReportPreview. Empty sections means that tab isn't in the
+// client's sheet, or has nothing for the current period yet.
+export function fetchReportPreview(clientId: string, kind: ReportKind): Promise<WeeklyReportPreview> {
+  return request(`/api/clients/${clientId}/report-preview/${kind}`);
+}
+
 // Permanent — unlike updateClient(id, { active: false }), which is reversible.
 export function deleteClient(id: string): Promise<void> {
   return request(`/api/clients/${id}`, { method: "DELETE" });
@@ -319,6 +436,12 @@ export function createReportLink(description: string, url: string): Promise<Repo
 // for the "Last sent" column.
 export function markReportLinkSent(id: string): Promise<ReportLink> {
   return postJson(`/api/report-links/${id}/mark-sent`, {});
+}
+
+// Permanent — a saved link is only ever read to compose a message, so
+// removing one doesn't affect any report already sent.
+export function deleteReportLink(id: string): Promise<void> {
+  return request(`/api/report-links/${id}`, { method: "DELETE" });
 }
 
 export type ConfigOptionCategory = "marketplace" | "status" | "task_type";

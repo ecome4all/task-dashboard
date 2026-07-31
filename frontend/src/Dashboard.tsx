@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   Task,
   TaskStatus,
@@ -7,27 +7,20 @@ import {
   ConfigOption,
   CurrentUser,
   ApiError,
+  Frequency,
+  FREQUENCY_LABEL,
   fetchTasks,
   updateTask,
   fetchEmployees,
   fetchConfigOptions,
   sendTaskUpdate,
+  createRecurringTask,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
-
-// Only used for the handful of statuses this frontend knows to color —
-// anything an admin adds beyond these falls back to "neutral", since
-// there's no meaningful color to guess for an arbitrary new status.
-const STATUS_COLOR: Record<string, string> = {
-  started: "neutral",
-  submitted: "info",
-  waiting_for_marketplace: "warn",
-  waiting_for_client: "warn",
-  again_submitted: "info",
-  done: "good",
-};
+import TaskNotes from "./TaskNotes";
+import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 
 const PAGE_SIZE = 10;
 
@@ -81,8 +74,14 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [employeeFilter, setEmployeeFilter] = useState<string | null>(null);
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const [justSentTaskId, setJustSentTaskId] = useState<string | null>(null);
+  const [openNotesTaskId, setOpenNotesTaskId] = useState<string | null>(null);
+  const [repeatingTaskId, setRepeatingTaskId] = useState<string | null>(null);
+  const [justRepeatedTaskId, setJustRepeatedTaskId] = useState<string | null>(null);
 
+  // Same rule as due dates: setting up work that will keep reappearing on
+  // everyone's board is a scheduling decision, not day-to-day triage.
   const canSetDueDate = user.role === "admin" || user.role === "manager";
+  const canRepeat = canSetDueDate;
 
   async function load() {
     setLoading(true);
@@ -114,17 +113,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
   const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
 
-  // "Waiting for Amazon" needs to read "Waiting for Flipkart" etc. depending
-  // on the task's own marketplace column — same rule the backend uses when
-  // it composes the WhatsApp update message. Falls back to the raw value for
-  // any status this list doesn't (yet) know a label for, e.g. right after an
-  // admin renames one and this component hasn't reloaded yet.
   function statusLabel(status: TaskStatus, marketplace: Marketplace | null): string {
-    if (status === "waiting_for_marketplace") {
-      return `Waiting for ${(marketplace && marketplaceLabels[marketplace]) || "Marketplace"}`;
-    }
-    const option = statusOptions.find((o) => o.value === status);
-    return option?.label ?? status;
+    return buildStatusLabel(status, marketplace, statusOptions, marketplaceLabels);
   }
 
   function selectStatusFilter(status: string | null) {
@@ -205,6 +195,23 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
       setActionError(errorMessage(err));
     } finally {
       setSendingTaskId(null);
+    }
+  }
+
+  // Sets up a repeat from an existing task. The copy happens server-side —
+  // see the recurring-tasks route — so editing this task afterwards doesn't
+  // change what the repeat goes on producing.
+  async function handleRepeat(task: Task, frequency: Frequency) {
+    setActionError("");
+    setRepeatingTaskId(task.id);
+    try {
+      await createRecurringTask(task.id, frequency);
+      setJustRepeatedTaskId(task.id);
+      setTimeout(() => setJustRepeatedTaskId((id) => (id === task.id ? null : id)), 2000);
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setRepeatingTaskId(null);
     }
   }
 
@@ -304,12 +311,15 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Due Date</th>
                 <th>Updated</th>
                 <th>Completed</th>
+                <th>Notes</th>
+                {canRepeat && <th>Repeat</th>}
                 <th>Send</th>
               </tr>
             </thead>
             <tbody>
               {pagedTasks.map((task) => (
-                <tr key={task.id}>
+                <Fragment key={task.id}>
+                <tr>
                   <td>{task.description}</td>
                   <td>{task.clientName ?? "—"}</td>
                   <td>{task.source}</td>
@@ -343,7 +353,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                       value={task.status}
                       placeholder="Status"
                       allowClear={false}
-                      triggerClassName={`status-trigger-${STATUS_COLOR[task.status] ?? "neutral"}`}
+                      triggerClassName={`status-trigger-${statusColor(task.status)}`}
                       options={statusOptions.map((status) => ({
                         value: status.value,
                         label: statusLabel(status.value, task.marketplace),
@@ -368,6 +378,39 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
                   <td>
                     <button
+                      className={`btn btn-sm ${openNotesTaskId === task.id ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => setOpenNotesTaskId(openNotesTaskId === task.id ? null : task.id)}
+                    >
+                      {task.noteCount > 0 ? `Notes (${task.noteCount})` : "Notes"}
+                    </button>
+                  </td>
+                  {canRepeat && (
+                    <td>
+                      <select
+                        className="field-select"
+                        value=""
+                        disabled={repeatingTaskId === task.id}
+                        onChange={(e) => {
+                          const value = e.target.value as Frequency;
+                          if (value) handleRepeat(task, value);
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="">
+                          {repeatingTaskId === task.id
+                            ? "Saving…"
+                            : justRepeatedTaskId === task.id
+                            ? "Set ✓"
+                            : "Repeat this"}
+                        </option>
+                        {(Object.keys(FREQUENCY_LABEL) as Frequency[]).map((freq) => (
+                          <option key={freq} value={freq}>{FREQUENCY_LABEL[freq]}</option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  <td>
+                    <button
                       className={`btn btn-sm ${task.pendingSendFields.length > 0 ? "btn-primary" : "btn-ghost"}`}
                       disabled={task.pendingSendFields.length === 0 || sendingTaskId === task.id}
                       onClick={() => handleSendUpdate(task)}
@@ -376,6 +419,22 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     </button>
                   </td>
                 </tr>
+                {openNotesTaskId === task.id && (
+                  <tr className="note-row">
+                    <td colSpan={canRepeat ? 15 : 14}>
+                      <TaskNotes
+                        taskId={task.id}
+                        user={user}
+                        onCountChange={(count) =>
+                          setTasks((prev) =>
+                            prev.map((t) => (t.id === task.id ? { ...t, noteCount: count } : t))
+                          )
+                        }
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

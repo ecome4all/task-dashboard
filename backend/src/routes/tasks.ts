@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { taskRepository } from "../repositories/taskRepository";
+import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
@@ -11,7 +12,10 @@ export function createTasksRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.get("/", async (_req, res) => {
-    const tasks = await taskRepository.list();
+    const [tasks, noteCounts] = await Promise.all([
+      taskRepository.list(),
+      taskNoteRepository.countsByTask(),
+    ]);
     // The Send button needs to know, per task, whether anything's changed
     // since the last send — computed here rather than trusting the client
     // to track it, since staff on different devices/sessions share one
@@ -20,8 +24,63 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       tasks.map((task) => ({
         ...task,
         pendingSendFields: changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null),
+        noteCount: noteCounts[task.id] ?? 0,
       }))
     );
+  });
+
+  // Notes are a running log, not one shared box — see the TaskNote model.
+  // Any logged-in employee can read and add; deleting is limited to the
+  // person who wrote it (or an admin), so nobody can quietly remove someone
+  // else's record of what happened.
+  router.get("/:id/notes", async (req, res) => {
+    res.json(await taskNoteRepository.listForTask(req.params.id));
+  });
+
+  router.post("/:id/notes", async (req, res) => {
+    const { body } = req.body;
+    if (typeof body !== "string" || !body.trim()) {
+      res.status(400).json({ error: "body is required" });
+      return;
+    }
+
+    const task = await taskRepository.findById(req.params.id);
+    if (!task) {
+      res.status(404).json({ error: "task not found" });
+      return;
+    }
+
+    const author = await employeeRepository.findById(req.employeeId!);
+    if (!author) {
+      res.status(403).json({ error: "employee not found" });
+      return;
+    }
+
+    res.status(201).json(
+      await taskNoteRepository.create({
+        taskId: task.id,
+        authorId: author.id,
+        authorName: author.name,
+        body: body.trim(),
+      })
+    );
+  });
+
+  router.delete("/:id/notes/:noteId", async (req, res) => {
+    const note = await taskNoteRepository.findById(req.params.noteId);
+    if (!note || note.taskId !== req.params.id) {
+      res.status(404).json({ error: "note not found" });
+      return;
+    }
+
+    const employee = await employeeRepository.findById(req.employeeId!);
+    if (!employee || (note.authorId !== employee.id && employee.role !== "admin")) {
+      res.status(403).json({ error: "you can only delete your own notes" });
+      return;
+    }
+
+    await taskNoteRepository.delete(note.id);
+    res.status(204).send();
   });
 
   router.patch("/:id", async (req, res) => {

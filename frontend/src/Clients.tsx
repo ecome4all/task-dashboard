@@ -28,7 +28,7 @@ interface ClientSummaryRow {
   done: number;
 }
 
-export default function Clients() {
+export default function Clients({ onOpenClient }: { onOpenClient: (id: string) => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [unrecognizedSenders, setUnrecognizedSenders] = useState<UnrecognizedSender[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -364,7 +364,7 @@ export default function Clients() {
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Clients</span>
-          <span className="panel-sub">{clients.length} total</span>
+          <span className="panel-sub">{clients.length} total · click a name to see everything about them</span>
         </div>
         <div className="panel-body">
           <table className="data-table">
@@ -381,7 +381,11 @@ export default function Clients() {
             <tbody>
               {clients.map((client) => (
                 <tr key={client.id}>
-                  <td>{client.name}</td>
+                  <td>
+                    <button className="link-button" onClick={() => onOpenClient(client.id)}>
+                      {client.name}
+                    </button>
+                  </td>
                   <td>
                     <input
                       className="field-input"

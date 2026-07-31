@@ -42,8 +42,63 @@ model Task {
   // values against this to work out what's actually new, with no manual
   // field picking. Null means nothing's ever been sent for this task yet.
   sentSnapshot Json?
+  notes        TaskNote[]
 
   @@index([tenantId, status])
+}
+
+// A running log of remarks on a task, oldest first. Deliberately a log and
+// not a single editable field on Task: several people work the same task
+// over days, and one shared box means whoever types next silently destroys
+// the previous person's context.
+model TaskNote {
+  id       String @id @default(cuid())
+  tenantId String @default("default")
+  taskId   String
+  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // Both the id and a snapshot of the name at write time: an employee can
+  // be renamed or deactivated later, and an old note should still show who
+  // actually wrote it, without a join that might come back empty.
+  authorId   String
+  authorName String
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+}
+
+// A task set to repeat, created from an existing one via "Repeat this".
+// Holds its own copy of the fields a new Task needs rather than pointing at
+// the original — the original can be edited or deleted afterwards, and that
+// must not change or break what the repeat produces.
+//
+// nextRunAt is the scheduler's queue: the job picks up every active row
+// whose nextRunAt has passed, creates the Task, then moves nextRunAt
+// forward by `frequency`. Storing the next time (instead of recomputing it
+// from lastRunAt) means a backend that was asleep or redeploying catches up
+// on exactly one run rather than replaying every missed one.
+model RecurringTask {
+  id       String @id @default(cuid())
+  tenantId String @default("default")
+  // Copied onto each Task this creates — same shape task intake produces,
+  // so a repeated task is indistinguishable from one sent over WhatsApp.
+  source      String
+  sourceRef   String
+  chatName    String?
+  description String
+  clientName  String?
+  assignee    String?
+  taskType    String?
+  marketplace String?
+  // "daily" | "weekly" | "monthly"
+  frequency String
+  nextRunAt DateTime
+  lastRunAt DateTime?
+  active    Boolean   @default(true)
+  createdBy String
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, active, nextRunAt])
 }
 
 model Employee {
@@ -54,6 +109,11 @@ model Employee {
   passwordHash String?
   role         String  @default("member") // "admin" | "manager" | "member"
   active       Boolean @default(true)
+  // WhatsApp number for the daily "your open work" reminder. Optional: an
+  // employee without one simply doesn't get reminders, rather than the
+  // reminder job failing. Stored in the same normalized form as Client.phone
+  // (country code, digits only) so it can be handed straight to an adapter.
+  phone String?
 }
 
 // A managed directory of clients, separate from Task.clientName (which is

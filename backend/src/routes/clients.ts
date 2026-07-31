@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { clientRepository } from "../repositories/clientRepository";
+import { taskRepository } from "../repositories/taskRepository";
+import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
-import { buildWeeklyReportPreview } from "../services/weeklyReportPreview";
+import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
+import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
 
 // Same audience as report-links: admins and managers are the ones who
 // send reports to clients, so they're the ones who maintain the directory.
@@ -141,6 +144,40 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     res.status(204).send();
   });
 
+  // Everything the Client Details screen shows about one client in a single
+  // round trip: the client record itself plus every task ever logged for
+  // them. The per-status/per-employee counts aren't computed here — the
+  // frontend already has to hold the task list to render the table, and it's
+  // the side that owns the status *labels* (config options are admin-
+  // editable), so counting there keeps one source of truth for both.
+  router.get("/:id/overview", requireRole(...MANAGE_ROLES), async (req, res) => {
+    const client = await clientRepository.findById(req.params.id);
+    if (!client) {
+      res.status(404).json({ error: "client not found" });
+      return;
+    }
+
+    const [tasks, noteCounts] = await Promise.all([
+      taskRepository.listForClient({
+        name: client.name,
+        groupIds: client.whatsappGroups.map((g) => g.groupId),
+        phone: client.phone,
+      }),
+      taskNoteRepository.countsByTask(),
+    ]);
+
+    res.json({
+      client,
+      // Same shape the Tasks board gets from GET /api/tasks, so the details
+      // screen can reuse the exact same Task type and row rendering.
+      tasks: tasks.map((task) => ({
+        ...task,
+        pendingSendFields: changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null),
+        noteCount: noteCounts[task.id] ?? 0,
+      })),
+    });
+  });
+
   // Live-reads this client's linked Google Sheet for the current week's
   // numbers — no persisted snapshot, so it's always in sync with whatever's
   // currently in the sheet. See services/weeklyReportPreview.ts for how
@@ -159,6 +196,35 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     try {
       const preview = await buildWeeklyReportPreview(client.reportSheetUrl, new Date());
       res.json(preview);
+    } catch (err) {
+      console.error(`Failed to read report sheet for client ${client.id}:`, err);
+      res.status(502).json({
+        error: "Couldn't read this client's report sheet. Check it's shared with the service account and the link is correct.",
+      });
+    }
+  });
+
+  // One specific report (Daily / Weekly Sales / Weekly SKU) read live from
+  // this client's sheet. Separate from /weekly-report-preview above, which
+  // reads every tab at once for the combined review screen.
+  router.get("/:id/report-preview/:kind", requireRole(...MANAGE_ROLES), async (req, res) => {
+    if (!isReportKind(req.params.kind)) {
+      res.status(400).json({ error: "unknown report" });
+      return;
+    }
+
+    const client = await clientRepository.findById(req.params.id);
+    if (!client) {
+      res.status(404).json({ error: "client not found" });
+      return;
+    }
+    if (!client.reportSheetUrl) {
+      res.status(400).json({ error: "No report sheet linked for this client." });
+      return;
+    }
+
+    try {
+      res.json(await buildReport(client.reportSheetUrl, req.params.kind, new Date()));
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
       res.status(502).json({

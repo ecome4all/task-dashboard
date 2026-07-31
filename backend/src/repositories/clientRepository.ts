@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 
 const TENANT_ID = "default";
@@ -8,6 +9,7 @@ const PUBLIC_FIELDS = {
   phone: true,
   notes: true,
   active: true,
+  createdAt: true,
   reportSheetUrl: true,
   whatsappGroups: { select: { id: true, groupId: true, groupName: true } },
 } as const;
@@ -97,6 +99,45 @@ export const clientRepository = {
 
   removeGroup(groupRowId: string) {
     return prisma.clientWhatsappGroup.delete({ where: { id: groupRowId } });
+  },
+
+  // Links a group to a client automatically, from task intake — see
+  // taskIntake.ts for when this fires. Deliberately never *reassigns*: a
+  // group already linked (to this client or any other) is left exactly as
+  // it is, because a link staff made by hand, or one made from an earlier
+  // message, must not silently move to a different client just because
+  // someone else posted in that group today. Returns the row it created,
+  // or null when there was already a link.
+  //
+  // The one thing it will change on an existing link is filling in a
+  // missing name: the group name comes from a separate provider API call
+  // that can fail (see PeriskopeAdapter.getChatName), so a group linked
+  // while that lookup was down would otherwise be stuck showing a raw JID
+  // forever. An already-saved name is never overwritten — staff may have
+  // typed it themselves.
+  async ensureGroupLinked(clientId: string, groupId: string, groupName: string | null) {
+    const existing = await prisma.clientWhatsappGroup.findFirst({
+      where: { tenantId: TENANT_ID, groupId },
+    });
+
+    if (existing) {
+      if (!existing.groupName && groupName) {
+        await prisma.clientWhatsappGroup.update({ where: { id: existing.id }, data: { groupName } });
+      }
+      return null;
+    }
+
+    try {
+      return await prisma.clientWhatsappGroup.create({
+        data: { tenantId: TENANT_ID, clientId, groupId, groupName },
+      });
+    } catch (err) {
+      // P2002 on (tenantId, groupId): a second webhook for the same group
+      // landed between the lookup above and this insert. The link exists
+      // either way, so this is the expected outcome of a race, not a failure.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return null;
+      throw err;
+    }
   },
 
   // Every WhatsApp group chat_id already linked to a client — used to work

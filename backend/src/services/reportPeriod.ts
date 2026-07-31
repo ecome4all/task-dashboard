@@ -58,6 +58,71 @@ export function findWeeklyRowFields(tab: SheetTab, monthName: string, weekNumber
     .filter((f, i) => i !== weekIdx && i !== monthIdx && f.value !== "");
 }
 
+// SKU tab: one row per SKU rather than one row per period, so this returns
+// many groups where the weekly tab returns one. Month/Week columns are
+// optional — a sheet that keeps only the current week's SKUs has no need
+// for them, and requiring them would mean the tab silently reads as empty.
+// When they are present, rows are narrowed to the current period the same
+// way findWeeklyRowFields does it.
+//
+// The SKU column is matched on /sku|asin|item|product/i so the tab doesn't
+// have to be titled one exact way — the existing sheets already vary in
+// how they name columns, which is why every other matcher here is a regex
+// too.
+export function findSkuRows(
+  tab: SheetTab,
+  monthName: string,
+  weekNumber: number
+): { sku: string; fields: ReportField[] }[] {
+  const skuIdx = findHeaderIndex(tab.headers, /sku|asin|item|product/i);
+  if (skuIdx === -1) return [];
+
+  const weekIdx = findHeaderIndex(tab.headers, /week/i);
+  const monthIdx = findHeaderIndex(tab.headers, /month/i);
+
+  return tab.rows
+    .filter((row) => {
+      const weekMatches = weekIdx === -1 || row[weekIdx]?.trim() === String(weekNumber);
+      const monthMatches = monthIdx === -1 || isSameMonth(row[monthIdx] ?? "", monthName);
+      return weekMatches && monthMatches;
+    })
+    .map((row) => ({
+      sku: row[skuIdx]?.trim() ?? "",
+      fields: tab.headers
+        .map((label, i) => ({ label, value: row[i] ?? "" }))
+        .filter((f, i) => i !== skuIdx && i !== weekIdx && i !== monthIdx && f.value !== ""),
+    }))
+    .filter((r) => r.sku !== "" && r.fields.length > 0);
+}
+
+// Just today's row from the daily tab — what the Daily Report sends, as
+// opposed to findDailyRowsInWeek below, which surfaces the whole week for
+// someone reviewing before a weekly send.
+export function findDailyRowForDate(tab: SheetTab, referenceDate: Date): { date: string; fields: ReportField[] } | null {
+  const dateIdx = findHeaderIndex(tab.headers, /date/i);
+  if (dateIdx === -1) return null;
+
+  const match = tab.rows.find((row) => {
+    const raw = row[dateIdx]?.trim();
+    if (!raw) return false;
+    const parsed = new Date(raw);
+    return (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.getFullYear() === referenceDate.getFullYear() &&
+      parsed.getMonth() === referenceDate.getMonth() &&
+      parsed.getDate() === referenceDate.getDate()
+    );
+  });
+  if (!match) return null;
+
+  return {
+    date: match[dateIdx]!.trim(),
+    fields: tab.headers
+      .map((label, i) => ({ label, value: match[i] ?? "" }))
+      .filter((f, i) => i !== dateIdx && f.value !== ""),
+  };
+}
+
 // Tab 2 (daily): every row whose Date falls within the current week's date
 // range gets surfaced (not just one) -- the reviewing human picks which
 // date(s) matter, per the "the client will handle it" design.

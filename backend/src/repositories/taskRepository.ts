@@ -8,6 +8,13 @@ export interface CreateTaskInput {
   description: string;
   chatName?: string;
   clientName?: string;
+  // Never set by WhatsApp intake — nothing is auto-triaged there. Present
+  // for repeating tasks (see scheduler.ts), which copy the triage off the
+  // task they were created from, so a repeat doesn't come back stripped of
+  // the employee and type someone already picked.
+  assignee?: string | null;
+  taskType?: string | null;
+  marketplace?: string | null;
 }
 
 export type TaskStatus =
@@ -42,6 +49,30 @@ export const taskRepository = {
 
   findById(id: string) {
     return prisma.task.findFirst({ where: { id, tenantId: TENANT_ID } });
+  },
+
+  // Every task belonging to one client, for the Client Details screen.
+  // A Task has no clientId — it stores the client's *name* as it was at
+  // intake time (see taskIntake.ts), so a name match alone would silently
+  // drop every older task the moment a client gets renamed. The chat a task
+  // arrived in is the stable link, so this also matches any of the client's
+  // linked WhatsApp groups, plus their saved phone for 1:1 tasks (compared
+  // on the last 10 digits, since sourceRef carries a provider suffix like
+  // "@c.us" and may or may not include the country code — same normalizing
+  // rule as clientRepository.findByChatId).
+  listForClient(params: { name: string; groupIds: string[]; phone: string | null }) {
+    const phoneDigits = params.phone ? params.phone.replace(/\D/g, "").slice(-10) : "";
+    return prisma.task.findMany({
+      where: {
+        tenantId: TENANT_ID,
+        OR: [
+          { clientName: params.name },
+          ...(params.groupIds.length > 0 ? [{ sourceRef: { in: params.groupIds } }] : []),
+          ...(phoneDigits.length === 10 ? [{ sourceRef: { contains: phoneDigits } }] : []),
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
   },
 
   update(id: string, input: UpdateTaskInput) {

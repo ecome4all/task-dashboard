@@ -26,6 +26,17 @@ export function createReportLinksRouter() {
     res.status(201).json(reportLink);
   });
 
+  router.delete("/:id", requireRole("admin", "manager"), async (req, res) => {
+    const reportLink = await reportLinkRepository.findById(req.params.id);
+    if (!reportLink) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+
+    await reportLinkRepository.delete(reportLink.id);
+    res.status(204).send();
+  });
+
   router.post("/:id/mark-sent", requireRole("admin", "manager"), async (req, res) => {
     const reportLink = await reportLinkRepository.findById(req.params.id);
     if (!reportLink) {

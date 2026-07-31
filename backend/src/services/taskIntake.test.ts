@@ -9,7 +9,7 @@ vi.mock("../repositories/taskRepository", () => ({
   taskRepository: { create: vi.fn() },
 }));
 vi.mock("../repositories/clientRepository", () => ({
-  clientRepository: { findByChatId: vi.fn() },
+  clientRepository: { findByChatId: vi.fn(), ensureGroupLinked: vi.fn() },
 }));
 vi.mock("../repositories/unrecognizedMessageRepository", () => ({
   unrecognizedMessageRepository: { create: vi.fn() },
@@ -23,6 +23,8 @@ describe("handleIncomingTaskMessage", () => {
   beforeEach(() => {
     vi.mocked(taskRepository.create).mockReset();
     vi.mocked(clientRepository.findByChatId).mockReset();
+    vi.mocked(clientRepository.ensureGroupLinked).mockReset();
+    vi.mocked(clientRepository.ensureGroupLinked).mockResolvedValue(null);
     vi.mocked(unrecognizedMessageRepository.create).mockReset();
   });
 
@@ -106,5 +108,92 @@ describe("handleIncomingTaskMessage", () => {
       "917417017570-1424446551@g.us",
       "919997905444@c.us"
     );
+  });
+
+  it("links the group to the client it recognized, so the rest of the group works next time", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Shivani" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+    const whatsapp = fakeAdapter();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      chatName: "Test 3",
+      senderPhone: "919574726156@c.us",
+      text: "task: hello",
+      whatsapp,
+    });
+
+    expect(clientRepository.ensureGroupLinked).toHaveBeenCalledWith(
+      "client-1",
+      "120363409833141766@g.us",
+      "Test 3"
+    );
+  });
+
+  it("passes a null group name through when the name lookup came back empty", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Shivani" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      senderPhone: "919574726156@c.us",
+      text: "task: hello",
+      whatsapp: fakeAdapter(),
+    });
+
+    expect(clientRepository.ensureGroupLinked).toHaveBeenCalledWith(
+      "client-1",
+      "120363409833141766@g.us",
+      null
+    );
+  });
+
+  it("doesn't try to link anything for a 1:1 chat, which has no group", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Shivani" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_official",
+      chatId: "919876543210",
+      text: "task: hello",
+      whatsapp: fakeAdapter(),
+    });
+
+    expect(clientRepository.ensureGroupLinked).not.toHaveBeenCalled();
+  });
+
+  it("doesn't link anything for an unrecognized sender — there's no client to link to", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(null);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      senderPhone: "910000000000@c.us",
+      text: "task: hello",
+      whatsapp: fakeAdapter(),
+    });
+
+    expect(clientRepository.ensureGroupLinked).not.toHaveBeenCalled();
+  });
+
+  // The task is the thing that matters — a link is a convenience for next
+  // time, so losing it must never cost the client their actual task.
+  it("still creates the task if the auto-link fails", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Shivani" } as any);
+    vi.mocked(clientRepository.ensureGroupLinked).mockRejectedValue(new Error("db down"));
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+
+    const task = await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      senderPhone: "919574726156@c.us",
+      text: "task: hello",
+      whatsapp: fakeAdapter(),
+    });
+
+    expect(taskRepository.create).toHaveBeenCalled();
+    expect(task).toEqual({ id: "task-1" });
   });
 });

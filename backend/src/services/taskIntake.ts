@@ -13,6 +13,13 @@ export interface TaskIntakeParams {
   senderPhone?: string;
 }
 
+// WhatsApp JIDs: a group is "<digits>-<digits>@g.us" or "<digits>@g.us",
+// anything else ("<number>@c.us", or a bare number on the official channel)
+// is a 1:1 chat, where there's no group to link in the first place.
+function isGroupChat(chatId: string): boolean {
+  return chatId.endsWith("@g.us");
+}
+
 // Shared by every intake channel (whapi group, official 1:1, Periskope): parse
 // the task: prefix, gate on a known client, store it, and acknowledge on the
 // same channel it arrived on. Returns null when the message wasn't a task (no
@@ -38,6 +45,34 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
       chatName: params.chatName,
     });
     return null;
+  }
+
+  // The client was recognized, but possibly only from the *sender's* own
+  // phone (findByChatId check #3) — in which case the group itself has never
+  // been linked, and the next task from anyone else in it (the client's
+  // staff, a colleague) wouldn't be recognized at all. Saving the link the
+  // first time the client's own number posts makes the whole group work from
+  // then on, with nobody having to find and copy a raw group JID by hand.
+  //
+  // Best-effort, and last-write-loses-to-the-existing-link by design (see
+  // ensureGroupLinked): the task itself is what matters, so a failure here
+  // is logged and swallowed rather than dropping a real task on the floor.
+  if (isGroupChat(params.chatId)) {
+    try {
+      const linked = await clientRepository.ensureGroupLinked(
+        client.id,
+        params.chatId,
+        params.chatName ?? null
+      );
+      if (linked) {
+        console.log(
+          `[task intake] auto-linked group ${params.chatId} to client ${client.name} ` +
+            `(recognized from sender ${params.senderPhone ?? "unknown"})`
+        );
+      }
+    } catch (err) {
+      console.error("Failed to auto-link WhatsApp group to client:", err);
+    }
   }
 
   const task = await taskRepository.create({

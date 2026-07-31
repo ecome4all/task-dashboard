@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { CurrentUser, fetchCurrentUser, logout, setUnauthorizedHandler } from "./api";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
+import RecurringTasks from "./RecurringTasks";
 import Employees from "./Employees";
 import Clients from "./Clients";
+import ClientDetail from "./ClientDetail";
 import ClientUpdate from "./ClientUpdate";
 import WeeklyReports from "./WeeklyReports";
 import Settings from "./Settings";
@@ -16,7 +18,15 @@ const ROLE_LABEL: Record<CurrentUser["role"], string> = {
   member: "Member",
 };
 
-type View = "tasks" | "employees" | "clients" | "client-update" | "weekly-reports" | "settings";
+type View =
+  | "tasks"
+  | "repeating"
+  | "employees"
+  | "clients"
+  | "client-details"
+  | "client-update"
+  | "weekly-reports"
+  | "settings";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -24,6 +34,10 @@ export default function App() {
   const [view, setView] = useState<View>("tasks");
   const [sessionExpired, setSessionExpired] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Which client the Client Details screen is showing. Held here rather than
+  // inside that screen so clicking a name on the Clients list can open it
+  // directly on that client, and so switching tabs and back doesn't lose it.
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCurrentUser().then((currentUser) => {
@@ -88,6 +102,12 @@ export default function App() {
           >
             Tasks
           </button>
+          <button
+            className={`nav-item ${view === "repeating" ? "active" : ""}`}
+            onClick={() => selectView("repeating")}
+          >
+            Repeating Tasks
+          </button>
           {canSeeEmployees && (
             <button
               className={`nav-item ${view === "employees" ? "active" : ""}`}
@@ -102,6 +122,14 @@ export default function App() {
               onClick={() => selectView("clients")}
             >
               Clients
+            </button>
+          )}
+          {canSeeClients && (
+            <button
+              className={`nav-item ${view === "client-details" ? "active" : ""}`}
+              onClick={() => selectView("client-details")}
+            >
+              Client Details
             </button>
           )}
           {canSeeClients && (
@@ -152,8 +180,19 @@ export default function App() {
 
         <section className="view">
           {view === "tasks" && <Dashboard user={user} />}
+          {view === "repeating" && <RecurringTasks user={user} />}
           {view === "employees" && <Employees user={user} />}
-          {view === "clients" && <Clients />}
+          {view === "clients" && (
+            <Clients
+              onOpenClient={(id) => {
+                setSelectedClientId(id);
+                setView("client-details");
+              }}
+            />
+          )}
+          {view === "client-details" && (
+            <ClientDetail clientId={selectedClientId} onSelectClient={setSelectedClientId} />
+          )}
           {view === "client-update" && <ClientUpdate />}
           {view === "weekly-reports" && <WeeklyReports />}
           {view === "settings" && <Settings />}

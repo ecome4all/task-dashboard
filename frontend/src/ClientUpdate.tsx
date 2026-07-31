@@ -8,6 +8,7 @@ import {
   fetchReportLinks,
   createReportLink,
   markReportLinkSent,
+  deleteReportLink,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
@@ -252,6 +253,23 @@ export default function ClientUpdate() {
       setLinks((prev) => [link, ...prev]);
       setNewLinkDescription("");
       setNewLinkUrl("");
+    } catch (err) {
+      setLinkError(errorMessage(err));
+    }
+  }
+
+  // Removing a saved link only removes the shortcut — reports already sent
+  // are WhatsApp messages, not rows here, so nothing already delivered
+  // changes. If the link being removed is the one currently attached to the
+  // batch, that selection is cleared too, so a deleted link can't still get
+  // composed into the next send.
+  async function handleDeleteLink(link: ReportLink) {
+    if (!window.confirm(`Remove "${link.description}"? Reports already sent are not affected.`)) return;
+    setLinkError("");
+    try {
+      await deleteReportLink(link.id);
+      setLinks((prev) => prev.filter((l) => l.id !== link.id));
+      setAttachedLinkId((current) => (current === link.id ? "" : current));
     } catch (err) {
       setLinkError(errorMessage(err));
     }
@@ -664,6 +682,7 @@ export default function ClientUpdate() {
                 <th>Description</th>
                 <th>Link</th>
                 <th>Last sent</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -674,6 +693,11 @@ export default function ClientUpdate() {
                     <a href={link.url} target="_blank" rel="noopener noreferrer">Open</a>
                   </td>
                   <td>{link.lastSentAt ? new Date(link.lastSentAt).toLocaleString() : "Never"}</td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDeleteLink(link)} type="button">
+                      Remove
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

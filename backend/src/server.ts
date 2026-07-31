@@ -15,6 +15,8 @@ import { requireAuth } from "./auth/requireAuth";
 import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
 import { CloudApiAdapter } from "./whatsapp/cloudApiAdapter";
 import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
+import { createRecurringTasksRouter } from "./routes/recurringTasks";
+import { startScheduler } from "./services/scheduler";
 
 const app = express();
 
@@ -81,6 +83,7 @@ app.use("/api/employees", requireAuth, createEmployeesRouter());
 app.use("/api/report-links", requireAuth, createReportLinksRouter());
 app.use("/api/clients", requireAuth, createClientsRouter(channels));
 app.use("/api/config-options", requireAuth, createConfigOptionsRouter());
+app.use("/api/recurring-tasks", requireAuth, createRecurringTasksRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -93,6 +96,14 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection:", reason);
 });
+
+// Creates repeating tasks when they fall due and sends the daily employee
+// reminder. In-process rather than an external cron: Railway already keeps
+// this one long-lived process alive, and everything the scheduler does is
+// driven by stored timestamps, so a restart never loses or duplicates work.
+// Set DISABLE_SCHEDULER=true to turn it off (e.g. if a second instance is
+// ever run alongside this one).
+startScheduler(channels);
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
