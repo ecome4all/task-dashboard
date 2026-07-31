@@ -1,6 +1,25 @@
 # Task Dashboard (v2)
 
-Replaces the Google Sheets task tracker. See `../Official Whatsapp API/PROPOSAL_V2.md` for the client-facing plan and `../Official Whatsapp API/TIME_AND_COST_ESTIMATION_V2.md` for internal effort/cost detail.
+Replaces the Google Sheets task tracker. Tasks arrive as WhatsApp messages, get triaged on a dashboard, and updates go back out to the client on the same channel they came in on.
+
+## What's on GitHub
+
+**This repo is public** (see the Vercel note under Deployment for why). Only the application itself belongs here — code, config templates, and this README. Nothing client-confidential, commercial, or credential-bearing.
+
+Never committed, and must stay that way:
+
+| Not published | Why |
+|---|---|
+| `LOGIN.txt` | real dashboard passwords — gitignored at the repo root |
+| `backend/.env`, `frontend/.env` | live database URL, API keys, JWT secret. Only `.env.example` (empty placeholders) is tracked |
+| `../Official Whatsapp API/` | client proposals and internal effort/cost estimates — ai4work commercial detail |
+| `../files recvd/` | client-supplied spreadsheets, logos and screenshots |
+| `../periskope-integration/` | separate package, its own concern |
+
+Two rules follow from the repo being public:
+
+- **Don't reference internal or sibling-folder documents from this README.** A `../` path is a dead link to anyone who clones, and naming an internal cost document tells the world it exists. This README previously linked the proposal and cost-estimate files that way; it no longer does.
+- **Secrets live in the host's dashboard, never in a file here** — Railway's Variables tab for the backend, Vercel's project env vars for the frontend.
 
 ## Structure
 
@@ -44,7 +63,7 @@ cd backend
 npm test
 ```
 
-48 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler, and the channel-resolver that picks the right WhatsApp adapter to reply on. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+109 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, and the employee reminder composer. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
@@ -75,15 +94,57 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
   - A reply always goes out on the *same* channel a task came in on (`whatsapp/resolveAdapter.ts`) — a group task can't be answered via the official API and vice versa
 - Auto-acknowledgement reply on task creation, on whichever channel it arrived on
 - Client gating on task intake: an incoming `task:` message only becomes a real Task if its chat_id (or, in a group, the individual sender's phone) is already tied to an active Client — otherwise it's logged to `UnrecognizedMessage` instead, visible on the Clients page for staff to review and link
+- **Automatic group linking:** when a `task:` message arrives from a WhatsApp group that isn't linked to anyone yet, but the *sender's own phone* matches a client, that group is saved to that client there and then (`clientRepository.ensureGroupLinked`). From that point on every other member of the group — the client's staff, colleagues — is recognized too, so nobody ever has to find and copy a raw group JID by hand. Deliberately **never reassigns**: a group already linked (by hand or by an earlier message) stays where it is, so a group can't silently move to another client because someone else posted in it. The one thing it will update on an existing link is filling in a missing group name. Best-effort — if the link fails, the task is still created
 - Dashboard: paginated task list (10/page), clickable status filter chips (with live counts) to narrow the list to one status, a per-client summary panel (total/pending/done), assign from a real employee list, change status/marketplace/type via a searchable dropdown, set a due date (admin/manager only — members can edit everything else on a task but not this, enforced server-side too)
 - **Settings:** Marketplace, Status, and Task Type are admin-editable lists (`ConfigOption` model, `/api/config-options`) instead of hardcoded — add/rename/deactivate options from the Settings tab without a code change. `waiting_for_marketplace` still gets its dynamic "Waiting for <marketplace>" label from whatever that marketplace option's current label is.
 - Employee management: admins add employees from the dashboard (`/api/employees`); dropdown is backed by the database, not a hardcoded list
 - Client management: admins/managers add clients, link a client to the WhatsApp group its tasks come from, edit phone/name, deactivate/reactivate
+- **Client Details:** one screen with everything about a single client — headline counts (all work / still open / done / past due date / no employee / average days to finish), a work-by-status breakdown bar, contact + linked WhatsApp groups + report sheet, free-text team notes (the only place `Client.notes` is editable), a per-employee breakdown, this week's live sheet numbers, and their full task history with status filters. Reached from the sidebar or by clicking a name on the Clients list. Note the join: a `Task` has no `clientId`, only the client's *name* as it was at intake, so `taskRepository.listForClient` also matches on the client's linked group ids and their phone (last 10 digits of `sourceRef`) — otherwise renaming a client would silently hide all their older work
 - Login/auth: email+password sessions (httpOnly cookie, JWT-backed); every `/api/*` route below `/api/auth` requires login
 - **Roles:** `admin` / `manager` / `member` on every employee. Only admins can add employees or use Settings; only admins and managers can see Clients or Send Report, and only they can set a task's due date; task access otherwise (view/assign/status/type/marketplace) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
 - **Send Report:** one combined screen — compose a metrics update (ad spend, orders, ACOS, etc., auto-calculating the derived percentages) with a live WhatsApp-formatted preview, optionally attach a saved report link (the client's own spreadsheet, e.g. a Google Sheet this app never reads/writes) into that same message, then send it in one action. A saved link's "last sent" timestamp updates once the combined send succeeds.
 - Crash safety: every outbound WhatsApp send (status-update notification, task-intake ack, report send) is wrapped so a failed send can't crash the whole backend process, plus a process-level `unhandledRejection` handler as a backstop — this was a real production incident (see git history for `tasks.ts`/`taskIntake.ts`/`clients.ts`/`reportLinks.ts`), not a hypothetical
 - Deployment config for Railway and Vercel
+
+## ⚠️ Periskope API is currently returning 401 (checked 2026-07-30)
+
+Every outbound call to `api.periskope.app` fails with:
+
+```
+401 {"code":"UNAUTHORIZED_ERROR","message":"APIs available only for active pro and enterprise plans."}
+```
+
+The account's plan has lapsed or downgraded — this is not a code or credentials problem. **Incoming webhooks still work** (Periskope pushes those to us; they aren't an API call we make), so tasks still get logged. Everything we *send* is broken:
+
+- No `✅ Got it, logged.` acknowledgement on task intake
+- No automatic "done" status notification back to the group
+- Send Report and Weekly Reports → "Send All" both fail (the `whapi` channel is the `PeriskopeAdapter` — see `server.ts`, the key name is historical)
+- `getChatName` returns undefined, so newly linked groups save with **no name** and show their raw JID in the UI
+
+Evidence it's a plan change and not a long-standing bug: tasks logged on 24–25 July captured group names fine ("Test 3", "Test 1"), and the one from 23 July didn't. Restoring the Periskope plan should fix all of the above with no code change — `ensureGroupLinked` backfills a missing group name the next time a task comes in from that group.
+
+This is also what blocks reading a group's **member list** to match a client against anyone in the group, rather than only against whoever posted.
+
+## Security fix: "Deactivate" now actually locks people out (2026-07-30)
+
+Deactivating an employee used to block only the **role-gated** screens (Clients, Employees, Settings, Reports). It did **not** block login, and it did not block anything behind `requireAuth` alone — a deactivated employee could still log in, read the entire task board, and edit tasks. Confirmed live before the fix: a deactivated member logged in (200), listed all 5 tasks, and successfully PATCHed one.
+
+Two changes:
+
+- **`routes/auth.ts`** — login rejects an inactive employee, worded identically to a wrong password so it doesn't leak which accounts exist.
+- **`auth/requireAuth.ts`** — now looks the employee up fresh on every request and rejects them if missing or inactive, so deactivating ends an *existing* session immediately rather than whenever its cookie happens to expire. It stashes the row on `req.employee`, and `requireRole` reuses it, so role-gated routes don't fetch the same primary key twice.
+
+## Renaming an employee
+
+`PATCH /api/employees/:id` accepts `name`, and the Employees screen has an editable name box. This is not a plain column update: `Task.assignee` and `RecurringTask.assignee` store the employee's **name as text**, not an id, so changing only the `Employee` row would leave all their work pointing at a name that belongs to nobody — still showing the old name, and no longer matching any option in the assignee dropdown. `employeeRepository.rename` updates all three in one transaction, and a rename that would collide with another employee's name is rejected with 409 (case-insensitively), since two people sharing a name makes assignment unanswerable.
+
+## Notes, repeating tasks, reminders and the three reports
+
+- **Notes on a task** (`TaskNote`) — a running log rather than one shared box: every note keeps who wrote it and when, so several people working the same task over days don't overwrite each other's context. Open the "Notes" button on any task row and the thread appears underneath it. Any logged-in employee can read and add; only the author or an admin can delete (enforced server-side, not just hidden). The board shows a count per row and only loads a thread when a row is actually opened.
+- **Repeating tasks** (`RecurringTask`) — "Repeat this" on any task (admin/manager) copies it into a standalone repeat set to daily/weekly/monthly. It's a **copy, not a reference**: editing, completing or deleting the original afterwards changes nothing about what the repeat produces. Triage (employee/type/marketplace) is carried across, so a repeat doesn't come back stripped. Manage them on the **Repeating Tasks** screen. First run is always one interval out, so setting up a weekly repeat doesn't instantly duplicate the task you're looking at.
+- **Daily employee reminder** — one WhatsApp message per employee at `REMINDER_HOUR` (default 9am) listing their own open work, grouped Late / Due today / Still open. Employees with no phone saved, or nothing open, are skipped rather than sent an empty message. Set an employee's number on the **Employees** screen.
+- **Scheduler** (`services/scheduler.ts`) — in-process, ticking every 5 minutes; no external cron. Everything is driven by stored timestamps (`nextRunAt`), so a restart or redeploy never loses or duplicates work, and a backend that was down for a week catches up with **one** run rather than replaying every missed one. `DISABLE_SCHEDULER=true` turns it off — needed only if a second instance is ever run alongside this one.
+- **Three separate reports** — Daily, Weekly Sales and Weekly SKU, each reading its own tab of the client's sheet (`Daily`, `Weekly`, `SKU`). Pick one with the chips at the top of the Reports screen. Tab names are tried in a few likely spellings rather than relying on the Sheets API's range parsing being case-insensitive. The SKU tab is one row per SKU: it needs a column matching `/sku|asin|item|product/i`, and optional Month/Week columns to narrow to the current period — without them, every row is used.
 
 **Not yet built (later phases / follow-ups):**
 - End-to-end/integration tests against a real database (needs a provisioned Postgres instance)
