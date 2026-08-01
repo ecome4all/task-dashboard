@@ -95,6 +95,12 @@ export default function App() {
         <div className="brand">
           <BrandLogo height={26} />
         </div>
+        {/* Sits directly under the logo, above the menu, so it's on screen
+            whenever the sidebar is — the old placement pinned it to the very
+            bottom, where a long menu or a short window pushed it out of view. */}
+        <div className="brand-credit">
+          created by <BrandCredit />
+        </div>
         <nav className="nav">
           <button
             className={`nav-item ${view === "tasks" ? "active" : ""}`}
@@ -157,9 +163,6 @@ export default function App() {
             </button>
           )}
         </nav>
-        <div className="sidebar-footer">
-          created by <BrandCredit />
-        </div>
       </aside>
 
       <div className="main">

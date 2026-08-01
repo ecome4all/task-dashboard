@@ -241,59 +241,55 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
           <span className="panel-sub">{filteredTasks.length} shown of {tasks.length} total</span>
         </div>
         <div className="panel-body">
-          <div className="filter-chips" style={{ alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              <button
-                className={`chip ${statusFilter === null ? "active" : ""}`}
-                onClick={() => selectStatusFilter(null)}
-              >
-                All <span className="chip-count">{tasks.length}</span>
-              </button>
+          <div className="filter-row">
+            {/* Status sits with the other filters as a dropdown rather than a
+                row of chips — the counts that made the chips worth their width
+                are kept on each option. */}
+            <select
+              className="field-select"
+              value={statusFilter ?? ""}
+              onChange={(e) => selectStatusFilter(e.target.value || null)}
+            >
+              <option value="">All Statuses ({tasks.length})</option>
               {statusOptions.map((option) => (
-                <button
-                  key={option.value}
-                  className={`chip ${statusFilter === option.value ? "active" : ""}`}
-                  onClick={() => selectStatusFilter(option.value)}
-                >
-                  {option.label} <span className="chip-count">{tasks.filter((t) => t.status === option.value).length}</span>
-                </button>
+                <option key={option.value} value={option.value}>
+                  {option.label} ({tasks.filter((t) => t.status === option.value).length})
+                </option>
               ))}
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              <select
-                className="field-select"
-                value={marketplaceFilter ?? ""}
-                onChange={(e) => selectMarketplaceFilter(e.target.value)}
-              >
-                <option value="">All Marketplaces</option>
-                {marketplaceOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-                <option value={UNSET_MARKETPLACE}>Unset</option>
-              </select>
-              <select
-                className="field-select"
-                value={employeeFilter ?? ""}
-                onChange={(e) => selectEmployeeFilter(e.target.value)}
-              >
-                <option value="">All Employees</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.name}>{employee.name}</option>
-                ))}
-                <option value={UNASSIGNED}>Unassigned</option>
-              </select>
-              <select
-                className="field-select"
-                value={typeFilter ?? ""}
-                onChange={(e) => selectTypeFilter(e.target.value)}
-              >
-                <option value="">All Types</option>
-                {taskTypeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-                <option value={UNSET_TYPE}>Not Set</option>
-              </select>
-            </div>
+            </select>
+            <select
+              className="field-select"
+              value={marketplaceFilter ?? ""}
+              onChange={(e) => selectMarketplaceFilter(e.target.value)}
+            >
+              <option value="">All Marketplaces</option>
+              {marketplaceOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+              <option value={UNSET_MARKETPLACE}>Unset</option>
+            </select>
+            <select
+              className="field-select"
+              value={employeeFilter ?? ""}
+              onChange={(e) => selectEmployeeFilter(e.target.value)}
+            >
+              <option value="">All Employees</option>
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.name}>{employee.name}</option>
+              ))}
+              <option value={UNASSIGNED}>Unassigned</option>
+            </select>
+            <select
+              className="field-select"
+              value={typeFilter ?? ""}
+              onChange={(e) => selectTypeFilter(e.target.value)}
+            >
+              <option value="">All Types</option>
+              {taskTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+              <option value={UNSET_TYPE}>Not Set</option>
+            </select>
           </div>
 
           <table className="data-table">

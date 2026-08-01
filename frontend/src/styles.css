@@ -50,16 +50,29 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 
 /* ---- app shell ---- */
 .shell { display: flex; min-height: 100svh; }
-.sidebar { width: 168px; flex-shrink: 0; background: var(--bg-alt); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 14px 12px; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 4px 16px; }
+/* Sticky and full-height so the whole panel — logo, credit and menu — stays
+   on screen while a long task table scrolls past it. */
+.sidebar {
+  width: 168px; flex-shrink: 0; background: var(--bg-alt); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 14px 12px;
+  position: sticky; top: 0; height: 100svh;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 4px 6px; }
+/* Directly under the logo rather than pinned to the bottom of the panel,
+   where a long menu or a short window pushed it out of sight. */
+.brand-credit {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 4px 14px; font-size: 12px; color: var(--text); opacity: 0.7;
+}
 .brand-mark { border-radius: 7px; flex-shrink: 0; object-fit: contain; }
 .brand-logo { display: inline-flex; align-items: center; border-radius: 8px; }
 .brand-logo img { display: block; }
-.nav { display: flex; flex-direction: column; gap: 4px; }
+/* Scrolls within itself if the menu ever outgrows the panel, so a new nav
+   item can never push the logo or the credit off screen. */
+.nav { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
 .nav-item { display: block; width: 100%; text-align: left; padding: 9px 11px; border-radius: 8px; border: none; background: transparent; color: var(--text); font-size: 13.5px; cursor: pointer; }
 .nav-item:hover { background: var(--border); }
 .nav-item.active { background: var(--accent); color: #fff; font-weight: 600; }
-.sidebar-footer { margin-top: auto; padding: 10px 8px; font-size: 12px; color: var(--text); opacity: 0.55; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .credit-logo { font-size: 13px; letter-spacing: -0.01em; }
 .credit-logo .ai { color: var(--text-h); font-weight: 700; }
 .credit-logo .four { color: oklch(0.72 0.2 132); font-weight: 800; }
@@ -255,7 +268,15 @@ table.data-table tr:last-child td { border-bottom: none; }
 .note-add textarea { width: 100%; }
 .note-error { color: var(--danger); font-size: 12.5px; }
 
+/* One row of filter dropdowns above a table. Wraps onto more rows on a
+   narrow screen rather than pushing the table sideways. */
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.filter-row select.field-select { flex: 0 1 auto; min-width: 0; }
+
 /* ---- status filter chips ---- */
+/* Still used by the Client Details screen, which filters one client's own
+   task list — few enough statuses there that chips read faster than a
+   dropdown, and they double as the per-status counts. */
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .chip {
   border: 1px solid var(--border); background: var(--bg); color: var(--text);
