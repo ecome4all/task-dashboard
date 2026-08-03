@@ -38,15 +38,18 @@ describe("extractPeriskopeMessage", () => {
     });
   });
 
-  it("ignores our own outgoing messages (from_me: true)", () => {
+  // Staff log work from the Ecom4all number too, so a from_me message that
+  // starts with "task:" must still become a task. This used to be dropped.
+  it("accepts a task: message sent from our own number", () => {
     const payload = messageCreated({
-      chat_id: "919876543210@c.us",
-      body: "✅ Got it, logged.",
-      message_type: "chat",
+      chat_id: "120363229283835953@g.us",
+      body: "task: Optimise Ads",
       from_me: true,
     });
-
-    expect(extractPeriskopeMessage(payload)).toBeNull();
+    expect(extractPeriskopeMessage(payload)).toEqual({
+      chatId: "120363229283835953@g.us",
+      text: "task: Optimise Ads",
+    });
   });
 
   it("ignores non-text messages (e.g. voice notes)", () => {
