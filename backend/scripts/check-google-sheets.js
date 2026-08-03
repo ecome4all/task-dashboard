@@ -34,18 +34,24 @@ if (!privateKey.includes("BEGIN PRIVATE KEY")) {
     "Copy the whole value of \"private_key\" from the JSON file, including the BEGIN and END lines.",
   );
 }
-// The single most common mistake: pasting the key across many real lines
-// instead of one line with \n written as a backslash and an n.
-if (privateKey.includes("\n") && !privateKey.includes("\\n")) {
+// Both shapes are fine by the time we read it, and telling them apart here
+// caused a false alarm worth explaining. In .env the key is written on one
+// line with \n as two characters — but dotenv expands \n inside a
+// double-quoted value into real newlines, so what lands in process.env has
+// real line breaks and is already correct. The app's own replace(/\\n/g)
+// then does nothing, which is harmless.
+//
+// So the only genuine failure is a key that has neither: pasted as one line
+// with the line breaks simply lost, which is not a usable key.
+const hasRealBreaks = privateKey.includes("\n");
+const hasEscapedBreaks = privateKey.includes("\\n");
+if (!hasRealBreaks && !hasEscapedBreaks) {
   fail(
-    "The private key is spread over several real lines.",
-    "It must be ONE long line, with \\n written as two characters (a backslash, then an n) — see step 6 of the guide.",
+    "The private key has no line breaks in it at all.",
+    "Copy the whole value of \"private_key\" from the JSON file exactly as it appears, keeping every \\n.",
   );
 }
-if (!privateKey.includes("\\n")) {
-  fail("The private key has no \\n in it at all.", "Copy the value exactly as it appears in the JSON file.");
-}
-console.log("  2. Private key looks right");
+console.log(`  2. Private key looks right (${hasRealBreaks ? "expanded by dotenv" : "escaped form"})`);
 
 // --- 3. Google accepts the key ---
 const { google } = require("googleapis");
@@ -85,13 +91,29 @@ const auth = new google.auth.GoogleAuth({
     console.log(`  4. Opened the sheet : ${res.data.properties.title}`);
     console.log(`     Tabs inside it   : ${tabs.join(", ")}`);
 
-    const wanted = ["Daily", "Weekly", "SKU"];
-    const missing = wanted.filter((w) => !tabs.some((t) => t.toLowerCase() === w.toLowerCase()));
-    if (missing.length) {
-      console.log(`\n  Note: the app also needs these tabs: ${missing.join(", ")}`);
-      console.log("  Reports for those will come back empty until the tabs exist.");
-    } else {
-      console.log("     All three tabs the app needs are there.");
+    // Same rules the app uses to decide which tab feeds which report (see
+    // pickTab in services/weeklyReportPreview.ts). Matched on wording, not an
+    // exact name, so the standard names below and older ones both work.
+    // SKU is tested first: "Weekly SKU Sales" also contains "Weekly".
+    const isSku = (n) => /\b(sku|asin)\b/i.test(n);
+    const found = {
+      "Daily Report": tabs.find((t) => /\bdaily\b/i.test(t) && !isSku(t)),
+      "Weekly Sales": tabs.find((t) => /\bweek(ly)?\b/i.test(t) && !isSku(t)),
+      "Weekly SKU Sales": tabs.find(isSku),
+    };
+
+    console.log("     Reports this sheet can produce:");
+    let missing = 0;
+    for (const [standardName, actual] of Object.entries(found)) {
+      if (actual) console.log(`       ${standardName.padEnd(18)} reads the tab "${actual}"`);
+      else {
+        console.log(`       ${standardName.padEnd(18)} NO MATCHING TAB — this report will be empty`);
+        missing++;
+      }
+    }
+    if (missing) {
+      console.log(`\n  Add the missing tab(s). The standard names are:`);
+      console.log("    Daily Report · Weekly Sales · Weekly SKU Sales");
     }
     console.log("\n  Everything works.\n");
   } catch (err) {

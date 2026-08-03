@@ -44,6 +44,19 @@ function sheetsClient() {
   return cachedClient;
 }
 
+// Every tab name in the spreadsheet, in the order they appear. Needed
+// because a report's tab can't be looked up by one fixed name — the same
+// three tables have been seen called "Daily"/"Daily Report"/"Daily Tracker"
+// across different versions of the client sheets. Callers match these names
+// against a pattern instead (see pickTab in weeklyReportPreview.ts).
+export async function listTabNames(spreadsheetId: string): Promise<string[]> {
+  const sheets = sheetsClient();
+  const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties.title" });
+  return (res.data.sheets ?? [])
+    .map((s: any) => s.properties?.title)
+    .filter((t: unknown): t is string => typeof t === "string");
+}
+
 // Reads one tab as its own header row + data rows, using Sheets'
 // FORMATTED_VALUE render option -- the same text you'd see (and get) if you
 // manually selected and copied the cell, e.g. "12.41%" stays "12.41%"
