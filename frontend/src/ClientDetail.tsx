@@ -13,6 +13,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import Pagination, { usePaged } from "./Paged";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 
 const PAGE_SIZE = 10;
@@ -68,7 +69,6 @@ export default function ClientDetail({
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
   const [notesDraft, setNotesDraft] = useState<string | null>(null);
   const [savingNotes, setSavingNotes] = useState(false);
   const [report, setReport] = useState<WeeklyReportPreview | null>(null);
@@ -114,7 +114,6 @@ export default function ClientDetail({
     setLoadingClient(true);
     setLoadError("");
     setStatusFilter(null);
-    setPage(1);
     setNotesDraft(null);
     setReport(null);
     setReportError("");
@@ -176,6 +175,9 @@ export default function ClientDetail({
     }
   }
 
+  const filteredTasks = statusFilter ? tasks.filter((t) => t.status === statusFilter) : tasks;
+  const paged = usePaged(filteredTasks, PAGE_SIZE);
+
   if (loadingList) return <Spinner label="Loading clients…" />;
 
   if (loadError && !client) return <ErrorBanner message={loadError} onRetry={() => (clientId ? loadClient(clientId) : loadShared())} />;
@@ -230,12 +232,6 @@ export default function ClientDetail({
       return acc;
     }, {})
   ).sort((a, b) => b.total - a.total);
-
-  const filteredTasks = statusFilter ? tasks.filter((t) => t.status === statusFilter) : tasks;
-  const pageCount = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedTasks = filteredTasks.slice(pageStart, pageStart + PAGE_SIZE);
 
   return (
     <>
@@ -512,7 +508,7 @@ export default function ClientDetail({
                       className={`chip ${statusFilter === null ? "active" : ""}`}
                       onClick={() => {
                         setStatusFilter(null);
-                        setPage(1);
+                        paged.reset();
                       }}
                     >
                       All <span className="chip-count">{tasks.length}</span>
@@ -523,7 +519,7 @@ export default function ClientDetail({
                         className={`chip ${statusFilter === row.value ? "active" : ""}`}
                         onClick={() => {
                           setStatusFilter(row.value);
-                          setPage(1);
+                          paged.reset();
                         }}
                       >
                         {row.label} <span className="chip-count">{row.count}</span>
@@ -545,7 +541,7 @@ export default function ClientDetail({
                       </tr>
                     </thead>
                     <tbody>
-                      {pagedTasks.map((task) => (
+                      {paged.items.map((task) => (
                         <tr key={task.id}>
                           <td>{task.description}</td>
                           <td>
@@ -570,29 +566,7 @@ export default function ClientDetail({
                       ))}
                     </tbody>
                   </table>
-
-                  {pageCount > 1 && (
-                    <div className="pagination">
-                      <span className="pagination-info">
-                        {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredTasks.length)} of {filteredTasks.length}
-                      </span>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        disabled={currentPage <= 1}
-                        onClick={() => setPage(currentPage - 1)}
-                      >
-                        Prev
-                      </button>
-                      <span className="pagination-info">Page {currentPage} of {pageCount}</span>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        disabled={currentPage >= pageCount}
-                        onClick={() => setPage(currentPage + 1)}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  )}
+                  <Pagination paged={paged} />
                 </>
               )}
             </div>

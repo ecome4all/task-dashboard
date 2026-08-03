@@ -11,6 +11,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import Pagination, { usePaged } from "./Paged";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -75,6 +76,8 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     }
   }
 
+  const pagedRepeats = usePaged(repeats, 10);
+
   if (loading) return <Spinner label="Loading repeating tasks…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
@@ -113,7 +116,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {repeats.map((repeat) => (
+                {pagedRepeats.items.map((repeat) => (
                   <tr key={repeat.id} style={repeat.active ? undefined : { opacity: 0.55 }}>
                     <td>{repeat.description}</td>
                     <td>{repeat.clientName ?? "—"}</td>

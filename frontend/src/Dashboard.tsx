@@ -20,6 +20,7 @@ import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
 import TaskNotes from "./TaskNotes";
+import Pagination, { usePaged } from "./Paged";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 
 const PAGE_SIZE = 10;
@@ -67,7 +68,6 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
-  const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [marketplaceFilter, setMarketplaceFilter] = useState<string | null>(null);
@@ -119,22 +119,22 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   function selectStatusFilter(status: string | null) {
     setStatusFilter(status);
-    setPage(1);
+    paged.reset();
   }
 
   function selectTypeFilter(type: string) {
     setTypeFilter(type || null);
-    setPage(1);
+    paged.reset();
   }
 
   function selectMarketplaceFilter(marketplace: string) {
     setMarketplaceFilter(marketplace || null);
-    setPage(1);
+    paged.reset();
   }
 
   function selectEmployeeFilter(employee: string) {
     setEmployeeFilter(employee || null);
-    setPage(1);
+    paged.reset();
   }
 
   // Updates the row immediately with the picked value (so the dropdown
@@ -215,10 +215,6 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     }
   }
 
-  if (loading) return <Spinner label="Loading tasks…" />;
-
-  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
-
   const filteredTasks = tasks.filter(
     (t) =>
       (!statusFilter || t.status === statusFilter) &&
@@ -226,10 +222,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
       matchesMarketplaceFilter(t, marketplaceFilter) &&
       matchesEmployeeFilter(t, employeeFilter)
   );
-  const pageCount = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedTasks = filteredTasks.slice(pageStart, pageStart + PAGE_SIZE);
+  const paged = usePaged(filteredTasks, PAGE_SIZE);
+
+  if (loading) return <Spinner label="Loading tasks…" />;
+
+  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
+
 
   return (
     <>
@@ -313,7 +311,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               </tr>
             </thead>
             <tbody>
-              {pagedTasks.map((task) => (
+              {paged.items.map((task) => (
                 <Fragment key={task.id}>
                 <tr>
                   <td>{task.description}</td>
@@ -434,29 +432,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               ))}
             </tbody>
           </table>
-
-          {pageCount > 1 && (
-            <div className="pagination">
-              <span className="pagination-info">
-                {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredTasks.length)} of {filteredTasks.length}
-              </span>
-              <button
-                className="btn btn-ghost btn-sm"
-                disabled={currentPage <= 1}
-                onClick={() => setPage(currentPage - 1)}
-              >
-                Prev
-              </button>
-              <span className="pagination-info">Page {currentPage} of {pageCount}</span>
-              <button
-                className="btn btn-ghost btn-sm"
-                disabled={currentPage >= pageCount}
-                onClick={() => setPage(currentPage + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )}
+              <Pagination paged={paged} />
         </div>
       </div>
     </>

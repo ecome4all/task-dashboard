@@ -16,6 +16,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import Pagination, { usePaged } from "./Paged";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -214,10 +215,6 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     }
   }
 
-  if (loading) return <Spinner label="Loading clients…" />;
-
-  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
-
   const clientSummary: ClientSummaryRow[] = Object.values(
     tasks.reduce<Record<string, ClientSummaryRow>>((acc, t) => {
       const name = t.clientName ?? "No Client";
@@ -228,6 +225,15 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
       return acc;
     }, {})
   ).sort((a, b) => b.total - a.total);
+
+  const pagedSummary = usePaged(clientSummary, 10);
+  const pagedSenders = usePaged(unrecognizedSenders, 10);
+  const pagedClients = usePaged(clients, 10);
+
+  if (loading) return <Spinner label="Loading clients…" />;
+
+  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
+
 
   return (
     <>
@@ -248,7 +254,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
               </tr>
             </thead>
             <tbody>
-              {clientSummary.map((row) => (
+              {pagedSummary.items.map((row) => (
                 <tr key={row.name}>
                   <td>{row.name}</td>
                   <td>{row.total}</td>
@@ -258,6 +264,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
               ))}
             </tbody>
           </table>
+            <Pagination paged={pagedSummary} />
         </div>
       </div>
 
@@ -324,7 +331,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                 </tr>
               </thead>
               <tbody>
-                {unrecognizedSenders.map((sender) => (
+                {pagedSenders.items.map((sender) => (
                   <tr key={sender.chatId}>
                     <td>{sender.chatName ?? sender.chatId}</td>
                     <td>{sender.messageCount}</td>
@@ -357,6 +364,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                 ))}
               </tbody>
             </table>
+            <Pagination paged={pagedSenders} />
           </div>
         </div>
       )}
@@ -379,7 +387,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
               </tr>
             </thead>
             <tbody>
-              {clients.map((client) => (
+              {pagedClients.items.map((client) => (
                 <tr key={client.id}>
                   <td>
                     <button className="link-button" onClick={() => onOpenClient(client.id)}>
@@ -461,6 +469,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
               ))}
             </tbody>
           </table>
+            <Pagination paged={pagedClients} />
         </div>
       </div>
     </>

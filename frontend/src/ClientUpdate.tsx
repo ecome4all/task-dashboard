@@ -12,6 +12,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import Pagination, { usePaged } from "./Paged";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -444,6 +445,8 @@ export default function ClientUpdate() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const pagedLinks = usePaged(links, 10);
+
   if (loading) return <Spinner label="Loading…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
@@ -488,7 +491,7 @@ export default function ClientUpdate() {
               style={{ flex: "1 1 260px" }}
             >
               <option value="">Attach a saved report link (optional)…</option>
-              {links.map((link) => (
+              {pagedLinks.items.map((link) => (
                 <option key={link.id} value={link.id}>{link.description}</option>
               ))}
             </select>

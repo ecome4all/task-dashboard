@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Employee, CurrentUser, ApiError, fetchAllEmployees, createEmployee, updateEmployee } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import Pagination, { usePaged } from "./Paged";
 
 const ROLE_LABEL: Record<Employee["role"], string> = {
   admin: "Admin",
@@ -114,6 +115,8 @@ export default function Employees({ user }: { user: CurrentUser }) {
     }
   }
 
+  const pagedEmployees = usePaged(employees, 10);
+
   if (loading) return <Spinner label="Loading employees…" />;
 
   if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
@@ -156,7 +159,7 @@ export default function Employees({ user }: { user: CurrentUser }) {
               </tr>
             </thead>
             <tbody>
-              {employees.map((employee) => {
+              {pagedEmployees.items.map((employee) => {
                 const isSelf = employee.id === user.id;
                 return (
                   <tr key={employee.id}>
