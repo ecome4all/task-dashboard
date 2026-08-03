@@ -316,3 +316,9 @@ table.data-table tr:last-child td { border-bottom: none; }
 .error-banner button { flex-shrink: 0; }
 
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.4s; } }
+
+/* ---- repeating task setup ---- */
+/* Opens under a task row on the board. The date and time are chosen here
+   rather than assumed, so nothing is scheduled until Save is pressed. */
+.repeat-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.repeat-form label.fact-label { display: block; margin-bottom: 4px; }

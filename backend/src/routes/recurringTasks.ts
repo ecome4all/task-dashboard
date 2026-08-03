@@ -23,11 +23,27 @@ export function createRecurringTasksRouter() {
   // original can be edited, completed or deleted afterwards, and none of
   // that should change or break what the repeat goes on producing.
   router.post("/", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { taskId, frequency } = req.body;
+    const { taskId, frequency, nextRunAt } = req.body;
 
     if (!isFrequency(frequency)) {
       res.status(400).json({ error: "frequency must be daily, weekly or monthly" });
       return;
+    }
+
+    // When the first one should be made. Chosen by whoever sets the repeat up
+    // rather than assumed — "every week" says nothing about which day or what
+    // time, and guessing produced tasks at whatever moment the button happened
+    // to be clicked. Falls back to one interval from now only if it's omitted.
+    let firstRun: Date;
+    if (nextRunAt === undefined || nextRunAt === null || nextRunAt === "") {
+      firstRun = firstRunAt(new Date(), frequency);
+    } else {
+      const parsed = new Date(nextRunAt);
+      if (Number.isNaN(parsed.getTime())) {
+        res.status(400).json({ error: "Enter a valid date and time for the first one." });
+        return;
+      }
+      firstRun = parsed;
     }
 
     const task = await taskRepository.findById(taskId);
@@ -49,16 +65,14 @@ export function createRecurringTasksRouter() {
         taskType: task.taskType,
         marketplace: task.marketplace,
         frequency,
-        // One interval from now, so setting up a weekly repeat doesn't
-        // immediately duplicate the task you're looking at.
-        nextRunAt: firstRunAt(new Date(), frequency),
+        nextRunAt: firstRun,
         createdBy: employee?.name ?? "Unknown",
       })
     );
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { active, frequency } = req.body;
+    const { active, frequency, nextRunAt } = req.body;
 
     if (active !== undefined && typeof active !== "boolean") {
       res.status(400).json({ error: "active must be true or false" });
@@ -67,6 +81,16 @@ export function createRecurringTasksRouter() {
     if (frequency !== undefined && !isFrequency(frequency)) {
       res.status(400).json({ error: "frequency must be daily, weekly or monthly" });
       return;
+    }
+
+    let parsedNextRun: Date | undefined;
+    if (nextRunAt !== undefined) {
+      const parsed = new Date(nextRunAt);
+      if (Number.isNaN(parsed.getTime())) {
+        res.status(400).json({ error: "Enter a valid date and time." });
+        return;
+      }
+      parsedNextRun = parsed;
     }
 
     const existing = await recurringTaskRepository.findById(req.params.id);
@@ -78,9 +102,12 @@ export function createRecurringTasksRouter() {
     res.json(
       await recurringTaskRepository.update(req.params.id, {
         ...(active !== undefined && { active }),
-        // Changing how often it repeats restarts the clock from now, rather
-        // than keeping a nextRunAt that was worked out for the old interval.
-        ...(frequency !== undefined && { frequency, nextRunAt: firstRunAt(new Date(), frequency) }),
+        // Changing how often it repeats deliberately leaves the next date
+        // alone: "every week instead of every day" shouldn't silently move
+        // the run to some other day. Change the date explicitly if you want
+        // it moved.
+        ...(frequency !== undefined && { frequency }),
+        ...(parsedNextRun !== undefined && { nextRunAt: parsedNextRun }),
       })
     );
   });

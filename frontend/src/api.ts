@@ -151,13 +151,21 @@ export function fetchRecurringTasks(): Promise<RecurringTask[]> {
 
 // "Repeat this" on a task: copies that task's details into a standalone
 // repeat, so editing or deleting the original later changes nothing.
-export function createRecurringTask(taskId: string, frequency: Frequency): Promise<RecurringTask> {
-  return postJson("/api/recurring-tasks", { taskId, frequency });
+// nextRunAt is when the first one should be made — chosen explicitly, since
+// "every week" says nothing about which day or what time.
+export function createRecurringTask(
+  taskId: string,
+  frequency: Frequency,
+  nextRunAt: string
+): Promise<RecurringTask> {
+  return postJson("/api/recurring-tasks", { taskId, frequency, nextRunAt });
 }
 
+// Changing frequency leaves the next date where it is — move it explicitly
+// with nextRunAt if you want it somewhere else.
 export function updateRecurringTask(
   id: string,
-  changes: { active?: boolean; frequency?: Frequency }
+  changes: { active?: boolean; frequency?: Frequency; nextRunAt?: string }
 ): Promise<RecurringTask> {
   return request(`/api/recurring-tasks/${id}`, {
     method: "PATCH",

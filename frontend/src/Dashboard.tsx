@@ -22,6 +22,7 @@ import SearchableSelect from "./SearchableSelect";
 import TaskNotes from "./TaskNotes";
 import Pagination, { usePaged } from "./Paged";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
+import { defaultFirstRun, fromLocalInputValue } from "./dateTimeInput";
 
 const PAGE_SIZE = 10;
 
@@ -77,6 +78,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [openNotesTaskId, setOpenNotesTaskId] = useState<string | null>(null);
   const [repeatingTaskId, setRepeatingTaskId] = useState<string | null>(null);
   const [justRepeatedTaskId, setJustRepeatedTaskId] = useState<string | null>(null);
+  // Which task's repeat form is open, and what's been chosen in it. The
+  // date and time are picked deliberately — nothing is scheduled until Save.
+  const [openRepeatTaskId, setOpenRepeatTaskId] = useState<string | null>(null);
+  const [repeatFrequency, setRepeatFrequency] = useState<Frequency>("weekly");
+  const [repeatStartAt, setRepeatStartAt] = useState("");
 
   // Same rule as due dates: setting up work that will keep reappearing on
   // everyone's board is a scheduling decision, not day-to-day triage.
@@ -198,14 +204,31 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     }
   }
 
+  function openRepeatForm(task: Task) {
+    if (openRepeatTaskId === task.id) {
+      setOpenRepeatTaskId(null);
+      return;
+    }
+    setOpenRepeatTaskId(task.id);
+    setRepeatFrequency("weekly");
+    setRepeatStartAt(defaultFirstRun());
+  }
+
   // Sets up a repeat from an existing task. The copy happens server-side —
   // see the recurring-tasks route — so editing this task afterwards doesn't
-  // change what the repeat goes on producing.
-  async function handleRepeat(task: Task, frequency: Frequency) {
+  // change what the repeat goes on producing. The first run is whatever date
+  // and time was picked, not a guess.
+  async function handleRepeat(task: Task) {
+    const startsAt = fromLocalInputValue(repeatStartAt);
+    if (!startsAt) {
+      setActionError("Pick the date and time for the first one.");
+      return;
+    }
     setActionError("");
     setRepeatingTaskId(task.id);
     try {
-      await createRecurringTask(task.id, frequency);
+      await createRecurringTask(task.id, repeatFrequency, startsAt);
+      setOpenRepeatTaskId(null);
       setJustRepeatedTaskId(task.id);
       setTimeout(() => setJustRepeatedTaskId((id) => (id === task.id ? null : id)), 2000);
     } catch (err) {
@@ -380,27 +403,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   </td>
                   {canRepeat && (
                     <td>
-                      <select
-                        className="field-select"
-                        value=""
-                        disabled={repeatingTaskId === task.id}
-                        onChange={(e) => {
-                          const value = e.target.value as Frequency;
-                          if (value) handleRepeat(task, value);
-                          e.target.value = "";
-                        }}
+                      <button
+                        className={`btn btn-sm ${openRepeatTaskId === task.id ? "btn-primary" : "btn-ghost"}`}
+                        onClick={() => openRepeatForm(task)}
                       >
-                        <option value="">
-                          {repeatingTaskId === task.id
-                            ? "Saving…"
-                            : justRepeatedTaskId === task.id
-                            ? "Set ✓"
-                            : "Repeat this"}
-                        </option>
-                        {(Object.keys(FREQUENCY_LABEL) as Frequency[]).map((freq) => (
-                          <option key={freq} value={freq}>{FREQUENCY_LABEL[freq]}</option>
-                        ))}
-                      </select>
+                        {justRepeatedTaskId === task.id ? "Set ✓" : "Repeat"}
+                      </button>
                     </td>
                   )}
                   <td>
@@ -413,6 +421,49 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     </button>
                   </td>
                 </tr>
+                {canRepeat && openRepeatTaskId === task.id && (
+                  <tr className="note-row">
+                    <td colSpan={15}>
+                      <div className="repeat-form">
+                        <div>
+                          <label className="fact-label">How often</label>
+                          <select
+                            className="field-select"
+                            value={repeatFrequency}
+                            onChange={(e) => setRepeatFrequency(e.target.value as Frequency)}
+                          >
+                            {(Object.keys(FREQUENCY_LABEL) as Frequency[]).map((freq) => (
+                              <option key={freq} value={freq}>{FREQUENCY_LABEL[freq]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="fact-label">First one on</label>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            value={repeatStartAt}
+                            onChange={(e) => setRepeatStartAt(e.target.value)}
+                          />
+                        </div>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleRepeat(task)}
+                          disabled={repeatingTaskId === task.id || !repeatStartAt}
+                          type="button"
+                        >
+                          {repeatingTaskId === task.id ? "Saving…" : "Save repeat"}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setOpenRepeatTaskId(null)} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="panel-sub" style={{ marginTop: 8 }}>
+                        A new task is made on that date and time, then every {FREQUENCY_LABEL[repeatFrequency].replace("Every ", "")} after it.
+                      </p>
+                    </td>
+                  </tr>
+                )}
                 {openNotesTaskId === task.id && (
                   <tr className="note-row">
                     <td colSpan={canRepeat ? 15 : 14}>

@@ -12,6 +12,7 @@ import {
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import Pagination, { usePaged } from "./Paged";
+import { toLocalInputValue, fromLocalInputValue } from "./dateTimeInput";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -63,6 +64,20 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     }
   }
 
+  // The next run is a date the user owns, not something the app decides —
+  // saved on blur, like the other inline edits on this app's tables.
+  async function handleNextRunSave(repeat: RecurringTask, value: string) {
+    const iso = fromLocalInputValue(value);
+    if (!iso || iso === new Date(repeat.nextRunAt).toISOString()) return;
+    setActionError("");
+    try {
+      const updated = await updateRecurringTask(repeat.id, { nextRunAt: iso });
+      setRepeats((prev) => prev.map((r) => (r.id === repeat.id ? updated : r)));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
   async function handleDelete(repeat: RecurringTask) {
     if (!window.confirm(`Stop repeating "${repeat.description}"? Tasks already created stay on the board.`)) {
       return;
@@ -92,9 +107,10 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
           <span className="panel-sub">{repeats.length} set up</span>
         </div>
         <p className="tip">
-          💡 These make a new task on their own, on the day they're due. To add one, go to Tasks and pick
-          “Repeat this” on any task — it copies that task. Changing or deleting the original task later
-          does not change what gets made here.
+          💡 These make a new task on their own, at the date and time set below. To add one, go to Tasks
+          and press “Repeat” on any task — you pick how often and when the first one should be. Changing
+          or deleting the original task later does not change what gets made here. Changing “How often”
+          does not move the next date — set that yourself.
         </p>
         <div className="panel-body">
           {repeats.length === 0 && (
@@ -136,7 +152,20 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                         FREQUENCY_LABEL[repeat.frequency]
                       )}
                     </td>
-                    <td>{repeat.active ? new Date(repeat.nextRunAt).toLocaleString() : "Off"}</td>
+                    <td>
+                      {canManage ? (
+                        <input
+                          className="field-input"
+                          type="datetime-local"
+                          defaultValue={toLocalInputValue(repeat.nextRunAt)}
+                          onBlur={(e) => handleNextRunSave(repeat, e.target.value)}
+                          style={{ width: 190 }}
+                        />
+                      ) : (
+                        new Date(repeat.nextRunAt).toLocaleString()
+                      )}
+                      {!repeat.active && <div className="panel-sub">Turned off</div>}
+                    </td>
                     <td>{repeat.lastRunAt ? new Date(repeat.lastRunAt).toLocaleString() : "Not yet"}</td>
                     <td>
                       {canManage ? (
