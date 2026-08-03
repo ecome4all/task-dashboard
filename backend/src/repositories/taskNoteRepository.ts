@@ -33,6 +33,10 @@ export const taskNoteRepository = {
     return prisma.taskNote.findFirst({ where: { id, tenantId: TENANT_ID } });
   },
 
+  markSent(id: string) {
+    return prisma.taskNote.update({ where: { id }, data: { sentAt: new Date() } });
+  },
+
   delete(id: string) {
     return prisma.taskNote.delete({ where: { id } });
   },

@@ -63,6 +63,11 @@ model TaskNote {
   authorName String
   body       String
   createdAt  DateTime @default(now())
+  // When this note was sent to the client's WhatsApp group, if it ever was.
+  // Notes are internal by default; sending is opted into per note, because
+  // plenty of them ("client hasn't paid yet") must never reach the client.
+  // Null means it stayed internal.
+  sentAt     DateTime?
 
   @@index([taskId])
 }

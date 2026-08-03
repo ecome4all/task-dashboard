@@ -322,3 +322,7 @@ table.data-table tr:last-child td { border-bottom: none; }
    rather than assumed, so nothing is scheduled until Save is pressed. */
 .repeat-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .repeat-form label.fact-label { display: block; margin-bottom: 4px; }
+.note-sent { font-size: 11px; font-weight: 600; color: var(--good); }
+.note-internal { font-size: 11px; color: var(--text); opacity: 0.45; }
+.note-add-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.note-send-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }

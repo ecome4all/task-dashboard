@@ -102,6 +102,9 @@ export interface TaskNote {
   authorName: string;
   body: string;
   createdAt: string;
+  // When this note was sent to the client's WhatsApp group. Null means it
+  // stayed internal — notes are not sent unless that is asked for.
+  sentAt: string | null;
 }
 
 // Oldest first — a note thread reads top to bottom.
@@ -109,8 +112,15 @@ export function fetchTaskNotes(taskId: string): Promise<TaskNote[]> {
   return request(`/api/tasks/${taskId}/notes`);
 }
 
-export function addTaskNote(taskId: string, body: string): Promise<TaskNote> {
-  return postJson(`/api/tasks/${taskId}/notes`, { body });
+// sendToWhatsapp is opted into per note. If the send fails the note is still
+// saved, and comes back with sentAt still null — so the screen can say it
+// wasn't sent rather than pretending it was.
+export function addTaskNote(
+  taskId: string,
+  body: string,
+  sendToWhatsapp: boolean
+): Promise<TaskNote> {
+  return postJson(`/api/tasks/${taskId}/notes`, { body, sendToWhatsapp });
 }
 
 // Only the person who wrote a note (or an admin) can remove it — enforced

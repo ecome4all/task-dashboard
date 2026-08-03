@@ -29,6 +29,7 @@ export default function TaskNotes({
 }) {
   const [notes, setNotes] = useState<TaskNote[] | null>(null);
   const [draft, setDraft] = useState("");
+  const [alsoSend, setAlsoSend] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -52,13 +53,19 @@ export default function TaskNotes({
     setSaving(true);
     setError("");
     try {
-      const note = await addTaskNote(taskId, body);
+      const note = await addTaskNote(taskId, body, alsoSend);
       setNotes((prev) => {
         const next = [...(prev ?? []), note];
         onCountChange?.(next.length);
         return next;
       });
       setDraft("");
+      // The note saved, but WhatsApp didn't take it. Say so plainly rather
+      // than leaving someone thinking the client has been told.
+      if (alsoSend && !note.sentAt) {
+        setError("Note saved, but it could not be sent to WhatsApp. Try sending it another way.");
+      }
+      setAlsoSend(false);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -94,6 +101,13 @@ export default function TaskNotes({
           <div className="note-head">
             <span className="note-author">{note.authorName}</span>
             <span className="note-time">{new Date(note.createdAt).toLocaleString()}</span>
+            {note.sentAt ? (
+              <span className="note-sent" title={`Sent to the group on ${new Date(note.sentAt).toLocaleString()}`}>
+                Sent to client ✓
+              </span>
+            ) : (
+              <span className="note-internal">Team only</span>
+            )}
             {/* Server enforces this too — an admin, or the person who wrote it. */}
             {(note.authorId === user.id || user.role === "admin") && (
               <button className="note-delete" onClick={() => handleDelete(note)} type="button">
@@ -114,14 +128,20 @@ export default function TaskNotes({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleAdd}
-            disabled={saving || !draft.trim()}
-            type="button"
-          >
-            {saving ? "Saving…" : "Add note"}
-          </button>
+          <div className="note-add-actions">
+            <label className="note-send-toggle">
+              <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} />
+              Also send to the client on WhatsApp
+            </label>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleAdd}
+              disabled={saving || !draft.trim()}
+              type="button"
+            >
+              {saving ? (alsoSend ? "Sending…" : "Saving…") : alsoSend ? "Add and send" : "Add note"}
+            </button>
+          </div>
         </div>
       )}
     </div>

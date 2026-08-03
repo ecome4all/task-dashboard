@@ -4,7 +4,7 @@ import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
-import { composeSendUpdateMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
+import { composeSendUpdateMessage, composeNoteMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
@@ -38,7 +38,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
   });
 
   router.post("/:id/notes", async (req, res) => {
-    const { body } = req.body;
+    const { body, sendToWhatsapp } = req.body;
     if (typeof body !== "string" || !body.trim()) {
       res.status(400).json({ error: "body is required" });
       return;
@@ -56,14 +56,28 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       return;
     }
 
-    res.status(201).json(
-      await taskNoteRepository.create({
-        taskId: task.id,
-        authorId: author.id,
-        authorName: author.name,
-        body: body.trim(),
-      })
-    );
+    let note = await taskNoteRepository.create({
+      taskId: task.id,
+      authorId: author.id,
+      authorName: author.name,
+      body: body.trim(),
+    });
+
+    // Sending is opted into per note — most are internal working detail the
+    // client must never see. The note is saved first either way: if the send
+    // fails, the writing isn't lost, and sentAt staying null is what tells
+    // the screen to show it as unsent rather than claiming success.
+    if (sendToWhatsapp === true) {
+      try {
+        const whatsapp = resolveAdapterForSource(task.source, channels);
+        await whatsapp.sendMessage(task.sourceRef, composeNoteMessage(task.description, note.body));
+        note = await taskNoteRepository.markSent(note.id);
+      } catch (err) {
+        console.error("Failed to send task note to WhatsApp:", err);
+      }
+    }
+
+    res.status(201).json(note);
   });
 
   router.delete("/:id/notes/:noteId", async (req, res) => {

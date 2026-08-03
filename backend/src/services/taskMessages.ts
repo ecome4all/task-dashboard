@@ -116,3 +116,16 @@ export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): 
   }
   return `"${input.description}" — ${joinClauses(clauses)}.`;
 }
+
+// A note sent to the client's group. Opens with the quoted task description
+// so the client knows which piece of work it refers to — a group can have
+// several open at once.
+//
+// The leading emoji and quote also matter for a reason that isn't obvious:
+// extractPeriskopeMessage no longer filters our own messages, so this comes
+// straight back through the webhook. Starting with anything other than the
+// task: prefix is what stops it being read as a brand new task. Pinned by a
+// test in parser/noLoop.test.ts.
+export function composeNoteMessage(description: string, body: string): string {
+  return `📝 *${description}*\n${body}`;
+}

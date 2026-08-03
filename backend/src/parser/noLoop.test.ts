@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseTaskMessage } from "./taskParser";
-import { composeSendUpdateMessage } from "../services/taskMessages";
+import { composeSendUpdateMessage, composeNoteMessage } from "../services/taskMessages";
 
 // extractPeriskopeMessage no longer filters `from_me`, so every message this
 // app sends into a group comes straight back through the webhook. If any of
@@ -22,6 +22,17 @@ describe("our own outbound messages must never read as a task", () => {
       marketplaceLabels: { amazon: "Amazon" },
     });
     expect(parseTaskMessage(message)).toBeNull();
+  });
+
+  it("a note sent to the group does not", () => {
+    expect(parseTaskMessage(composeNoteMessage("Optimise Ads", "Done, ACOS is down to 22%"))).toBeNull();
+  });
+
+  // The sharpest case for notes: someone types a note that itself begins with
+  // "task:". The note body is pasted straight into the message, so only the
+  // emoji and quoted description in front of it stop a loop.
+  it("a note whose text itself starts with 'task:' does not", () => {
+    expect(parseTaskMessage(composeNoteMessage("Optimise Ads", "task: please also check Flipkart"))).toBeNull();
   });
 
   // The dangerous case: a task whose own text begins with "task:" gets quoted
