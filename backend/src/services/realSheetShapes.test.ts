@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findDailyRowForDate, findWeeklyRowFields, findSkuRows } from "./reportPeriod";
+import { findDailyRowForDate, findWeeklyRowFields, findSkuRows, findMonthlyRowFields } from "./reportPeriod";
 import { SheetTab } from "./googleSheets";
 
 // These fixtures are the actual shapes read out of a real generated client
@@ -130,5 +130,34 @@ describe("Weekly SKU Sales tab", () => {
   it("still works on a tab with a single block and no repeated headers", () => {
     const single: SheetTab = { headers: tab.headers, rows: tab.rows.slice(0, 2) };
     expect(findSkuRows(single, "August", 1)).toHaveLength(2);
+  });
+});
+
+describe("Monthly Summary tab", () => {
+  // Same table as the master's, including the two internal columns.
+  const tab: SheetTab = {
+    headers: ["Month", "Spend", "Order", "Sales", "Acos", "Target Achieved", "Keyword"],
+    rows: [
+      ["JULY", "45,028", "146", "205,442", "21.91%", "Yes", "detective case"],
+      ["August", "4,234", "13", "21,690", "19.52%", "No", "forensic files"],
+      ["September", "", "", "", "", "", ""],
+    ],
+  };
+
+  it("matches the current month", () => {
+    const fields = findMonthlyRowFields(tab, "August");
+    expect(fields?.find((f) => f.label === "Sales")?.value).toBe("21,690");
+  });
+
+  it("is tolerant of capitalisation", () => {
+    expect(findMonthlyRowFields(tab, "July")?.find((f) => f.label === "Spend")?.value).toBe("45,028");
+  });
+
+  it("reports nothing for a month with no figures yet", () => {
+    expect(findMonthlyRowFields(tab, "September")).toBeNull();
+  });
+
+  it("returns nothing for a month the sheet has no row for", () => {
+    expect(findMonthlyRowFields(tab, "December")).toBeNull();
   });
 });

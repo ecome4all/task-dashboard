@@ -6,6 +6,7 @@ import {
   fetchClients,
   sendClientUpdate,
   fetchReportLinks,
+  fetchReportPreview,
   createReportLink,
   markReportLinkSent,
   deleteReportLink,
@@ -79,6 +80,31 @@ const COLUMN_WIDTH: Record<string, number> = {
   phone: 125, clientName: 140, startDate: 100, endDate: 100, asin: 105, productName: 130,
   rating: 65, reviews: 75,
 };
+
+// Maps a column header in the client's sheet to the column on this screen.
+// Only the columns actually typed in are listed: Acos, T.Acos, Ads Sales %
+// and Organic Sales % are worked out from the others by this screen, so
+// pulling the sheet's own copies would risk showing a different number from
+// the one the message is built with.
+const SHEET_COLUMN_TO_KEY: Record<string, string> = {
+  name: "productName",
+  spend: "adSpend",
+  order: "adOrders",
+  sales: "adSales",
+  "t.order": "totalOrders",
+  "t.sales": "totalSales",
+  rating: "rating",
+  reviews: "reviews",
+  "fba units": "fbaUnits",
+};
+
+// Sheet values arrive formatted — "7,306.36", "₹1,462", "37.66%". The number
+// columns on this screen are parsed with Number(), which rejects all of
+// those, so the formatting is stripped as they're filled in.
+function plainNumber(value: string): string {
+  const cleaned = value.trim().replace(/[,\s₹$%]/g, "");
+  return cleaned !== "" && !Number.isNaN(Number(cleaned)) ? cleaned : value.trim();
+}
 
 interface ClientRow {
   id: string;
@@ -233,6 +259,9 @@ export default function ClientUpdate() {
   const [highlights, setHighlights] = useState("");
   const [includeHighlights, setIncludeHighlights] = useState(true);
   const [attachedLinkId, setAttachedLinkId] = useState("");
+  // "Fill from sheet": which client to pull this week's SKU figures for.
+  const [fillClientId, setFillClientId] = useState("");
+  const [filling, setFilling] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const [newLinkDescription, setNewLinkDescription] = useState("");
@@ -326,6 +355,42 @@ export default function ClientUpdate() {
 
   function setSendVia(rowIndex: number, value: string) {
     setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, sendVia: value } : r)));
+  }
+
+  // Reads the client's own report sheet and lays this week's SKU figures out
+  // one row per product, instead of them being typed or pasted in by hand.
+  // Replaces the rows rather than adding to them — a half-filled leftover row
+  // from a previous client would otherwise be sent as its own message.
+  async function handleFillFromSheet() {
+    const client = clients.find((c) => c.id === fillClientId);
+    if (!client) return;
+    setFilling(true);
+    setLinkError("");
+    try {
+      const preview = await fetchReportPreview(client.id, "weekly_sku");
+      if (preview.sections.length === 0) {
+        setLinkError(`No SKU figures found in ${client.name}'s sheet for ${preview.month}, week ${preview.week}.`);
+        return;
+      }
+      const filled: ClientRow[] = preview.sections.map((section) => {
+        const data: Record<string, string> = {
+          clientName: client.name,
+          phone: client.phone ?? "",
+          asin: section.source,
+        };
+        for (const field of section.fields) {
+          const key = SHEET_COLUMN_TO_KEY[field.label.trim().toLowerCase()];
+          if (key) data[key] = key === "productName" ? field.value.trim() : plainNumber(field.value);
+        }
+        return { id: `row-${nextRowId.current++}`, data };
+      });
+      setRows(filled);
+      setRowStatus({});
+    } catch (err) {
+      setLinkError(errorMessage(err));
+    } finally {
+      setFilling(false);
+    }
   }
 
   function addRow() {
@@ -514,6 +579,25 @@ export default function ClientUpdate() {
               onChange={(e) => setPeriod(e.target.value)}
               style={{ flex: "1 1 220px" }}
             />
+            <select
+              className="field-select"
+              value={fillClientId}
+              onChange={(e) => setFillClientId(e.target.value)}
+              style={{ flex: "1 1 220px" }}
+            >
+              <option value="">Fill rows from a client's sheet…</option>
+              {clients.filter((c) => c.reportSheetUrl?.trim()).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <button
+              className="btn btn-ghost"
+              onClick={handleFillFromSheet}
+              disabled={!fillClientId || filling}
+              type="button"
+            >
+              {filling ? "Reading sheet…" : "Fill rows"}
+            </button>
             <select
               className="field-select"
               value={attachedLinkId}

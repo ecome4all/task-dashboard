@@ -101,6 +101,21 @@ export function findWeeklyRowFields(tab: SheetTab, monthName: string, weekNumber
   return usableFields(tab.headers, row, [weekIdx, monthIdx]);
 }
 
+// Monthly tab: one row per month, matched on the Month column alone. Kept
+// separate from the weekly finder because that one requires a Week column,
+// which this table does not have.
+export function findMonthlyRowFields(tab: SheetTab, monthName: string): ReportField[] | null {
+  const monthIdx = findHeaderIndex(tab.headers, /month/i);
+  if (monthIdx === -1) return null;
+
+  const row = tab.rows.find((r) => isSameMonth(r[monthIdx] ?? "", monthName));
+  if (!row) return null;
+
+  const fields = usableFields(tab.headers, row, [monthIdx]);
+  // Same rule as the daily tab: a month with no figures yet is not a report.
+  return fields.some((f) => looksNumeric(f.value)) ? fields : null;
+}
+
 // SKU tab: one row per SKU rather than one row per period, so this returns
 // many groups where the weekly tab returns one. Month/Week columns are
 // optional — a sheet that keeps only the current week's SKUs has no need

@@ -13,6 +13,9 @@ import {
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 
+// Pause between one client's message and the next.
+const SEND_GAP_MS = 2000;
+
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
@@ -61,6 +64,7 @@ function isIncluded(state: ClientReportState, source: string, field: ReportField
 function reportHeading(kind: ReportKind, preview: WeeklyReportPreview): string {
   if (kind === "daily") return `📊 *Daily Update — ${new Date().toLocaleDateString()}*`;
   if (kind === "weekly_sku") return `📦 *SKU Update — ${preview.month}, Week ${preview.week}*`;
+  if (kind === "monthly") return `📊 *Monthly Update — ${preview.month}*`;
   return `📊 *Performance Update — ${preview.month}, Week ${preview.week}*`;
 }
 
@@ -93,6 +97,9 @@ export default function WeeklyReports() {
   const [sendError, setSendError] = useState("");
   const [rowStatus, setRowStatus] = useState<Record<string, RowStatus>>({});
   const [sendingAll, setSendingAll] = useState(false);
+  // Which clients this send covers. Empty means "everyone that's ready" —
+  // the common case, so nothing has to be ticked to send to all of them.
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function load() {
@@ -166,7 +173,9 @@ export default function WeeklyReports() {
   }
 
   const ready = states.filter((s) => s.preview && s.preview.sections.length > 0 && sendTargetFor(s));
-  const sendable = ready.filter((s) => rowStatus[s.client.id] !== "sent");
+  const anySelected = Object.values(selected).some(Boolean);
+  const chosen = anySelected ? ready.filter((s) => selected[s.client.id]) : ready;
+  const sendable = chosen.filter((s) => rowStatus[s.client.id] !== "sent");
 
   async function handleSendAll() {
     const targets = sendable;
@@ -197,7 +206,8 @@ export default function WeeklyReports() {
       }
       setProgress({ done: i + 1, total: targets.length });
       if (i < targets.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // A gap between messages so WhatsApp doesn't read the batch as spam.
+        await new Promise((resolve) => setTimeout(resolve, SEND_GAP_MS));
       }
     }
 
@@ -262,7 +272,19 @@ export default function WeeklyReports() {
             return (
               <div key={state.client.id} className="panel" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
                 <div className="panel-head">
-                  <span className="panel-title">{state.client.name}</span>
+                  <span className="panel-title">
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!selected[state.client.id]}
+                        onChange={(e) =>
+                          setSelected((prev) => ({ ...prev, [state.client.id]: e.target.checked }))
+                        }
+                        disabled={sendingAll}
+                      />
+                      {state.client.name}
+                    </label>
+                  </span>
                   <span className="panel-sub">{rowStatusLabel(rowStatus[state.client.id])}</span>
                 </div>
                 <div className="panel-body">

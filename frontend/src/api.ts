@@ -411,12 +411,13 @@ export function fetchWeeklyReportPreview(clientId: string): Promise<WeeklyReport
 
 // The three reports that can be sent to a client, each read from its own tab
 // of that client's sheet: "Daily", "Weekly" and "SKU".
-export type ReportKind = "daily" | "weekly_sales" | "weekly_sku";
+export type ReportKind = "daily" | "weekly_sales" | "weekly_sku" | "monthly";
 
 export const REPORT_KIND_LABEL: Record<ReportKind, string> = {
   daily: "Daily Report",
   weekly_sales: "Weekly Sales Report",
   weekly_sku: "Weekly SKU Report",
+  monthly: "Monthly Report",
 };
 
 // One specific report, rather than every tab at once like

@@ -60,3 +60,22 @@ describe("pickTab", () => {
     expect(pickTab("daily", ["Dailyish"])).toBeNull();
   });
 });
+
+describe("pickTab — monthly", () => {
+  it("finds the monthly tab once a client sheet carries one", () => {
+    expect(pickTab("monthly", ["Daily Report", "Weekly Sales", "Weekly SKU Sales", "Monthly Summary"]))
+      .toBe("Monthly Summary");
+  });
+
+  // "Monthly Summary" contains neither "week" nor "daily", so it must not be
+  // claimed by either of those rules.
+  it("does not confuse monthly with the weekly or daily tabs", () => {
+    const tabs = ["Daily Report", "Weekly Sales", "Monthly Summary"];
+    expect(pickTab("weekly_sales", tabs)).toBe("Weekly Sales");
+    expect(pickTab("daily", tabs)).toBe("Daily Report");
+  });
+
+  it("returns null when the sheet has no monthly tab", () => {
+    expect(pickTab("monthly", ["Daily Report", "Weekly Sales"])).toBeNull();
+  });
+});

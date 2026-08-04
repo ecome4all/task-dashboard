@@ -6,6 +6,7 @@ import {
   findDailyRowsInWeek,
   findDailyRowForDate,
   findSkuRows,
+  findMonthlyRowFields,
   ReportField,
 } from "./reportPeriod";
 import { ensurePercentSuffix } from "./reportFormatting";
@@ -15,9 +16,9 @@ import { ensurePercentSuffix } from "./reportFormatting";
 // weekly summary; "weekly_sku" reads a per-SKU tab, which the older sheets
 // don't have yet — a client whose sheet has no SKU tab simply produces no
 // sections, the same way a missing Weekly or Daily tab already does.
-export type ReportKind = "daily" | "weekly_sales" | "weekly_sku";
+export type ReportKind = "daily" | "weekly_sales" | "weekly_sku" | "monthly";
 
-export const REPORT_KINDS: ReportKind[] = ["daily", "weekly_sales", "weekly_sku"];
+export const REPORT_KINDS: ReportKind[] = ["daily", "weekly_sales", "weekly_sku", "monthly"];
 
 export function isReportKind(value: unknown): value is ReportKind {
   return typeof value === "string" && (REPORT_KINDS as string[]).includes(value);
@@ -27,6 +28,7 @@ export const REPORT_KIND_LABEL: Record<ReportKind, string> = {
   daily: "Daily Report",
   weekly_sales: "Weekly Sales Report",
   weekly_sku: "Weekly SKU Report",
+  monthly: "Monthly Report",
 };
 
 // Which tab belongs to which report, matched on the name's wording rather
@@ -51,6 +53,9 @@ export function pickTab(kind: ReportKind, tabNames: string[]): string | null {
   }
   if (kind === "daily") {
     return tabNames.find((n) => /\bdaily\b/i.test(n) && !isSku(n)) ?? null;
+  }
+  if (kind === "monthly") {
+    return tabNames.find((n) => /\bmonth(ly)?\b/i.test(n) && !isSku(n)) ?? null;
   }
   // weekly_sales: a weekly tab that isn't the per-SKU one. "Monthly Summary"
   // and "Listing Optimisation Tracker" are deliberately not matched — no
@@ -80,6 +85,12 @@ const REPORT_COLUMNS: Record<ReportKind, string[]> = {
   weekly_sku: [
     "Name", "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
     "Ads Sales %", "Organic Sales %", "Rating", "Reviews", "FBA Units",
+  ],
+  // "Target Achieved" and "Keyword" sit in this table on the master and are
+  // internal — deliberately not listed, so they never reach a client.
+  monthly: [
+    "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
+    "Ads Sales %", "Organic Sales %",
   ],
 };
 
@@ -152,6 +163,12 @@ export async function buildReport(
     const fields = today ? onlyAgreedColumns(kind, today.fields) : [];
     if (today && fields.length > 0) {
       sections.push({ source: `Daily — ${today.date}`, fields: withPercentSuffix(fields) });
+    }
+  } else if (kind === "monthly") {
+    const found = findMonthlyRowFields(tab, month);
+    const fields = found ? onlyAgreedColumns(kind, found) : [];
+    if (fields.length > 0) {
+      sections.push({ source: `Monthly — ${month}`, fields: withPercentSuffix(fields) });
     }
   } else if (kind === "weekly_sales") {
     const found = findWeeklyRowFields(tab, month, week);
