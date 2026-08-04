@@ -33,6 +33,51 @@ function findHeaderIndex(headers: string[], pattern: RegExp): number {
   return headers.findIndex((h) => pattern.test(h));
 }
 
+// Spreadsheet error cells (#DIV/0!, #N/A, #REF!, #VALUE!) reach us as text.
+// Sending "#DIV/0!" to a client is worse than saying nothing, and the percent
+// suffix rule turns it into the even odder "#DIV/0!%", so these are dropped
+// from a report entirely rather than passed through.
+function isErrorCell(value: string): boolean {
+  return value.trim().startsWith("#");
+}
+
+// Whether a cell is actually a number: "7306.36", "4,234", "37.66%" yes;
+// "Mini Case - 1" or "forensic files" no. Used to tell a row that genuinely
+// has this period's figures from one that only carries labels or leftovers.
+function looksNumeric(value: string): boolean {
+  const cleaned = value.trim().replace(/[,\s%₹$]/g, "");
+  return cleaned !== "" && !Number.isNaN(Number(cleaned));
+}
+
+function usableFields(headers: string[], row: string[], skipIndexes: number[]): ReportField[] {
+  return headers
+    .map((label, i) => ({ label, value: row[i] ?? "" }))
+    .filter((f, i) => !skipIndexes.includes(i) && f.value.trim() !== "" && !isErrorCell(f.value));
+}
+
+// The Week column is written "WEEK 1" in the real sheets, not "1", so the
+// number is pulled out of whatever wording surrounds it.
+function weekNumberIn(cellValue: string): number | null {
+  const match = cellValue.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+// Dates are written "1 August" — a day and a month name, with no year. That
+// is not something Date can parse on its own, so the reference year is
+// supplied. Anything already parseable (2026-08-01, 01/08/2026) still works.
+function parseSheetDate(cellValue: string, referenceDate: Date): Date | null {
+  const raw = cellValue.trim();
+  if (!raw) return null;
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime()) && /\d{4}/.test(raw)) return direct;
+
+  const withYear = new Date(`${raw} ${referenceDate.getFullYear()}`);
+  if (!Number.isNaN(withYear.getTime())) return withYear;
+
+  return Number.isNaN(direct.getTime()) ? null : direct;
+}
+
 export interface ReportField {
   label: string;
   value: string;
@@ -47,15 +92,13 @@ export function findWeeklyRowFields(tab: SheetTab, monthName: string, weekNumber
   const monthIdx = findHeaderIndex(tab.headers, /month/i);
 
   const row = tab.rows.find((r) => {
-    const weekMatches = r[weekIdx]?.trim() === String(weekNumber);
+    const weekMatches = weekNumberIn(r[weekIdx] ?? "") === weekNumber;
     const monthMatches = monthIdx === -1 || isSameMonth(r[monthIdx] ?? "", monthName);
     return weekMatches && monthMatches;
   });
   if (!row) return null;
 
-  return tab.headers
-    .map((label, i) => ({ label, value: row[i] ?? "" }))
-    .filter((f, i) => i !== weekIdx && i !== monthIdx && f.value !== "");
+  return usableFields(tab.headers, row, [weekIdx, monthIdx]);
 }
 
 // SKU tab: one row per SKU rather than one row per period, so this returns
@@ -79,18 +122,44 @@ export function findSkuRows(
 
   const weekIdx = findHeaderIndex(tab.headers, /week/i);
   const monthIdx = findHeaderIndex(tab.headers, /month/i);
+  const skuHeader = (tab.headers[skuIdx] ?? "").trim().toLowerCase();
 
-  return tab.rows
+  // The real sheets stack one block per week down a single tab, each block
+  // starting with its own repeated header row ("ASIN | Name | Spend | ..."),
+  // and carry no Week column to tell the blocks apart. Reading the whole tab
+  // therefore reported every week at once, with the header rows themselves
+  // appearing as products called "ASIN".
+  //
+  // So: split on the repeated headers, and report only the last block — the
+  // most recent week, which is what a weekly report is about.
+  const blocks: string[][][] = [[]];
+  for (const row of tab.rows) {
+    const cell = (row[skuIdx] ?? "").trim();
+    if (cell.toLowerCase() === skuHeader) {
+      blocks.push([]); // a repeated header row starts the next week's block
+      continue;
+    }
+    blocks[blocks.length - 1].push(row);
+  }
+  // The final block is often next week's, pre-filled with product names but
+  // no figures yet. Take the last block that actually has numbers in it.
+  const latest =
+    blocks
+      .filter((b) =>
+        b.some((r) => r.some((cell, i) => i !== skuIdx && looksNumeric(cell ?? "")))
+      )
+      .pop() ?? [];
+
+  return latest
     .filter((row) => {
-      const weekMatches = weekIdx === -1 || row[weekIdx]?.trim() === String(weekNumber);
+      // Only applied when the columns exist — most SKU tabs have neither.
+      const weekMatches = weekIdx === -1 || weekNumberIn(row[weekIdx] ?? "") === weekNumber;
       const monthMatches = monthIdx === -1 || isSameMonth(row[monthIdx] ?? "", monthName);
       return weekMatches && monthMatches;
     })
     .map((row) => ({
-      sku: row[skuIdx]?.trim() ?? "",
-      fields: tab.headers
-        .map((label, i) => ({ label, value: row[i] ?? "" }))
-        .filter((f, i) => i !== skuIdx && i !== weekIdx && i !== monthIdx && f.value !== ""),
+      sku: (row[skuIdx] ?? "").trim(),
+      fields: usableFields(tab.headers, row, [skuIdx, weekIdx, monthIdx]),
     }))
     .filter((r) => r.sku !== "" && r.fields.length > 0);
 }
@@ -103,11 +172,9 @@ export function findDailyRowForDate(tab: SheetTab, referenceDate: Date): { date:
   if (dateIdx === -1) return null;
 
   const match = tab.rows.find((row) => {
-    const raw = row[dateIdx]?.trim();
-    if (!raw) return false;
-    const parsed = new Date(raw);
+    const parsed = parseSheetDate(row[dateIdx] ?? "", referenceDate);
     return (
-      !Number.isNaN(parsed.getTime()) &&
+      parsed !== null &&
       parsed.getFullYear() === referenceDate.getFullYear() &&
       parsed.getMonth() === referenceDate.getMonth() &&
       parsed.getDate() === referenceDate.getDate()
@@ -115,12 +182,13 @@ export function findDailyRowForDate(tab: SheetTab, referenceDate: Date): { date:
   });
   if (!match) return null;
 
-  return {
-    date: match[dateIdx]!.trim(),
-    fields: tab.headers
-      .map((label, i) => ({ label, value: match[i] ?? "" }))
-      .filter((f, i) => i !== dateIdx && f.value !== ""),
-  };
+  const fields = usableFields(tab.headers, match, [dateIdx]);
+  // Rows exist for every day of the month, blank until the day is filled in.
+  // Such a row can still carry a stray text column (these sheets keep a
+  // keyword column alongside the metrics), which would otherwise be sent to
+  // the client on its own as the whole day's report. No figures, no report.
+  if (!fields.some((f) => looksNumeric(f.value))) return { date: match[dateIdx]!.trim(), fields: [] };
+  return { date: match[dateIdx]!.trim(), fields };
 }
 
 // Tab 2 (daily): every row whose Date falls within the current week's date

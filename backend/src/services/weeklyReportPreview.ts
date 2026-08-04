@@ -58,6 +58,43 @@ export function pickTab(kind: ReportKind, tabNames: string[]): string | null {
   return tabNames.find((n) => /\bweek(ly)?\b/i.test(n) && !isSku(n)) ?? null;
 }
 
+// Exactly the columns from the agreed sample sheet, and nothing else.
+//
+// A master tab carries working columns a client must never see — a keyword
+// column ("crime solving case files") was found sitting inside the Daily
+// table and went out in a report. Whitelisting means a new column added to
+// the master is ignored by default rather than quietly forwarded.
+//
+// The key column of each table (Date / Week / ASIN) is not listed: the
+// finders already strip it, since it identifies the row rather than being
+// one of its figures.
+const REPORT_COLUMNS: Record<ReportKind, string[]> = {
+  daily: [
+    "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
+    "Ads Sales %", "Organic Sales %",
+    "Active Listing", "Out of Stock Listing", "Inactive Listing/Blocked",
+  ],
+  weekly_sales: [
+    "Spend", "Sales", "Acos", "T.Sales", "T.Acos", "Ads Sales %", "Organic Sales %",
+  ],
+  weekly_sku: [
+    "Name", "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
+    "Ads Sales %", "Organic Sales %", "Rating", "Reviews", "FBA Units",
+  ],
+};
+
+// Tolerant of spacing and capitalisation, since the same column is spelled
+// "T.Acos" / "T.ACOS" / "t.acos " across sheets, but nothing beyond that —
+// an unrecognised column is dropped, not guessed at.
+function normalizeHeader(header: string): string {
+  return header.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): ReportField[] {
+  const allowed = new Set(REPORT_COLUMNS[kind].map(normalizeHeader));
+  return fields.filter((f) => allowed.has(normalizeHeader(f.label)));
+}
+
 export interface ReportSection {
   // e.g. "Weekly — July, Week 2", "Daily — 2026-07-08" or "SKU TR04-B" —
   // lets the reviewing human tell which tab/period/SKU each block came from.
@@ -112,17 +149,20 @@ export async function buildReport(
 
   if (kind === "daily") {
     const today = findDailyRowForDate(tab, referenceDate);
-    if (today && today.fields.length > 0) {
-      sections.push({ source: `Daily — ${today.date}`, fields: withPercentSuffix(today.fields) });
+    const fields = today ? onlyAgreedColumns(kind, today.fields) : [];
+    if (today && fields.length > 0) {
+      sections.push({ source: `Daily — ${today.date}`, fields: withPercentSuffix(fields) });
     }
   } else if (kind === "weekly_sales") {
-    const fields = findWeeklyRowFields(tab, month, week);
-    if (fields && fields.length > 0) {
+    const found = findWeeklyRowFields(tab, month, week);
+    const fields = found ? onlyAgreedColumns(kind, found) : [];
+    if (fields.length > 0) {
       sections.push({ source: `Weekly — ${month}, Week ${week}`, fields: withPercentSuffix(fields) });
     }
   } else {
     for (const row of findSkuRows(tab, month, week)) {
-      sections.push({ source: row.sku, fields: withPercentSuffix(row.fields) });
+      const fields = onlyAgreedColumns(kind, row.fields);
+      if (fields.length > 0) sections.push({ source: row.sku, fields: withPercentSuffix(fields) });
     }
   }
 

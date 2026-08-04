@@ -147,11 +147,23 @@ function rawValuesFor(row: ClientRow): Record<string, number | undefined> {
   return out;
 }
 
+// Anything that can be attached to a message: a link saved on this screen,
+// or a client's own report sheet, which appears here automatically as soon
+// as it is saved against the client. savedLinkId is set only for the former —
+// a client sheet has no row of its own, so there is nothing to mark as sent
+// or to delete.
+interface Attachable {
+  id: string;
+  description: string;
+  url: string;
+  savedLinkId?: string;
+}
+
 interface SharedMessageInput {
   period: string;
   highlights: string;
   includeHighlights: boolean;
-  attachedLink?: ReportLink;
+  attachedLink?: Attachable;
 }
 
 // One message per row (one product), built from that row's own numbers
@@ -364,7 +376,25 @@ export default function ClientUpdate() {
     touchedRowIds.forEach(clearRowStatus);
   }
 
-  const attachedLink = links.find((l) => l.id === attachedLinkId);
+  // Saved links first, then every client that has a report sheet saved.
+  // Client sheets are not stored twice — they are read straight off the
+  // client record, so saving one on the Clients screen makes it appear here
+  // immediately and removing it makes it disappear.
+  const savedAttachables: Attachable[] = links.map((l) => ({
+    id: l.id,
+    description: l.description,
+    url: l.url,
+    savedLinkId: l.id,
+  }));
+  const clientSheetAttachables: Attachable[] = clients
+    .filter((c) => c.reportSheetUrl?.trim())
+    .map((c) => ({
+      id: `client:${c.id}`,
+      description: `${c.name} — report sheet`,
+      url: c.reportSheetUrl as string,
+    }));
+  const attachables = [...savedAttachables, ...clientSheetAttachables];
+  const attachedLink = attachables.find((l) => l.id === attachedLinkId);
 
   // Ready to send: has a client name and somewhere to actually send it
   // (a matched client's group, or the row's own Phone cell).
@@ -420,9 +450,9 @@ export default function ClientUpdate() {
       }
     }
 
-    if (attachedLink) {
+    if (attachedLink?.savedLinkId) {
       try {
-        const updated = await markReportLinkSent(attachedLink.id);
+        const updated = await markReportLinkSent(attachedLink.savedLinkId);
         setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
       } catch (err) {
         console.error("Failed to record report link as sent:", err);
@@ -490,10 +520,21 @@ export default function ClientUpdate() {
               onChange={(e) => setAttachedLinkId(e.target.value)}
               style={{ flex: "1 1 260px" }}
             >
-              <option value="">Attach a saved report link (optional)…</option>
-              {pagedLinks.items.map((link) => (
-                <option key={link.id} value={link.id}>{link.description}</option>
-              ))}
+              <option value="">Attach a report link (optional)…</option>
+              {clientSheetAttachables.length > 0 && (
+                <optgroup label="Client report sheets">
+                  {clientSheetAttachables.map((a) => (
+                    <option key={a.id} value={a.id}>{a.description}</option>
+                  ))}
+                </optgroup>
+              )}
+              {savedAttachables.length > 0 && (
+                <optgroup label="Saved links">
+                  {savedAttachables.map((a) => (
+                    <option key={a.id} value={a.id}>{a.description}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 
