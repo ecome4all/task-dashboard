@@ -10,6 +10,7 @@ import { createEmployeesRouter } from "./routes/employees";
 import { createReportLinksRouter } from "./routes/reportLinks";
 import { createClientsRouter } from "./routes/clients";
 import { createConfigOptionsRouter } from "./routes/configOptions";
+import { createDiagnosticsRouter } from "./routes/diagnostics";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
 import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
@@ -87,6 +88,9 @@ app.use("/api/report-links", requireAuth, createReportLinksRouter());
 app.use("/api/clients", requireAuth, createClientsRouter(channels));
 app.use("/api/config-options", requireAuth, createConfigOptionsRouter());
 app.use("/api/recurring-tasks", requireAuth, createRecurringTasksRouter());
+// Admin-only, and read-only: reports why a report sheet won't read when the
+// answer is on the host rather than in the sheet. See routes/diagnostics.ts.
+app.use("/api/diagnostics", requireAuth, createDiagnosticsRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
