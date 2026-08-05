@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { extractOfficialMessage } from "../parser/extractOfficialMessage";
 import { handleIncomingTaskMessage } from "../services/taskIntake";
-import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
+import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
-export function createOfficialWebhookRouter(whatsapp: WhatsAppAdapter) {
+export function createOfficialWebhookRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   // Meta calls this once, when the webhook URL is registered in the App
@@ -35,7 +35,7 @@ export function createOfficialWebhookRouter(whatsapp: WhatsAppAdapter) {
       source: "whatsapp_official",
       chatId: incoming.chatId,
       text: incoming.text,
-      whatsapp,
+      channels,
     });
 
     if (!task) {

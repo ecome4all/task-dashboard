@@ -2,7 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { extractPeriskopeMessage } from "../parser/extractPeriskopeMessage";
 import { handleIncomingTaskMessage } from "../services/taskIntake";
-import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
+import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
 // Periskope signs every webhook POST with an HMAC-SHA256 of the raw request
 // body, sent in the x-periskope-signature header — verified against the
@@ -19,7 +19,7 @@ export function isValidSignature(rawBody: Buffer | undefined, signature: string 
   return expectedBuf.length === signatureBuf.length && crypto.timingSafeEqual(expectedBuf, signatureBuf);
 }
 
-export function createPeriskopeWebhookRouter(whatsapp: WhatsAppAdapter) {
+export function createPeriskopeWebhookRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.post("/periskope", async (req, res) => {
@@ -39,7 +39,7 @@ export function createPeriskopeWebhookRouter(whatsapp: WhatsAppAdapter) {
 
     // The webhook payload's `data` is a message, not a chat — it never
     // carries the chat's display name, so this is a second API call.
-    const chatName = await whatsapp.getChatName?.(incoming.chatId);
+    const chatName = await channels.whapi.getChatName?.(incoming.chatId);
 
     const task = await handleIncomingTaskMessage({
       source: "whatsapp_group",
@@ -47,7 +47,7 @@ export function createPeriskopeWebhookRouter(whatsapp: WhatsAppAdapter) {
       text: incoming.text,
       chatName,
       senderPhone: incoming.senderPhone,
-      whatsapp,
+      channels,
     });
 
     if (!task) {

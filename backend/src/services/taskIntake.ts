@@ -1,14 +1,20 @@
 import { parseTaskMessage } from "../parser/taskParser";
+import { containsPhoneNumber, findEmployeeMention } from "../parser/employeeMention";
 import { taskRepository } from "../repositories/taskRepository";
 import { clientRepository } from "../repositories/clientRepository";
+import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
-import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
+import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+import { notifyAssignee } from "./assignmentNotice";
 
 export interface TaskIntakeParams {
   source: string;
   chatId: string;
   text: string;
-  whatsapp: WhatsAppAdapter;
+  // Both channels, not just the one this message arrived on: the reply goes
+  // back on the arriving channel, but telling the assigned employee always
+  // goes out on the group channel — see assignmentNotice.ts.
+  channels: WhatsAppChannels;
   chatName?: string;
   senderPhone?: string;
 }
@@ -75,12 +81,26 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     }
   }
 
+  // Tagging someone's WhatsApp number in the message assigns the task to
+  // them on the way in — "task: fix the listing @919876543210" arrives
+  // already triaged instead of sitting unassigned until someone opens the
+  // dashboard. The number is matched against saved employee numbers, so a
+  // client tagging their own colleague, or quoting an order number, changes
+  // nothing. The employee table is only queried when the message actually
+  // contains something number-shaped.
+  const mention = containsPhoneNumber(parsed.description)
+    ? findEmployeeMention(parsed.description, await employeeRepository.list())
+    : null;
+
   const task = await taskRepository.create({
     source: params.source,
     sourceRef: params.chatId,
-    description: parsed.description,
+    // The tagged number itself is dropped from the description — see
+    // findEmployeeMention. It addressed a person, it isn't part of the work.
+    description: mention ? mention.description : parsed.description,
     chatName: params.chatName,
     clientName: client.name,
+    ...(mention && { assignee: mention.employee.name }),
   });
 
   // Best-effort: the task is already saved above, and this ack is just a
@@ -88,9 +108,21 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
   // must not crash the webhook handler, since an uncaught rejection here
   // would take down the whole server, not just this one message.
   try {
-    await params.whatsapp.sendMessage(params.chatId, "✅ Got it, logged.");
+    await resolveAdapterForSource(params.source, params.channels).sendMessage(
+      params.chatId,
+      "✅ Got it, logged."
+    );
   } catch (err) {
     console.error("Failed to send task acknowledgement:", err);
+  }
+
+  // Never throws — see notifyAssignee.
+  if (mention) {
+    await notifyAssignee(
+      mention.employee.name,
+      { description: task.description, clientName: task.clientName, dueDate: task.dueDate },
+      params.channels
+    );
   }
 
   return task;

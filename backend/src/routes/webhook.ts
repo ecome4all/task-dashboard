@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { extractIncomingMessage } from "../parser/extractIncomingMessage";
 import { handleIncomingTaskMessage } from "../services/taskIntake";
-import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
+import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
-export function createWebhookRouter(whatsapp: WhatsAppAdapter) {
+export function createWebhookRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.post("/whapi", async (req, res) => {
@@ -30,7 +30,7 @@ export function createWebhookRouter(whatsapp: WhatsAppAdapter) {
       chatId: incoming.chatId,
       text: incoming.text,
       chatName: incoming.chatName,
-      whatsapp,
+      channels,
     });
 
     if (!task) {

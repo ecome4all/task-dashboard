@@ -73,9 +73,12 @@ const channels: WhatsAppChannels = {
 
 // Not behind requireAuth: WhatsApp calls these directly, not a logged-in
 // browser. See the shared-secret/signature checks inside each router.
-app.use("/webhook", createWebhookRouter(channels.whapi));
-app.use("/webhook", createPeriskopeWebhookRouter(channels.whapi));
-app.use("/webhook", createOfficialWebhookRouter(channels.official));
+// Each router gets both channels, not just its own: it replies on the channel
+// the message arrived on, but a task that tags an employee also has to reach
+// that employee, and staff are only reachable on the group channel's number.
+app.use("/webhook", createWebhookRouter(channels));
+app.use("/webhook", createPeriskopeWebhookRouter(channels));
+app.use("/webhook", createOfficialWebhookRouter(channels));
 
 app.use("/api/auth", createAuthRouter());
 app.use("/api/tasks", requireAuth, createTasksRouter(channels));
