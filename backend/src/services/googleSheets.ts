@@ -19,6 +19,53 @@ export interface SheetTab {
   rows: string[][];
 }
 
+// A PEM private key has to survive being pasted into a hosting dashboard's
+// variables box, and it frequently doesn't: .env strips the quotes around a
+// value and a hosting UI keeps them, a one-line value holds its line breaks as
+// literal "\n" while a pasted block holds real ones, and copying "the key"
+// out of a document often takes the base64 body without the BEGIN/END lines.
+// Each of those produces the same unhelpful failure deep inside OpenSSL
+// ("error:1E08010C:DECODER routines::unsupported") with nothing pointing at
+// the variable — and it cost a production outage of the report screens here,
+// where the key had arrived as body-only with every line break flattened.
+//
+// So rather than trusting one exact form, this rebuilds the canonical PEM
+// from whatever arrived: unquote, un-escape, take the base64 body, and wrap
+// it back at 64 characters under the right header. What it can't do is
+// invent a key that isn't there — an empty or non-base64 value still fails,
+// just with a message that names the variable.
+export function normalizePrivateKey(raw: string): string {
+  let value = raw.trim();
+
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1);
+  }
+
+  // Env vars can't hold real newlines, so a one-line value spells them out.
+  value = value.replace(/\\n/g, "\n");
+
+  // Service-account keys are PKCS#8 ("PRIVATE KEY"); an older "RSA PRIVATE
+  // KEY" is kept as-is rather than silently relabelled into something the
+  // decoder would then reject.
+  const label = /-----BEGIN ([A-Z ]+)-----/.exec(value)?.[1] ?? "PRIVATE KEY";
+  const body = value
+    .replace(/-----BEGIN [A-Z ]+-----/g, "")
+    .replace(/-----END [A-Z ]+-----/g, "")
+    .replace(/\s+/g, "");
+
+  if (!body) {
+    throw new Error(
+      "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY is set but contains no key — paste the whole key, including the BEGIN and END lines"
+    );
+  }
+
+  const wrapped = body.match(/.{1,64}/g)!.join("\n");
+  return `-----BEGIN ${label}-----\n${wrapped}\n-----END ${label}-----\n`;
+}
+
 let cachedClient: ReturnType<typeof google.sheets> | null = null;
 
 // One authenticated client, reused across requests -- GoogleAuth caches and
@@ -34,9 +81,9 @@ function sheetsClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: email,
-      // Env vars can't hold real newlines -- the key is stored with literal
-      // "\n" escape sequences and unescaped here before use.
-      private_key: privateKey.replace(/\\n/g, "\n"),
+      // Rebuilt rather than trusted as-is — see normalizePrivateKey for the
+      // several shapes this value arrives in depending on where it was pasted.
+      private_key: normalizePrivateKey(privateKey),
     },
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
