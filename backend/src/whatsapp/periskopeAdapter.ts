@@ -5,6 +5,17 @@ const PERISKOPE_BASE_URL = "https://api.periskope.app";
 // Group and 1:1 chat IDs use the same "<id>@g.us" / "<number>@c.us" JIDs as
 // whapi.cloud, so callers (resolveAdapterForSource, task.sourceRef) don't
 // need to know which provider is actually behind this adapter.
+// Periskope addresses a chat, not a person: a plain number is not a chat_id.
+// Callers that send to an individual hold a bare number (Employee.phone for
+// assignment alerts and daily reminders, Client.phone for a report) rather
+// than a JID, so the 1:1 suffix is added here — one place, instead of every
+// caller having to know a provider's addressing scheme. Anything already
+// carrying an "@" (a "<group>@g.us" or "<number>@c.us" from task.sourceRef)
+// is passed straight through.
+function toChatId(to: string): string {
+  return to.includes("@") ? to : `${to}@c.us`;
+}
+
 export class PeriskopeAdapter implements WhatsAppAdapter {
   constructor(
     private readonly apiKey: string,
@@ -24,7 +35,7 @@ export class PeriskopeAdapter implements WhatsAppAdapter {
         "x-phone": this.phone,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ chat_id: to, message: text }),
+      body: JSON.stringify({ chat_id: toChatId(to), message: text }),
     });
 
     if (!response.ok) {

@@ -5,6 +5,7 @@ import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
 import { composeSendUpdateMessage, composeNoteMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
+import { notifyAssignee } from "../services/assignmentNotice";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
@@ -152,6 +153,13 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       }
     }
 
+    // Who the task was on before this edit — the employee only gets told
+    // when it's actually moved to someone new, not every time the dropdown is
+    // re-picked at the same value or another field is edited on a task they
+    // already own. Only fetched when the assignee is part of this request.
+    const previousAssignee =
+      assignee !== undefined ? (await taskRepository.findById(req.params.id))?.assignee ?? null : null;
+
     const task = await taskRepository.update(req.params.id, {
       assignee,
       status,
@@ -159,6 +167,18 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       marketplace,
       dueDate: parsedDueDate,
     });
+
+    // The whole point of the feature: the moment someone is put on a task,
+    // they get a WhatsApp message about it, rather than finding out at
+    // tomorrow morning's reminder or the next time they open the dashboard.
+    // Best-effort and never throws — the assignment is already saved above.
+    if (assignee !== undefined && task.assignee && task.assignee !== previousAssignee) {
+      await notifyAssignee(
+        task.assignee,
+        { description: task.description, clientName: task.clientName, dueDate: task.dueDate },
+        channels
+      );
+    }
 
     // Only "done" is announced back to the group automatically — every
     // other status change is just internal triage the client doesn't need

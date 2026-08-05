@@ -4,6 +4,7 @@ import { recurringTaskRepository } from "../repositories/recurringTaskRepository
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { advanceNextRunAt, Frequency } from "./recurrence";
 import { composeEmployeeReminder, ReminderTask } from "./reminderMessages";
+import { notifyAssignee } from "./assignmentNotice";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
 // How often the scheduler wakes up. Everything it does is driven by stored
@@ -34,7 +35,7 @@ function dateKey(date: Date): string {
 // Creates the Task a repeat is due for, then moves its clock forward. Order
 // matters: if creating the task throws, the clock is left alone so the next
 // tick retries rather than silently skipping this run.
-export async function runDueRecurringTasks(now: Date): Promise<number> {
+export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels): Promise<number> {
   const due = await recurringTaskRepository.due(now);
   let created = 0;
 
@@ -43,7 +44,7 @@ export async function runDueRecurringTasks(now: Date): Promise<number> {
       // Carries the triage across too (employee/type/marketplace), so a
       // repeat doesn't come back on the board stripped of decisions someone
       // already made on the task it was created from.
-      await taskRepository.create({
+      const task = await taskRepository.create({
         source: repeat.source,
         sourceRef: repeat.sourceRef,
         description: repeat.description,
@@ -60,6 +61,15 @@ export async function runDueRecurringTasks(now: Date): Promise<number> {
         advanceNextRunAt(repeat.nextRunAt, repeat.frequency as Frequency, now)
       );
       created += 1;
+
+      // A repeat that carries an assignee is a fresh piece of work landing on
+      // that person, so they get the same "this is yours" message as any
+      // other assignment. Never throws — see notifyAssignee.
+      await notifyAssignee(
+        task.assignee,
+        { description: task.description, clientName: task.clientName, dueDate: task.dueDate },
+        channels
+      );
       console.log(`[scheduler] created repeating task "${repeat.description}" (${repeat.frequency})`);
     } catch (err) {
       console.error(`[scheduler] failed to run repeat ${repeat.id}:`, err);
@@ -117,7 +127,7 @@ async function tick(channels: WhatsAppChannels) {
   const now = new Date();
 
   try {
-    await runDueRecurringTasks(now);
+    await runDueRecurringTasks(now, channels);
   } catch (err) {
     console.error("[scheduler] recurring task pass failed:", err);
   }
