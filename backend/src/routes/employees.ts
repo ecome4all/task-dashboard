@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
+import { authService } from "../auth/authService";
+import { isValidEmail, passwordProblem } from "../auth/credentialRules";
 
 const ROLES = ["admin", "manager", "member"];
 
@@ -77,6 +79,68 @@ export function createEmployeesRouter() {
 
     const employee = await employeeRepository.update(req.params.id, { role, active, phone });
     res.json(employee);
+  });
+
+  // Gives an employee a way to sign in, or replaces the login they have.
+  // Admin-only, and the only route in the app that creates one — there is no
+  // public sign-up, by design. The admin hands the password over themselves;
+  // nothing here emails or WhatsApps it, since a password sitting in a chat
+  // thread is a password anyone who later opens that phone can read.
+  router.put("/:id/login", requireRole("admin"), async (req, res) => {
+    const { email, password } = req.body;
+
+    if (typeof email !== "string" || !isValidEmail(email)) {
+      res.status(400).json({ error: "That doesn't look like an email address." });
+      return;
+    }
+    const problem = passwordProblem(password);
+    if (problem) {
+      res.status(400).json({ error: problem });
+      return;
+    }
+
+    const employee = await employeeRepository.findById(req.params.id);
+    if (!employee) {
+      res.status(404).json({ error: "employee not found" });
+      return;
+    }
+
+    // Email is the login name, so two people can't share one. Checked here
+    // rather than left to the unique index so the answer says which of the
+    // two things went wrong.
+    const clash = await employeeRepository.findByEmail(email);
+    if (clash && clash.id !== employee.id) {
+      res.status(409).json({ error: `${clash.name} already logs in with that email.` });
+      return;
+    }
+
+    const updated = await employeeRepository.setLogin(
+      employee.id,
+      email,
+      await authService.hashPassword(password)
+    );
+    console.log(`[employees] set login for ${updated.name} <${updated.email}>`);
+    res.json(updated);
+  });
+
+  // Takes sign-in access away without deleting the person: they keep their
+  // name, their tasks and their WhatsApp messages, they just can't log in.
+  // (Deactivating, next to this, stops both at once.)
+  router.delete("/:id/login", requireRole("admin"), async (req, res) => {
+    // Without this an admin could remove their own login and be locked out
+    // with no way back in — same reasoning as the self-demotion guard above.
+    if (req.params.id === req.employeeId) {
+      res.status(400).json({ error: "you can't remove your own login" });
+      return;
+    }
+
+    const employee = await employeeRepository.findById(req.params.id);
+    if (!employee) {
+      res.status(404).json({ error: "employee not found" });
+      return;
+    }
+
+    res.json(await employeeRepository.clearLogin(employee.id));
   });
 
   return router;

@@ -9,6 +9,7 @@ import ClientDetail from "./ClientDetail";
 import ClientUpdate from "./ClientUpdate";
 import WeeklyReports from "./WeeklyReports";
 import Settings from "./Settings";
+import Account from "./Account";
 import { BrandLogo, BrandCredit } from "./Brand";
 import Spinner from "./Spinner";
 
@@ -26,7 +27,8 @@ type View =
   | "client-details"
   | "client-update"
   | "weekly-reports"
-  | "settings";
+  | "settings"
+  | "account";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -174,10 +176,13 @@ export default function App() {
           >
             ☰
           </button>
-          <div className="who">
+          {/* Your own name is the way into your own account — there's no
+              separate menu item for it, since changing a password is a rare
+              errand and everyone (not just admins) needs to reach it. */}
+          <button className="who" onClick={() => selectView("account")} title="My account">
             <span className="name">{user.name}</span>
             <span className="role">{ROLE_LABEL[user.role]}</span>
-          </div>
+          </button>
           <button className="btn btn-primary" onClick={handleLogout}>Log out</button>
         </header>
 
@@ -199,6 +204,7 @@ export default function App() {
           {view === "client-update" && <ClientUpdate />}
           {view === "weekly-reports" && <WeeklyReports />}
           {view === "settings" && <Settings />}
+          {view === "account" && <Account user={user} />}
         </section>
       </div>
     </div>

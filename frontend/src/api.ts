@@ -20,6 +20,17 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   onUnauthorized = handler;
 }
 
+// Reading the body can itself fail (already-consumed stream, non-JSON body),
+// and that must never replace the real error with a parsing one.
+async function serverErrorText(res: Response): Promise<string | null> {
+  try {
+    const body = await res.json();
+    return typeof body?.error === "string" && body.error.trim() ? body.error : null;
+  } catch {
+    return null;
+  }
+}
+
 // Network failures (offline, DNS, CORS) throw before a Response even exists —
 // wrapped here so every caller sees the same ApiError shape either way.
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -44,7 +55,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (res.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/me") {
       onUnauthorized?.();
     }
-    throw new ApiError(`Something went wrong (${res.status}). Try again.`, res.status);
+    // Prefer whatever the server said went wrong — routes answer with
+    // { error: "..." } written for the person reading it ("Kinjal already
+    // logs in with that email"), which is far more use than a status code.
+    // Falls back to the generic line when there's no JSON body, or the body
+    // has no error text (an HTML error page from a proxy, say).
+    throw new ApiError(
+      (await serverErrorText(res)) ?? `Something went wrong (${res.status}). Try again.`,
+      res.status
+    );
   }
 
   if (res.status === 204) return undefined as T;
@@ -216,9 +235,15 @@ export interface Employee {
   name: string;
   role: "admin" | "manager" | "member";
   active: boolean;
-  // WhatsApp number for the daily "your open work" reminder. Empty means
-  // this employee just doesn't get reminders.
+  // WhatsApp number for the "a new task is yours" alert and the daily "your
+  // open work" reminder. Empty means this employee just doesn't get either.
   phone: string | null;
+  // The email they sign in with, if an admin has given them a login. An
+  // employee row on its own is not a login — see hasLogin.
+  email: string | null;
+  // Whether this person can actually sign in: both an email and a password
+  // have to be set, so the email alone doesn't answer it.
+  hasLogin: boolean;
 }
 
 export function fetchEmployees(): Promise<Employee[]> {
@@ -247,6 +272,31 @@ export function updateEmployee(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
+}
+
+// Admin-only. Sets an employee's login, or replaces the one they have — both
+// halves at once, since there's no password-reset email to fall back on if
+// only one were changed. Fails with 409 if another employee already signs in
+// with that email.
+export function setEmployeeLogin(id: string, email: string, password: string): Promise<Employee> {
+  return request(`/api/employees/${id}/login`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+// Admin-only. Takes sign-in access away and leaves the employee in place —
+// they keep their name, their tasks and their WhatsApp messages.
+export function removeEmployeeLogin(id: string): Promise<Employee> {
+  return request(`/api/employees/${id}/login`, { method: "DELETE" });
+}
+
+// Anyone, for their own account. The current password is asked for even
+// though the session already proves who this is — it's what stops a browser
+// left logged in from being turned into a permanent takeover.
+export function changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+  return postJson("/api/auth/change-password", { currentPassword, newPassword });
 }
 
 export interface CurrentUser {
