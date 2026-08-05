@@ -63,7 +63,7 @@ cd backend
 npm test
 ```
 
-187 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, and the email/password rules used when giving someone a login. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+220 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, the email/password rules used when giving someone a login, the scheduled report round's config reading, due-check and message wording, and the service-account key reshaping. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
@@ -143,6 +143,38 @@ An **employee row is not a login.** "Add employee" creates somebody who can be g
 - **My account → Change my password** (`POST /api/auth/change-password`, any role) is where the person replaces the password an admin knows with one only they know. The current password is required even though the session already proves who they are — that's what stops a browser left logged in from becoming a permanent takeover.
 - Emails are stored and looked up **lower-case** (`normalizeEmail`), so capitals can't create a second account for one person or break their login. `hasLogin` on the employee API is a computed boolean — `passwordHash` is read to derive it and never leaves the server.
 - **Known limit:** sessions are signed JWTs with no revocation list, so changing a password does not end sessions already issued on other devices; they run until they expire (7 days). Deactivating the employee *does* end them immediately, since `requireAuth` re-reads the row on every request.
+
+## Scheduled reports — sent to clients automatically
+
+Off unless `REPORT_SEND_ENABLED=true`. When on, the scheduler sends the
+configured report to every active client with a sheet linked, on a fixed day
+and hour, **5 seconds apart** (`SEND_GAP_MS` — WhatsApp throttles a burst of
+similar messages from one number, and losing the account costs more than the
+round taking a minute longer).
+
+Config is environment variables, not a table: the timetable is identical for
+every client, so a `ReportSchedule` row would have had one row with values
+that never vary. `REPORT_SEND_KIND`, `REPORT_SEND_DAY` (0–6 or `every`),
+`REPORT_SEND_HOUR`, alongside the existing `REMINDER_HOUR`. A bad day value
+falls back to Monday rather than to every day — a wrong value that sends
+weekly is a smaller mistake than one that sends seven times a week.
+
+Most of the code is about *not* sending. A client is skipped, not messaged,
+when their sheet has no figures for the period, when it can't be opened, or
+when there's no group and no phone to send to. An empty report is worse than a
+late one: the client reads it as the state of their account.
+
+Afterwards every admin and manager gets one summary — sent to whom, what
+failed, what was skipped and why. That message is the only evidence the round
+happened, since the reports went to clients rather than to staff; without it a
+total failure is indistinguishable from a quiet week.
+
+`composeReportMessage` deliberately mirrors `composeMessage` in
+`frontend/src/WeeklyReports.tsx` so a client can't tell an automatic report
+from a hand-sent one — change both together. The run marker is held in memory
+(a restart inside the scheduled hour could send twice; accepted, since the
+window is one hour of one day) and the day key is the **local** date, because
+a Monday 10:00 round keyed off UTC fires on Sunday evening India time.
 
 ## Renaming an employee
 

@@ -6,6 +6,17 @@ import { advanceNextRunAt, Frequency } from "./recurrence";
 import { composeEmployeeReminder, ReminderTask } from "./reminderMessages";
 import { notifyAssignee } from "./assignmentNotice";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
+import { clientRepository } from "../repositories/clientRepository";
+import { buildReport, ReportKind } from "./weeklyReportPreview";
+import {
+  RunResult,
+  SEND_GAP_MS,
+  composeReportMessage,
+  composeRunSummary,
+  isDue,
+  localDateKey,
+  readScheduleConfig,
+} from "./reportSchedule";
 
 // How often the scheduler wakes up. Everything it does is driven by stored
 // timestamps rather than by the tick itself, so this interval only decides
@@ -123,6 +134,115 @@ export async function sendEmployeeReminders(now: Date, channels: WhatsAppChannel
   return sent;
 }
 
+// In memory, like lastReminderDate above. A restart inside the scheduled hour
+// could start the round a second time, so this is the one place where that
+// matters most — the messages go to clients, not to us. It's kept in memory
+// anyway, for one reason: the round only fires in a single hour of a single
+// day, and a redeploy landing inside that exact hour is rare, while a
+// database table whose every row would be identical is permanent. If a
+// double-send ever actually happens, this is the line to move into Postgres.
+let lastReportRunOn: string | null = null;
+
+// The scheduled report round: on the chosen day and hour, every client with a
+// report sheet linked is sent their report, five seconds apart, with no one
+// pressing anything.
+//
+// This messages clients directly, which is why so much of it is about not
+// sending. A client is skipped rather than sent to when their sheet has no
+// figures for the period, when their sheet can't be opened, or when there's
+// nowhere to send it — an empty or broken report is worse than a late one,
+// because the client reads it as the state of their account.
+//
+// Whatever happens, the team gets one summary afterwards. Without it a silent
+// failure looks exactly like a quiet week.
+export async function runScheduledReports(now: Date, channels: WhatsAppChannels): Promise<RunResult[]> {
+  const config = readScheduleConfig();
+  if (!isDue(config, now, lastReportRunOn)) return [];
+
+  // Claimed before any sending starts. If the round throws half way, the next
+  // tick five minutes later must not start it again and send the first
+  // clients their report twice.
+  lastReportRunOn = localDateKey(now);
+
+  const clients = await clientRepository.listWithReportSheet();
+  const results: RunResult[] = [];
+
+  for (const client of clients) {
+    // Groups first, phone second — the same order the Weekly Reports screen
+    // defaults to, so an automatic send lands in the same chat a manual one
+    // would have.
+    const target = client.whatsappGroups[0]?.groupId ?? client.phone?.trim();
+    if (!target) {
+      results.push({ clientName: client.name, sent: false, skipped: "nowhere to send it" });
+      continue;
+    }
+
+    let message: string;
+    try {
+      const report = await buildReport(client.reportSheetUrl!, config.kind, now);
+      if (report.sections.length === 0) {
+        results.push({ clientName: client.name, sent: false, skipped: "no figures for this period" });
+        continue;
+      }
+      message = composeReportMessage(client.name, config.kind, report, now);
+    } catch (err) {
+      console.error(`[scheduler] couldn't build ${client.name}'s report:`, err);
+      results.push({ clientName: client.name, sent: false, skipped: "couldn't open the sheet" });
+      continue;
+    }
+
+    try {
+      await channels.whapi.sendMessage(target, message);
+      results.push({ clientName: client.name, sent: true });
+      console.log(`[scheduler] sent ${config.kind} report to ${client.name}`);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message.slice(0, 120) : "send failed";
+      console.error(`[scheduler] failed to send ${client.name}'s report:`, err);
+      results.push({ clientName: client.name, sent: false, failed: reason });
+    }
+
+    // Only between sends — no point holding the round open after the last one.
+    // Counted over attempts rather than successes: a rejected send still cost
+    // the connected number a request.
+    if (client !== clients[clients.length - 1]) {
+      await new Promise((resolve) => setTimeout(resolve, SEND_GAP_MS));
+    }
+  }
+
+  await tellStaffWhatWentOut(config.kind, results, now, channels);
+  return results;
+}
+
+// Admins and managers only: they're the roles that can open the report
+// screens, so they're the ones who can act on anything that didn't go.
+async function tellStaffWhatWentOut(
+  kind: ReportKind,
+  results: RunResult[],
+  now: Date,
+  channels: WhatsAppChannels
+): Promise<void> {
+  const summary = composeRunSummary(kind, results, now);
+  if (!summary) {
+    console.log("[scheduler] report round fired with no clients to send to");
+    return;
+  }
+
+  const staff = await prisma.employee.findMany({
+    where: { tenantId: "default", active: true, role: { in: ["admin", "manager"] } },
+  });
+
+  for (const person of staff) {
+    if (!person.phone) continue;
+    try {
+      await channels.whapi.sendMessage(person.phone, summary);
+    } catch (err) {
+      // The reports themselves already went out; failing to report on that
+      // must not throw into the tick.
+      console.error(`[scheduler] couldn't send the round summary to ${person.name}:`, err);
+    }
+  }
+}
+
 async function tick(channels: WhatsAppChannels) {
   const now = new Date();
 
@@ -130,6 +250,12 @@ async function tick(channels: WhatsAppChannels) {
     await runDueRecurringTasks(now, channels);
   } catch (err) {
     console.error("[scheduler] recurring task pass failed:", err);
+  }
+
+  try {
+    await runScheduledReports(now, channels);
+  } catch (err) {
+    console.error("[scheduler] scheduled report round failed:", err);
   }
 
   try {
