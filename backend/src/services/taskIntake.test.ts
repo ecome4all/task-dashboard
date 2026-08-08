@@ -4,6 +4,7 @@ import { taskRepository } from "../repositories/taskRepository";
 import { clientRepository } from "../repositories/clientRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
+import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
@@ -15,6 +16,9 @@ vi.mock("../repositories/clientRepository", () => ({
 }));
 vi.mock("../repositories/employeeRepository", () => ({
   employeeRepository: { list: vi.fn(), findByName: vi.fn() },
+}));
+vi.mock("../repositories/taskNoteRepository", () => ({
+  taskNoteRepository: { create: vi.fn() },
 }));
 vi.mock("../repositories/unrecognizedMessageRepository", () => ({
   unrecognizedMessageRepository: { create: vi.fn() },
@@ -226,6 +230,8 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
     vi.mocked(clientRepository.ensureGroupLinked).mockResolvedValue(null);
     vi.mocked(employeeRepository.list).mockReset();
     vi.mocked(employeeRepository.list).mockResolvedValue([SHIVANI] as any);
+    vi.mocked(taskNoteRepository.create).mockReset();
+    vi.mocked(taskNoteRepository.create).mockResolvedValue({} as any);
     vi.mocked(employeeRepository.findByName).mockReset();
     vi.mocked(employeeRepository.findByName).mockResolvedValue({ ...SHIVANI, active: true } as any);
     vi.mocked(unrecognizedMessageRepository.create).mockReset();
@@ -344,5 +350,54 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
     });
 
     expect(task).toMatchObject({ id: "task-1" });
+  });
+
+  // A tagged number that matches nobody used to fail in silence: the task
+  // appeared unassigned with the number still in its text, which reads
+  // exactly like nobody having tagged anyone. Twice that was reported as the
+  // feature being broken, when the number simply wasn't saved against
+  // anyone.
+  it("leaves a note when a tagged number belongs to no employee", async () => {
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-9", description: "x" } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "group-1@g.us",
+      text: "task: Need account details @918733071033",
+      channels: fakeChannels(),
+    });
+
+    expect(taskNoteRepository.create).toHaveBeenCalledTimes(1);
+    const note = vi.mocked(taskNoteRepository.create).mock.calls[0][0];
+    expect(note.taskId).toBe("task-9");
+    expect(note.body).toContain("no employee has it saved");
+  });
+
+  it("leaves no note when the tag did match somebody", async () => {
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-10", description: "x" } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "group-1@g.us",
+      text: "task: fix the listing @919876543210",
+      channels: fakeChannels(),
+    });
+
+    expect(taskNoteRepository.create).not.toHaveBeenCalled();
+  });
+
+  // Nothing number-shaped in the message at all: silence is correct here,
+  // and a note on every ordinary request would be noise.
+  it("leaves no note when nothing was tagged", async () => {
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-11", description: "x" } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "group-1@g.us",
+      text: "task: fix the listing",
+      channels: fakeChannels(),
+    });
+
+    expect(taskNoteRepository.create).not.toHaveBeenCalled();
   });
 });

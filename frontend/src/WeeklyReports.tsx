@@ -118,23 +118,33 @@ export default function WeeklyReports() {
       setStates(initial);
       setLoading(false);
 
-      // Each client's sheet is read independently and in parallel — one
-      // client's sheet being unshared/misconfigured shouldn't block the
-      // rest of the list from showing up.
-      await Promise.all(
-        clients.map(async (client) => {
-          try {
-            const preview = await fetchReportPreview(client.id, kind);
-            setStates((prev) =>
-              prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, preview } : s))
-            );
-          } catch (err) {
-            setStates((prev) =>
-              prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, loadError: errorMessage(err) } : s))
-            );
-          }
-        })
-      );
+      // Each client's sheet is read independently — one client's sheet being
+      // unshared shouldn't stop the rest of the list appearing — but a few at
+      // a time, not all at once.
+      //
+      // Asking for nineteen sheets in one breath is what put "couldn't read
+      // this client's report sheet" beside healthy clients: Google answers a
+      // burst unevenly, some come back 429, and the screen reported that as a
+      // problem with those sheets. The backend retries a busy answer now, and
+      // this stops provoking it in the first place. Rows still fill in as
+      // each one lands, so it doesn't feel slower.
+      const queue = [...clients];
+      const readNext = async (): Promise<void> => {
+        const client = queue.shift();
+        if (!client) return;
+        try {
+          const preview = await fetchReportPreview(client.id, kind);
+          setStates((prev) =>
+            prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, preview } : s))
+          );
+        } catch (err) {
+          setStates((prev) =>
+            prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, loadError: errorMessage(err) } : s))
+          );
+        }
+        return readNext();
+      };
+      await Promise.all(Array.from({ length: Math.min(4, clients.length) }, readNext));
     } catch (err) {
       setLoadError(errorMessage(err));
       setLoading(false);

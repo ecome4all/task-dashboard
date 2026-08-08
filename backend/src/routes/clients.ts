@@ -7,6 +7,7 @@ import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessa
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
+import { classifySheetError } from "../services/googleSheets";
 import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
 
 // Same audience as report-links: admins and managers are the ones who
@@ -182,6 +183,38 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   // numbers — no persisted snapshot, so it's always in sync with whatever's
   // currently in the sheet. See services/weeklyReportPreview.ts for how
   // "current period" is matched across the known tabs.
+// Turns a failed sheet read into something the person reading it can act on.
+// Every failure used to say "check it's shared with the service account and
+// the link is correct" — so when Google simply answered slowly under a burst
+// of reads, staff went looking for a sharing problem that didn't exist, on
+// sheets that were fine. Each cause now names itself, and only one of them
+// is the reader's to fix.
+function sheetFailure(err: unknown): { status: number; error: string } {
+  switch (classifySheetError(err)) {
+    case "not_shared":
+      return {
+        status: 502,
+        error:
+          "This client's sheet isn't shared with the reports account yet. Open the sheet in Google Sheets, press Share, and give Viewer access to " +
+          (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "the reports account") + ".",
+      };
+    case "not_found":
+      return { status: 502, error: "That sheet link doesn't open. Check the Report Sheet link on the Clients screen." };
+    case "busy":
+      return {
+        status: 503,
+        error: "Google was busy and didn't answer in time. Press Retry — there's nothing wrong with this sheet.",
+      };
+    case "credentials":
+      return {
+        status: 502,
+        error: "The Google connection isn't working. This affects every client, not just this one — an admin should check Google Sheets setup.",
+      };
+    default:
+      return { status: 502, error: "Couldn't read this client's report sheet. Press Retry, and if it keeps happening check the link and sharing." };
+  }
+}
+
   router.get("/:id/weekly-report-preview", requireRole(...MANAGE_ROLES), async (req, res) => {
     const client = await clientRepository.findById(req.params.id);
     if (!client) {
@@ -198,9 +231,8 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       res.json(preview);
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
-      res.status(502).json({
-        error: "Couldn't read this client's report sheet. Check it's shared with the service account and the link is correct.",
-      });
+      const failure = sheetFailure(err);
+      res.status(failure.status).json({ error: failure.error });
     }
   });
 
@@ -227,9 +259,8 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       res.json(await buildReport(client.reportSheetUrl, req.params.kind, new Date()));
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
-      res.status(502).json({
-        error: "Couldn't read this client's report sheet. Check it's shared with the service account and the link is correct.",
-      });
+      const failure = sheetFailure(err);
+      res.status(failure.status).json({ error: failure.error });
     }
   });
 

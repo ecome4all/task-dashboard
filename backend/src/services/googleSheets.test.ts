@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizePrivateKey, extractSpreadsheetId } from "./googleSheets";
+import { normalizePrivateKey, extractSpreadsheetId, classifySheetError } from "./googleSheets";
 
 // Not a real key — a short base64-ish body is enough to check the reshaping,
 // and no test should carry live credentials.
@@ -79,5 +79,45 @@ describe("extractSpreadsheetId", () => {
 
   it("returns null for something that isn't a sheet at all", () => {
     expect(extractSpreadsheetId("https://example.com/not/a/sheet")).toBeNull();
+  });
+});
+
+// Each of these has a completely different answer, and naming the wrong one
+// sends staff hunting for a problem that isn't there. Every failure used to
+// say "check it's shared" — including the ones where Google was simply busy
+// and the sheet was perfect.
+describe("classifySheetError", () => {
+  it("calls a 403 a sharing problem", () => {
+    expect(classifySheetError({ code: 403 })).toBe("not_shared");
+    expect(classifySheetError({ response: { status: 403 } })).toBe("not_shared");
+  });
+
+  it("calls a 404 a wrong link", () => {
+    expect(classifySheetError({ code: 404 })).toBe("not_found");
+  });
+
+  // The one that caused the false alarm: a burst of reads, some answered 429.
+  it("calls a rate limit or a server error busy, not broken", () => {
+    expect(classifySheetError({ code: 429 })).toBe("busy");
+    expect(classifySheetError({ code: 500 })).toBe("busy");
+    expect(classifySheetError({ response: { status: 503 } })).toBe("busy");
+  });
+
+  it("treats a dropped connection as busy — it's worth another go", () => {
+    expect(classifySheetError(new Error("socket hang up"))).toBe("busy");
+    expect(classifySheetError(new Error("read ECONNRESET"))).toBe("busy");
+  });
+
+  // A bad key fails at the token exchange, before any request reaches Sheets,
+  // so it arrives with no HTTP status of its own — the exact shape of the
+  // outage that took every client's reports down.
+  it("recognises a credentials failure with no status on it", () => {
+    expect(classifySheetError(new Error("error:1E08010C:DECODER routines::unsupported"))).toBe("credentials");
+    expect(classifySheetError(new Error("invalid_grant: account not found"))).toBe("credentials");
+  });
+
+  it("admits when it doesn't know", () => {
+    expect(classifySheetError(new Error("something else entirely"))).toBe("unknown");
+    expect(classifySheetError(undefined)).toBe("unknown");
   });
 });

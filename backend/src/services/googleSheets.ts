@@ -66,6 +66,68 @@ export function normalizePrivateKey(raw: string): string {
   return `-----BEGIN ${label}-----\n${wrapped}\n-----END ${label}-----\n`;
 }
 
+// What actually went wrong reading a sheet. Worth distinguishing because the
+// answer to each is completely different, and a message naming the wrong one
+// sends staff hunting for a problem that isn't there — which is exactly what
+// happened when every failure said "check it's shared".
+export type SheetProblem = "not_shared" | "not_found" | "busy" | "credentials" | "unknown";
+
+export class SheetReadError extends Error {
+  constructor(public problem: SheetProblem, public cause?: unknown) {
+    super(`sheet read failed: ${problem}`);
+    this.name = "SheetReadError";
+  }
+}
+
+function statusOf(err: any): number | undefined {
+  return err?.code ?? err?.response?.status ?? err?.status;
+}
+
+export function classifySheetError(err: unknown): SheetProblem {
+  const status = statusOf(err);
+  const text = String((err as any)?.message ?? "");
+  if (status === 403) return "not_shared";
+  if (status === 404) return "not_found";
+  if (status === 429 || (typeof status === "number" && status >= 500)) return "busy";
+  // A bad key fails at the token exchange, before any request reaches Sheets,
+  // so it arrives with no HTTP status of its own.
+  if (/DECODER|invalid_grant|private key|credential/i.test(text)) return "credentials";
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|network/i.test(text)) return "busy";
+  return "unknown";
+}
+
+// Whether trying again could plausibly work. Deliberately narrow: retrying a
+// sheet that isn't shared just delays the same failure three times over.
+function isTransient(err: unknown): boolean {
+  const problem = classifySheetError(err);
+  return problem === "busy";
+}
+
+const RETRY_DELAYS_MS = [400, 1200];
+
+// Google answers a burst of reads unevenly — the Weekly Reports screen asks
+// for every client at once, and on a cold process each of those is also
+// waiting on the first access-token exchange. A few come back 429 or 503
+// while the rest succeed, which is what put "couldn't read this sheet" next
+// to perfectly healthy clients.
+//
+// Two retries with a growing pause turns that into a slower answer rather
+// than a wrong one. Anything that isn't transient is rethrown immediately.
+async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err;
+      if (!isTransient(err) || attempt === RETRY_DELAYS_MS.length) break;
+      console.warn(`[sheets] transient failure, retrying in ${RETRY_DELAYS_MS[attempt]}ms:`, (err as any)?.message);
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+    }
+  }
+  throw new SheetReadError(classifySheetError(lastError), lastError);
+}
+
 let cachedClient: ReturnType<typeof google.sheets> | null = null;
 
 // One authenticated client, reused across requests -- GoogleAuth caches and
@@ -97,11 +159,13 @@ function sheetsClient() {
 // across different versions of the client sheets. Callers match these names
 // against a pattern instead (see pickTab in weeklyReportPreview.ts).
 export async function listTabNames(spreadsheetId: string): Promise<string[]> {
-  const sheets = sheetsClient();
-  const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties.title" });
-  return (res.data.sheets ?? [])
-    .map((s: any) => s.properties?.title)
-    .filter((t: unknown): t is string => typeof t === "string");
+  return withRetry(async () => {
+    const sheets = sheetsClient();
+    const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties.title" });
+    return (res.data.sheets ?? [])
+      .map((s: any) => s.properties?.title)
+      .filter((t: unknown): t is string => typeof t === "string");
+  });
 }
 
 // Reads one tab as its own header row + data rows, using Sheets'
@@ -111,6 +175,7 @@ export async function listTabNames(spreadsheetId: string): Promise<string[]> {
 // throwing if the tab doesn't exist (a client's sheet may not have every
 // known tab), so the caller can skip it instead of failing the whole read.
 export async function readTab(spreadsheetId: string, tabName: string): Promise<SheetTab | null> {
+  return withRetry(async () => {
   try {
     const sheets = sheetsClient();
     const res = await sheets.spreadsheets.values.get({
@@ -131,4 +196,5 @@ export async function readTab(spreadsheetId: string, tabName: string): Promise<S
     if (err?.code === 400 || err?.response?.status === 400) return null;
     throw err;
   }
+  });
 }

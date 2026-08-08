@@ -1,5 +1,6 @@
 import { parseTaskMessage } from "../parser/taskParser";
 import { containsPhoneNumber, findEmployeeMention } from "../parser/employeeMention";
+import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { taskRepository } from "../repositories/taskRepository";
 import { clientRepository } from "../repositories/clientRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
@@ -114,6 +115,31 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     );
   } catch (err) {
     console.error("Failed to send task acknowledgement:", err);
+  }
+
+  // A number was tagged but matched nobody. Until now that failed in
+  // silence: the task simply appeared unassigned with the number still in
+  // its text, indistinguishable from nobody having tagged anyone — and the
+  // two times it happened, the conclusion drawn was that the feature was
+  // broken rather than that the number wasn't saved against anyone.
+  //
+  // The note is internal, never sent to the group. The client's group is the
+  // wrong audience for "your number isn't one of our staff", and the person
+  // who needs to know is whoever opens the task.
+  if (!mention && containsPhoneNumber(parsed.description)) {
+    try {
+      await taskNoteRepository.create({
+        taskId: task.id,
+        authorId: "system",
+        authorName: "Task Dashboard",
+        body:
+          "A number was tagged in this message, but no employee has it saved, so nobody was assigned. " +
+          "Check the number on the Employees screen — matching is on the last 10 digits.",
+      });
+    } catch (err) {
+      // A missing note must never cost us the task itself.
+      console.error("Failed to note an unmatched tagged number:", err);
+    }
   }
 
   // Never throws — see notifyAssignee.
