@@ -129,3 +129,25 @@ export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): 
 export function composeNoteMessage(description: string, body: string): string {
   return `📝 *${description}*\n${body}`;
 }
+
+// Whether a client's group should be told about this edit. Pulled out of the
+// route so the rule can be tested: it decides when a real person's WhatsApp
+// buzzes, and every one of these cases was a live bug waiting to happen.
+//
+// The promise being kept is "the group gets an automatic message every time
+// a request's stage changes" — so every stage counts, not only Done. The
+// guards are all about not messaging when nothing actually moved: editing a
+// due date, re-saving the same status, or an edit that never touched status
+// at all must stay silent, because a client reading "status changed to
+// Submitted" about a task that was already Submitted learns nothing and
+// trusts the next one less.
+export function shouldAnnounceStageChange(input: {
+  statusInRequest: boolean;
+  previousStatus: string | null;
+  newStatus: string;
+  disabled?: boolean;
+}): boolean {
+  if (input.disabled) return false;
+  if (!input.statusInRequest) return false;
+  return input.newStatus !== input.previousStatus;
+}

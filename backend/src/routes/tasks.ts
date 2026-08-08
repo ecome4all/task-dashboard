@@ -4,7 +4,14 @@ import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
-import { composeSendUpdateMessage, composeNoteMessage, changedFieldsSince, buildSnapshot, TaskSnapshot } from "../services/taskMessages";
+import {
+  composeSendUpdateMessage,
+  composeNoteMessage,
+  changedFieldsSince,
+  buildSnapshot,
+  shouldAnnounceStageChange,
+  TaskSnapshot,
+} from "../services/taskMessages";
 import { notifyAssignee } from "../services/assignmentNotice";
 
 const DUE_DATE_ROLES = ["admin", "manager"];
@@ -153,12 +160,15 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       }
     }
 
-    // Who the task was on before this edit — the employee only gets told
-    // when it's actually moved to someone new, not every time the dropdown is
-    // re-picked at the same value or another field is edited on a task they
-    // already own. Only fetched when the assignee is part of this request.
-    const previousAssignee =
-      assignee !== undefined ? (await taskRepository.findById(req.params.id))?.assignee ?? null : null;
+    // How the task stood before this edit. Both notifications below turn on
+    // something having actually changed rather than merely being present in
+    // the request: re-picking a dropdown at the value it already had, or
+    // editing a due date, must not message anyone. Fetched once, and only
+    // when one of the two fields that can notify is part of this request.
+    const before =
+      assignee !== undefined || status !== undefined ? await taskRepository.findById(req.params.id) : null;
+    const previousAssignee = before?.assignee ?? null;
+    const previousStatus = before?.status ?? null;
 
     const task = await taskRepository.update(req.params.id, {
       assignee,
@@ -180,22 +190,41 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       );
     }
 
-    // Only "done" is announced back to the group automatically — every
-    // other status change is just internal triage the client doesn't need
-    // pinged about. Uses the same composer as the manual Send button, just
-    // forced to the single "status" field, so both message paths stay
-    // worded identically. This send is best-effort: the status update
-    // itself is already saved above, and a WhatsApp failure (network blip,
-    // bad chat_id, Periskope outage) must not fail the request or crash the
-    // server — an uncaught rejection here would take down the whole
-    // process, not just this one notification.
-    // Tracks what the response's pendingSendFields should reflect -- starts
-    // as the snapshot already on the task, and gets the status field merged
-    // in below on a successful automatic send, without needing a re-fetch.
-    // A non-"done" status change leaves the snapshot untouched, so it still
-    // shows up as pending on the manual Send button instead of being lost.
+    // Every stage change is announced back to the group, not just "done" —
+    // "the group gets an automatic message every time a request's stage
+    // changes" is what was promised, and for a client the point of the
+    // system is watching their request move without having to ask.
+    //
+    // Guarded on the stage having actually moved. Without that, editing a
+    // due date or re-picking the same status would message the client again
+    // saying nothing had changed, which is worse than not messaging at all.
+    //
+    // Uses the same composer as the manual Send button, forced to the single
+    // "status" field, so both paths stay worded identically. Best-effort:
+    // the change is already saved above, and a WhatsApp failure (network
+    // blip, bad chat_id, Periskope outage) must not fail the request or
+    // crash the server — an uncaught rejection here would take down the
+    // whole process, not just this one notification.
+    //
+    // DISABLE_AUTO_STATUS_UPDATES exists because this is the one feature
+    // that messages a client on someone else's schedule. If a group ever
+    // finds it noisy it can be switched off in the hosting settings without
+    // a deploy, and the manual Send button still covers everything.
+    //
+    // currentSnapshot tracks what the response's pendingSendFields should
+    // reflect — it starts as the snapshot already on the task and gets the
+    // status merged in below on a successful send, so a later manual Send
+    // doesn't restate what was already announced. A failed send leaves it
+    // untouched, so the change stays pending on the Send button rather than
+    // being silently lost.
     let currentSnapshot = task.sentSnapshot as TaskSnapshot | null;
-    if (status !== undefined && task.status === "done") {
+    const stageChanged = shouldAnnounceStageChange({
+      statusInRequest: status !== undefined,
+      previousStatus,
+      newStatus: task.status,
+      disabled: process.env.DISABLE_AUTO_STATUS_UPDATES === "true",
+    });
+    if (stageChanged) {
       try {
         const whatsapp = resolveAdapterForSource(task.source, channels);
         const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
