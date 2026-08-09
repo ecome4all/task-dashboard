@@ -2,6 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { extractPeriskopeMessage } from "../parser/extractPeriskopeMessage";
 import { handleIncomingTaskMessage } from "../services/taskIntake";
+import { markMessageSeen, messageKey } from "../services/seenMessages";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
 // Periskope signs every webhook POST with an HMAC-SHA256 of the raw request
@@ -34,6 +35,22 @@ export function createPeriskopeWebhookRouter(channels: WhatsAppChannels) {
     const incoming = extractPeriskopeMessage(req.body);
     if (!incoming) {
       res.status(200).send("ignored: not a new text message");
+      return;
+    }
+
+    // Periskope redelivers a message it didn't get a quick enough answer
+    // about, and everything below this line is slow: another Periskope call
+    // for the chat name, the task write, the reply to the group, the
+    // assignee's alert. When that reached about five seconds, one message
+    // became two identical tasks, two "Got it, logged" replies to the client
+    // and two alerts to the assignee.
+    //
+    // The gate goes here rather than deeper in, because the duplicate work
+    // starts on the very next line. Answering 200 is right: the message was
+    // handled, the first time we saw it.
+    if (!markMessageSeen(messageKey(req.body, incoming.chatId, incoming.text, incoming.senderPhone))) {
+      console.log("[periskope webhook] ignoring a message already handled:", incoming.chatId);
+      res.status(200).send("ignored: already handled");
       return;
     }
 
