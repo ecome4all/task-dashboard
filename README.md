@@ -135,6 +135,52 @@ Two changes:
 - **`routes/auth.ts`** — login rejects an inactive employee, worded identically to a wrong password so it doesn't leak which accounts exist.
 - **`auth/requireAuth.ts`** — now looks the employee up fresh on every request and rejects them if missing or inactive, so deactivating ends an *existing* session immediately rather than whenever its cookie happens to expire. It stashes the row on `req.employee`, and `requireRole` reuses it, so role-gated routes don't fetch the same primary key twice.
 
+## One WhatsApp message, one task
+
+Periskope redelivers a message it hasn't had a quick answer about, and this
+webhook answers only after doing everything: a second Periskope call for the
+chat name, the task write, the "Got it, logged" reply, the assignee's alert.
+Timed live at about five seconds, which was long enough — one message became
+two identical tasks, two acknowledgements to the client and two alerts to the
+assignee, five seconds apart. It was reaching real clients, not just tests:
+any slow intake (cold process, Neon waking up, Periskope answering lazily)
+did it.
+
+`markMessageSeen` (services/seenMessages.ts) gates the handler on the
+provider's message id, falling back to chat + sender + exact text if that
+field is ever absent — dedupe quietly ceasing to work would look exactly like
+the bug it prevents. A redelivery is answered 200 and dropped.
+
+In memory rather than a table, deliberately: redeliveries arrive seconds after
+the original so they land in the same process, and the alternative is a
+database write per inbound message plus a migration. A redelivery straddling a
+restart still gets through — the real cure for that is answering the webhook
+sooner (reply once the task is written, then send the acknowledgement and the
+alert), which is the fix to reach for if this recurs.
+
+## Stage changes are announced to the client's group
+
+Moving a task to any new stage messages that client's WhatsApp group at once,
+not only "Done" as it used to. The proposal this system was bought on promises
+the group is told every time a request's stage changes, and a client watching
+for their request to move is the reason they tolerate the WhatsApp workflow at
+all.
+
+It fires only on a stage that actually moved: re-picking the same status, or
+editing a due date, sends nothing. A client reading "status changed to
+Submitted" about a task that was already Submitted learns nothing and trusts
+the next message less. That rule is `shouldAnnounceStageChange` in
+services/taskMessages.ts rather than a condition inline in the route — it
+decides when a real person's phone buzzes, so it lives somewhere it is tested.
+
+A successful send merges the status into the task's sent-snapshot so a later
+manual Send doesn't restate it; a failed send leaves the snapshot alone, so
+the change stays pending on the Send button instead of vanishing.
+
+`DISABLE_AUTO_STATUS_UPDATES=true` switches it off without a deploy. This is
+the one feature that messages a client on someone else's schedule, and a group
+finding it noisy shouldn't have to wait for a release.
+
 ## Employees and logins
 
 An **employee row is not a login.** "Add employee" creates somebody who can be given tasks, picked in the assignee dropdown and messaged on WhatsApp — with no email, no password, and no way to sign in. Giving them one is a separate, deliberate step, and there is no public sign-up route anywhere in the app.
