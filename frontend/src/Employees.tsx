@@ -6,6 +6,7 @@ import {
   fetchAllEmployees,
   createEmployee,
   updateEmployee,
+  deleteEmployee,
   setEmployeeLogin,
   removeEmployeeLogin,
 } from "./api";
@@ -135,6 +136,30 @@ export default function Employees({ user }: { user: CurrentUser }) {
     }
   }
 
+  // Deleting is separate from deactivating on purpose, and the wording of the
+  // confirmation carries the whole difference: deactivating is what you want
+  // for someone who has left, and this isn't that.
+  async function handleDelete(employee: Employee) {
+    if (
+      !window.confirm(
+        `Delete ${employee.name} for good?\n\n` +
+          `Their name stays on work they already did, but the person is removed and this can't be undone.\n\n` +
+          `If they've simply left, press Cancel and use Deactivate instead — that stops their login and their messages, and can be undone.`
+      )
+    ) {
+      return;
+    }
+    setActionError("");
+    try {
+      await deleteEmployee(employee.id);
+      setEmployees((prev) => prev.filter((e) => e.id !== employee.id));
+    } catch (err) {
+      // The server refuses your own account and the last active admin, and
+      // says which — that message is far more use than a generic failure.
+      setActionError(errorMessage(err));
+    }
+  }
+
   // Adding an employee gives them a name on the board and WhatsApp messages —
   // it does not give them a way in. This is where that happens, and it's the
   // only place in the app that creates a login: there's no public sign-up.
@@ -254,6 +279,7 @@ export default function Employees({ user }: { user: CurrentUser }) {
                 <th>WhatsApp number</th>
                 <th>Login</th>
                 <th>Active</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -336,11 +362,23 @@ export default function Employees({ user }: { user: CurrentUser }) {
                         {employee.active ? "Deactivate" : "Reactivate"}
                       </button>
                     </td>
+                    <td>
+                      {/* Deliberately last and quiet: Deactivate is the one
+                          to reach for nine times out of ten. */}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        disabled={isSelf}
+                        title={isSelf ? "You can't delete your own account" : "Remove this person for good"}
+                        onClick={() => handleDelete(employee)}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
 
                   {loginDraft && (
                     <tr>
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <form
                           className="add-employee"
                           onSubmit={(e) => {

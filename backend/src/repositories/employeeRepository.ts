@@ -184,4 +184,22 @@ export const employeeRepository = {
   findById(id: string) {
     return prisma.employee.findFirst({ where: { id, tenantId: TENANT_ID } });
   },
+
+  // Hard delete, for a duplicate or a test account. Task.assignee holds a
+  // name rather than a link to this row, so past work keeps the name of
+  // whoever did it: deleting someone removes their access and their
+  // reminders, not the record of what they did.
+  //
+  // Deactivating remains the right answer for someone who has left. This is
+  // for rows that should never have existed.
+  delete(id: string) {
+    return prisma.employee.delete({ where: { id } });
+  },
+
+  // Only used to refuse deleting the last admin — see whyEmployeeCannotBeDeleted.
+  countOtherActiveAdmins(excludeId: string) {
+    return prisma.employee.count({
+      where: { tenantId: TENANT_ID, active: true, role: "admin", id: { not: excludeId } },
+    });
+  },
 };

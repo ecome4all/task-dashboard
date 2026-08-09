@@ -13,6 +13,12 @@ import {
   TaskSnapshot,
 } from "../services/taskMessages";
 import { notifyAssignee } from "../services/assignmentNotice";
+import { requireRole } from "../auth/requireRole";
+
+// Deleting a task is the one thing on this router that isn't open to
+// everyone: members raise and work tasks, they don't remove them. Same two
+// roles that can delete a client.
+const MANAGE_ROLES = ["admin", "manager"];
 
 const DUE_DATE_ROLES = ["admin", "manager"];
 
@@ -86,6 +92,24 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     }
 
     res.status(201).json(note);
+  });
+
+  // Removing a task outright. Marking it done is how finished work is
+  // closed; this is for the things that were never work — a duplicate, a
+  // test, a message that shouldn't have become a task. Without it those sit
+  // in the Done list for the life of the system.
+  //
+  // Admins and managers, matching who can delete a client. Its notes go with
+  // it automatically (the relation cascades).
+  router.delete("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
+    const task = await taskRepository.findById(req.params.id);
+    if (!task) {
+      res.status(404).json({ error: "task not found" });
+      return;
+    }
+    await taskRepository.delete(task.id);
+    console.log(`[tasks] deleted "${task.description}" (${task.clientName ?? "no client"})`);
+    res.status(204).send();
   });
 
   router.delete("/:id/notes/:noteId", async (req, res) => {

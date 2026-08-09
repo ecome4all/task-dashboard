@@ -3,6 +3,7 @@ import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
 import { authService } from "../auth/authService";
 import { isValidEmail, passwordProblem } from "../auth/credentialRules";
+import { whyEmployeeCannotBeDeleted } from "../services/employeeDeletion";
 
 const ROLES = ["admin", "manager", "member"];
 
@@ -141,6 +142,35 @@ export function createEmployeesRouter() {
     }
 
     res.json(await employeeRepository.clearLogin(employee.id));
+  });
+
+  // Removing someone outright, for a duplicate or a test account. Someone who
+  // has actually left should be deactivated instead: that stops their login
+  // and their messages while keeping their name attached to the work they
+  // did. Deleting is for rows that should never have existed.
+  //
+  // Their past work is unaffected either way — a task stores the assignee's
+  // name, not a link to this row.
+  router.delete("/:id", requireRole("admin"), async (req, res) => {
+    const employee = await employeeRepository.findById(req.params.id);
+    if (!employee) {
+      res.status(404).json({ error: "employee not found" });
+      return;
+    }
+
+    const refusal = whyEmployeeCannotBeDeleted({
+      isSelf: employee.id === req.employeeId,
+      targetIsActiveAdmin: employee.active && employee.role === "admin",
+      otherActiveAdmins: await employeeRepository.countOtherActiveAdmins(employee.id),
+    });
+    if (refusal) {
+      res.status(400).json({ error: refusal });
+      return;
+    }
+
+    await employeeRepository.delete(employee.id);
+    console.log(`[employees] deleted ${employee.name}`);
+    res.status(204).send();
   });
 
   return router;

@@ -148,6 +148,13 @@ export function deleteTaskNote(taskId: string, noteId: string): Promise<void> {
   return request(`/api/tasks/${taskId}/notes/${noteId}`, { method: "DELETE" });
 }
 
+// Removes a task and its notes for good. Marking a task done is how finished
+// work is closed — this is for a duplicate, a test, or a message that should
+// never have become a task. Admins and managers only, enforced server-side.
+export function deleteTask(id: string): Promise<void> {
+  return request(`/api/tasks/${id}`, { method: "DELETE" });
+}
+
 export type Frequency = "daily" | "weekly" | "monthly";
 
 export const FREQUENCY_LABEL: Record<Frequency, string> = {
@@ -272,6 +279,16 @@ export function updateEmployee(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
+}
+
+// Removes someone for good. Deactivating is the right answer for a person who
+// has left — it stops their login and their messages while keeping their name
+// on the work they did. This is for a duplicate or a test account.
+//
+// The server refuses to delete your own account, or the last active admin,
+// and says why — show the message rather than a generic failure.
+export function deleteEmployee(id: string): Promise<void> {
+  return request(`/api/employees/${id}`, { method: "DELETE" });
 }
 
 // Admin-only. Sets an employee's login, or replaces the one they have — both

@@ -181,6 +181,23 @@ the change stays pending on the Send button instead of vanishing.
 the one feature that messages a client on someone else's schedule, and a group
 finding it noisy shouldn't have to wait for a release.
 
+## Deleting tasks and employees
+
+Both were missing, so a duplicate task or a test account stayed on the board
+for the life of the system — found while cleaning up after live testing.
+
+**Tasks:** `DELETE /api/tasks/:id`, admin and manager (matching who can delete
+a client). Notes cascade with the task. Marking Done remains how finished work
+is closed; this is for things that were never work.
+
+**Employees:** `DELETE /api/employees/:id`, admin only, and refused in two
+cases by `whyEmployeeCannotBeDeleted` (services/employeeDeletion.ts) — your own
+account, and the last active admin. Both would end with somebody locked out of
+their own system, so the rule is a tested pure function rather than a
+condition buried in the route. Deactivating stays the right answer for someone
+who has left: `Task.assignee` holds a name rather than a foreign key, so past
+work keeps the name of whoever did it either way.
+
 ## Employees and logins
 
 An **employee row is not a login.** "Add employee" creates somebody who can be given tasks, picked in the assignee dropdown and messaged on WhatsApp — with no email, no password, and no way to sign in. Giving them one is a separate, deliberate step, and there is no public sign-up route anywhere in the app.

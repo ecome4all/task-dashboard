@@ -93,4 +93,14 @@ export const taskRepository = {
   updateSnapshot(id: string, snapshot: Record<string, string | null>) {
     return prisma.task.update({ where: { id }, data: { sentSnapshot: snapshot } });
   },
+
+  // Hard delete, for a duplicate, a test, or a message that should never have
+  // become a task at all. Its notes go with it — TaskNote cascades on the
+  // relation — so nothing is left pointing at a task that no longer exists.
+  //
+  // Marking something done is the normal way to finish work; this is for
+  // things that were never work in the first place.
+  delete(id: string) {
+    return prisma.task.delete({ where: { id } });
+  },
 };

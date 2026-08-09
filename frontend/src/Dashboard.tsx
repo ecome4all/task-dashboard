@@ -14,6 +14,7 @@ import {
   fetchEmployees,
   fetchConfigOptions,
   sendTaskUpdate,
+  deleteTask,
   createRecurringTask,
 } from "./api";
 import Spinner from "./Spinner";
@@ -88,6 +89,9 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   // everyone's board is a scheduling decision, not day-to-day triage.
   const canSetDueDate = user.role === "admin" || user.role === "manager";
   const canRepeat = canSetDueDate;
+  // Members raise and work tasks; they don't remove them. Matched by the
+  // server, which is what actually enforces it.
+  const canDelete = canSetDueDate;
 
   async function load() {
     setLoading(true);
@@ -201,6 +205,28 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
       setActionError(errorMessage(err));
     } finally {
       setSendingTaskId(null);
+    }
+  }
+
+  // Removing a task outright. Finished work is closed by marking it Done —
+  // this is for the things that were never work: a duplicate, a test, a
+  // message that shouldn't have become a task. The notes go with it, which
+  // is why the confirmation says so.
+  async function handleDeleteTask(task: Task) {
+    const noteWarning = task.noteCount > 0 ? `\n\nIts ${task.noteCount} note(s) will be deleted too.` : "";
+    if (
+      !window.confirm(
+        `Delete "${task.description}"?${noteWarning}\n\nThis can't be undone. Nothing is sent to the client.`
+      )
+    ) {
+      return;
+    }
+    setActionError("");
+    try {
+      await deleteTask(task.id);
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    } catch (err) {
+      setActionError(errorMessage(err));
     }
   }
 
@@ -331,6 +357,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 <th>Notes</th>
                 {canRepeat && <th>Repeat</th>}
                 <th>Send</th>
+                {canDelete && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -420,10 +447,24 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                       {sendingTaskId === task.id ? "Sending…" : justSentTaskId === task.id ? "Sent ✓" : "Send"}
                     </button>
                   </td>
+                  {canDelete && (
+                    <td>
+                      {/* For a duplicate, a test, or a message that should
+                          never have become a task. Finished work is closed by
+                          marking it Done, not by removing it. */}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        title="Remove this task for good"
+                        onClick={() => handleDeleteTask(task)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  )}
                 </tr>
                 {canRepeat && openRepeatTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={15}>
+                    <td colSpan={14 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <div className="repeat-form">
                         <div>
                           <label className="fact-label">How often</label>
@@ -466,7 +507,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 )}
                 {openNotesTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={canRepeat ? 15 : 14}>
+                    <td colSpan={14 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <TaskNotes
                         taskId={task.id}
                         user={user}
