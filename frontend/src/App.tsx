@@ -28,10 +28,33 @@ type View =
   | "settings"
   | "account";
 
+const VIEWS: View[] = [
+  "tasks",
+  "repeating",
+  "employees",
+  "clients",
+  "client-details",
+  "weekly-reports",
+  "settings",
+  "account",
+];
+
+// The screen in the address bar, so a refresh comes back to where you were
+// rather than to Tasks. Anyone working on Reports refreshes constantly — after
+// filling in a sheet, after a send — and each one threw them back to the
+// board.
+//
+// The hash rather than the path: it needs no server rewrite of its own, and it
+// leaves the existing /api routing alone.
+function viewFromHash(): View {
+  const asked = window.location.hash.replace(/^#\/?/, "");
+  return VIEWS.includes(asked as View) ? (asked as View) : "tasks";
+}
+
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [view, setView] = useState<View>("tasks");
+  const [view, setView] = useState<View>(viewFromHash);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Which client the Client Details screen is showing. Held here rather than
@@ -59,6 +82,14 @@ export default function App() {
     return () => setUnauthorizedHandler(null);
   }, []);
 
+  // Keeps the Back button honest: pressing it changes the hash, and this puts
+  // the screen back in step with it.
+  useEffect(() => {
+    const onHashChange = () => setView(viewFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   if (checkingSession) {
     return (
       <main className="login-page">
@@ -74,6 +105,18 @@ export default function App() {
   const canSeeClients = user.role === "admin" || user.role === "manager";
   const canSeeEmployees = user.role === "admin";
 
+  // A hash can be typed by hand, kept in a bookmark, or left over from before
+  // someone's role changed — none of which the nav can hide. The backend
+  // refuses the data regardless; this is so nobody is left looking at an empty
+  // screen wondering what broke.
+  const allowedHere =
+    view === "employees" || view === "settings"
+      ? canSeeEmployees
+      : view === "clients" || view === "client-details" || view === "weekly-reports"
+      ? canSeeClients
+      : true;
+  const shownView: View = allowedHere ? view : "tasks";
+
   async function handleLogout() {
     await logout();
     setSessionExpired(false);
@@ -85,6 +128,9 @@ export default function App() {
   // set to true in the first place).
   function selectView(newView: View) {
     setView(newView);
+    // Written rather than pushed, so each screen becomes a step Back can
+    // return to.
+    window.location.hash = `#/${newView}`;
     setMobileNavOpen(false);
   }
 
@@ -103,20 +149,20 @@ export default function App() {
         </div>
         <nav className="nav">
           <button
-            className={`nav-item ${view === "tasks" ? "active" : ""}`}
+            className={`nav-item ${shownView ==="tasks" ? "active" : ""}`}
             onClick={() => selectView("tasks")}
           >
             Tasks
           </button>
           <button
-            className={`nav-item ${view === "repeating" ? "active" : ""}`}
+            className={`nav-item ${shownView ==="repeating" ? "active" : ""}`}
             onClick={() => selectView("repeating")}
           >
             Repeating Tasks
           </button>
           {canSeeEmployees && (
             <button
-              className={`nav-item ${view === "employees" ? "active" : ""}`}
+              className={`nav-item ${shownView ==="employees" ? "active" : ""}`}
               onClick={() => selectView("employees")}
             >
               Employees
@@ -124,7 +170,7 @@ export default function App() {
           )}
           {canSeeClients && (
             <button
-              className={`nav-item ${view === "clients" ? "active" : ""}`}
+              className={`nav-item ${shownView ==="clients" ? "active" : ""}`}
               onClick={() => selectView("clients")}
             >
               Clients
@@ -132,7 +178,7 @@ export default function App() {
           )}
           {canSeeClients && (
             <button
-              className={`nav-item ${view === "client-details" ? "active" : ""}`}
+              className={`nav-item ${shownView ==="client-details" ? "active" : ""}`}
               onClick={() => selectView("client-details")}
             >
               Client Details
@@ -140,7 +186,7 @@ export default function App() {
           )}
           {canSeeClients && (
             <button
-              className={`nav-item ${view === "weekly-reports" ? "active" : ""}`}
+              className={`nav-item ${shownView ==="weekly-reports" ? "active" : ""}`}
               onClick={() => selectView("weekly-reports")}
             >
               Reports
@@ -148,7 +194,7 @@ export default function App() {
           )}
           {canSeeEmployees && (
             <button
-              className={`nav-item ${view === "settings" ? "active" : ""}`}
+              className={`nav-item ${shownView ==="settings" ? "active" : ""}`}
               onClick={() => selectView("settings")}
             >
               Settings
@@ -177,23 +223,23 @@ export default function App() {
         </header>
 
         <section className="view">
-          {view === "tasks" && <Dashboard user={user} />}
-          {view === "repeating" && <RecurringTasks user={user} />}
-          {view === "employees" && <Employees user={user} />}
-          {view === "clients" && (
+          {shownView ==="tasks" && <Dashboard user={user} />}
+          {shownView ==="repeating" && <RecurringTasks user={user} />}
+          {shownView ==="employees" && <Employees user={user} />}
+          {shownView ==="clients" && (
             <Clients
               onOpenClient={(id) => {
                 setSelectedClientId(id);
-                setView("client-details");
+                selectView("client-details");
               }}
             />
           )}
-          {view === "client-details" && (
+          {shownView ==="client-details" && (
             <ClientDetail clientId={selectedClientId} onSelectClient={setSelectedClientId} />
           )}
-          {view === "weekly-reports" && <WeeklyReports />}
-          {view === "settings" && <Settings />}
-          {view === "account" && <Account user={user} />}
+          {shownView ==="weekly-reports" && <WeeklyReports />}
+          {shownView ==="settings" && <Settings />}
+          {shownView ==="account" && <Account user={user} />}
         </section>
       </div>
     </div>
