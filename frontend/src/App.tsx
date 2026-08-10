@@ -6,7 +6,6 @@ import RecurringTasks from "./RecurringTasks";
 import Employees from "./Employees";
 import Clients from "./Clients";
 import ClientDetail from "./ClientDetail";
-import ClientUpdate from "./ClientUpdate";
 import WeeklyReports from "./WeeklyReports";
 import Settings from "./Settings";
 import Account from "./Account";
@@ -25,7 +24,6 @@ type View =
   | "employees"
   | "clients"
   | "client-details"
-  | "client-update"
   | "weekly-reports"
   | "settings"
   | "account";
@@ -142,18 +140,10 @@ export default function App() {
           )}
           {canSeeClients && (
             <button
-              className={`nav-item ${view === "client-update" ? "active" : ""}`}
-              onClick={() => selectView("client-update")}
-            >
-              Send Report
-            </button>
-          )}
-          {canSeeClients && (
-            <button
               className={`nav-item ${view === "weekly-reports" ? "active" : ""}`}
               onClick={() => selectView("weekly-reports")}
             >
-              Weekly Reports
+              Reports
             </button>
           )}
           {canSeeEmployees && (
@@ -201,7 +191,6 @@ export default function App() {
           {view === "client-details" && (
             <ClientDetail clientId={selectedClientId} onSelectClient={setSelectedClientId} />
           )}
-          {view === "client-update" && <ClientUpdate />}
           {view === "weekly-reports" && <WeeklyReports />}
           {view === "settings" && <Settings />}
           {view === "account" && <Account user={user} />}
