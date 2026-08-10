@@ -98,6 +98,11 @@ function statusOf(err: any): number | undefined {
   return undefined;
 }
 
+// How Google words running out of the per-minute read allowance. Used twice
+// below: to call it busy rather than a sharing problem, and to stop it being
+// retried.
+const QUOTA_WORDING = /quota|rate limit|rateLimitExceeded|RESOURCE_EXHAUSTED|too many requests/i;
+
 export function classifySheetError(err: unknown): SheetProblem {
   const status = statusOf(err);
   const text = String((err as any)?.message ?? "");
@@ -107,7 +112,7 @@ export function classifySheetError(err: unknown): SheetProblem {
   // "out of quota" reads as "this sheet isn't shared" and sends staff to fix
   // sharing on sheets that are shared perfectly well. Reading two dozen
   // clients' sheets on one screen is exactly how the allowance runs out.
-  if (/quota|rate limit|rateLimitExceeded|RESOURCE_EXHAUSTED|too many requests/i.test(text)) return "busy";
+  if (QUOTA_WORDING.test(text)) return "busy";
 
   if (status === 403) return "not_shared";
   if (status === 404) return "not_found";
@@ -163,9 +168,14 @@ export function sheetErrorDetail(err: unknown): string | undefined {
 
 // Whether trying again could plausibly work. Deliberately narrow: retrying a
 // sheet that isn't shared just delays the same failure three times over.
+//
+// Running out of the per-minute allowance is the one "busy" that must NOT be
+// retried. The waits below are under two seconds, so all a retry does is hit
+// the same wall — and spend two more of the very requests that ran out. Every
+// failing client was costing three.
 function isTransient(err: unknown): boolean {
-  const problem = classifySheetError(err);
-  return problem === "busy";
+  if (QUOTA_WORDING.test(String((err as any)?.message ?? ""))) return false;
+  return classifySheetError(err) === "busy";
 }
 
 const RETRY_DELAYS_MS = [400, 1200];
@@ -223,13 +233,39 @@ function sheetsClient() {
 // three tables have been seen called "Daily"/"Daily Report"/"Daily Tracker"
 // across different versions of the client sheets. Callers match these names
 // against a pattern instead (see pickTab in weeklyReportPreview.ts).
+// Google allows 60 reads a minute per account. The Reports screen asks for
+// every client at once, and each client costs two reads — the tab list, then
+// the tab itself — so two dozen clients is 48 before anybody presses Refresh.
+// A couple of reloads and every card on the screen turns into "Quota exceeded",
+// which reads exactly like every sheet being broken at once.
+//
+// Tab names are the half worth keeping: a client's sheet is generated with its
+// tabs and they are essentially never renamed, while the figures inside them
+// change all day. Caching just this halves the reads and leaves the numbers
+// live.
+//
+// In memory, so a restart clears it, and short enough that a genuinely renamed
+// tab fixes itself within the hour without anyone being told to do anything.
+const TAB_NAME_CACHE_MS = 10 * 60 * 1000;
+const tabNameCache = new Map<string, { names: string[]; readAt: number }>();
+
+export function forgetTabNames(spreadsheetId?: string): void {
+  if (spreadsheetId) tabNameCache.delete(spreadsheetId);
+  else tabNameCache.clear();
+}
+
 export async function listTabNames(spreadsheetId: string): Promise<string[]> {
+  const cached = tabNameCache.get(spreadsheetId);
+  if (cached && Date.now() - cached.readAt < TAB_NAME_CACHE_MS) return cached.names;
+
   return withRetry(async () => {
     const sheets = sheetsClient();
     const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties.title" });
-    return (res.data.sheets ?? [])
+    const names = (res.data.sheets ?? [])
       .map((s: any) => s.properties?.title)
       .filter((t: unknown): t is string => typeof t === "string");
+    tabNameCache.set(spreadsheetId, { names, readAt: Date.now() });
+    return names;
   });
 }
 

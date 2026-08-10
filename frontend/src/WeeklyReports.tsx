@@ -147,6 +147,21 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+// A day inside each week, so every report can be asked for with one date and
+// the backend works the period out the same way for all of them. Weeks 1–3 are
+// seven days each and week 4 takes the rest of the month — the client's own
+// convention, mirrored from currentWeekNumber in reportPeriod.ts.
+const DAY_IN_WEEK: Record<number, string> = { 1: "04", 2: "11", 3: "18", 4: "25" };
+
+function weekOf(date: string): number {
+  const day = Number(date.split("-")[2]);
+  return day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+}
+
+function monthOf(date: string): string {
+  return date.slice(0, 7); // YYYY-MM, what <input type="month"> wants
+}
+
 // Which period the figures on screen are for, so the heading says what is
 // being read rather than only where it came from.
 //
@@ -166,8 +181,7 @@ function periodLabel(kind: ReportKind, date: string): string {
   if (kind === "daily") return `Latest figures up to ${humanDate(date)}`;
   if (kind === "monthly") return `${monthName} ${year}`;
 
-  const week = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
-  return `${monthName} ${year}, Week ${week}`;
+  return `${monthName} ${year}, Week ${weekOf(date)}`;
 }
 
 // What a client's card says when their sheet has nothing for this report.
@@ -385,7 +399,7 @@ export default function WeeklyReports() {
         </div>
         <p className="tip">
           💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Pick the report and
-          the date, then tick the clients you want. Ticking a client picks its figures for you, leaving out any
+          the period, then tick the clients you want. Ticking a client picks its figures for you, leaving out any
           that are zero — untick a row to drop it, tick a zero to put it back. Nothing is sent to a client you
           haven't ticked. A client with no sheet linked (see Clients) won't show up here.
         </p>
@@ -403,23 +417,70 @@ export default function WeeklyReports() {
             ))}
           </div>
 
+          {/* Asked for in the unit the report is actually about: a day for the
+              daily one, a month and a week for the weekly ones, a month for the
+              monthly. All three end up as one date, which is what the backend
+              works every period out from — picking a week just means picking a
+              day inside it. */}
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
-            <div>
-              <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-date">
-                Report for
-              </label>
-              <input
-                id="report-date"
-                type="date"
-                className="field-input"
-                value={date}
-                // No future dates: those rows are blank in every sheet, so the
-                // only thing picking one can do is empty the screen.
-                max={todayValue()}
-                onChange={(e) => setDate(e.target.value || todayValue())}
-                disabled={sendingAll}
-              />
-            </div>
+            {kind === "daily" && (
+              <div>
+                <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-date">
+                  Day
+                </label>
+                <input
+                  id="report-date"
+                  type="date"
+                  className="field-input"
+                  value={date}
+                  // No future days: those rows are blank in every sheet, so the
+                  // only thing picking one can do is empty the screen.
+                  max={todayValue()}
+                  onChange={(e) => setDate(e.target.value || todayValue())}
+                  disabled={sendingAll}
+                />
+              </div>
+            )}
+
+            {kind !== "daily" && (
+              <div>
+                <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-month">
+                  Month
+                </label>
+                <input
+                  id="report-month"
+                  type="month"
+                  className="field-input"
+                  value={monthOf(date)}
+                  max={monthOf(todayValue())}
+                  onChange={(e) =>
+                    setDate(e.target.value ? `${e.target.value}-${DAY_IN_WEEK[weekOf(date)]}` : todayValue())
+                  }
+                  disabled={sendingAll}
+                />
+              </div>
+            )}
+
+            {(kind === "weekly_sales" || kind === "weekly_sku") && (
+              <div>
+                <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-week">
+                  Week
+                </label>
+                <select
+                  id="report-week"
+                  className="field-select"
+                  value={weekOf(date)}
+                  onChange={(e) => setDate(`${monthOf(date)}-${DAY_IN_WEEK[Number(e.target.value)]}`)}
+                  disabled={sendingAll}
+                >
+                  <option value={1}>Week 1 — 1st to 7th</option>
+                  <option value={2}>Week 2 — 8th to 14th</option>
+                  <option value={3}>Week 3 — 15th to 21st</option>
+                  <option value={4}>Week 4 — 22nd to month end</option>
+                </select>
+              </div>
+            )}
+
             {date !== todayValue() && (
               <button
                 className="btn btn-ghost"
