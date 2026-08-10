@@ -28,9 +28,26 @@ describe("Daily Report tab", () => {
     expect(findDailyRowForDate(tab, new Date(2026, 7, 2))?.date).toBe("2 August");
   });
 
-  // A blank row exists for every future day of the month.
-  it("returns nothing useful for a day with no numbers yet", () => {
-    expect(findDailyRowForDate(tab, new Date(2026, 7, 3))?.fields ?? []).toHaveLength(0);
+  // A blank row exists for every future day of the month. Asked for such a
+  // day, the report falls back to the last day that was filled in rather than
+  // reporting nothing — the sheets run a day or two behind, so reading only
+  // the day asked for meant almost every client came back empty.
+  it("falls back to the last day with numbers", () => {
+    const row = findDailyRowForDate(tab, new Date(2026, 7, 3));
+    expect(row?.date).toBe("2 August");
+    expect(row?.fields.find((f) => f.label === "Spend")?.value).toBe("2,263");
+  });
+
+  // Old numbers are worse than none: past a week they no longer describe the
+  // account, and a client reading them as today's would be misled.
+  it("does not reach back further than a week", () => {
+    expect(findDailyRowForDate(tab, new Date(2026, 7, 20))).toBeNull();
+  });
+
+  // Rows exist for the whole month ahead. One of those going out as today's
+  // report would show a client an empty day as their account.
+  it("never reads a day later than the one asked for", () => {
+    expect(findDailyRowForDate(tab, new Date(2026, 7, 1))?.date).toBe("1 August");
   });
 
   // The real Daily tab carries a keyword column ("crime solving case files")
@@ -41,7 +58,22 @@ describe("Daily Report tab", () => {
       headers: ["Date", "Spend", "Sales", "crime solving case files"],
       rows: [["4 August", "", "", "forensic files"]],
     };
-    expect(findDailyRowForDate(withKeyword, new Date(2026, 7, 4))?.fields).toHaveLength(0);
+    expect(findDailyRowForDate(withKeyword, new Date(2026, 7, 4))).toBeNull();
+  });
+
+  // The fallback must not turn that stray text into a report either: it skips
+  // such a day and keeps looking, rather than settling for it.
+  it("skips past a text-only day to a real one", () => {
+    const withKeyword: SheetTab = {
+      headers: ["Date", "Spend", "Sales", "crime solving case files"],
+      rows: [
+        ["3 August", "1,971", "14,510", "forensic files"],
+        ["4 August", "", "", "forensic files"],
+      ],
+    };
+    const row = findDailyRowForDate(withKeyword, new Date(2026, 7, 4));
+    expect(row?.date).toBe("3 August");
+    expect(row?.fields.find((f) => f.label === "Sales")?.value).toBe("14,510");
   });
 
   // "#DIV/0!" would otherwise be sent to a client, and the percent rule turns

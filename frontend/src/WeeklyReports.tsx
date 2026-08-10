@@ -59,10 +59,23 @@ function isIncluded(state: ClientReportState, source: string, field: ReportField
   return state.included[fieldKey(source, field)] ?? true;
 }
 
+// Today, as the date input wants it (YYYY-MM-DD) and in the browser's own
+// timezone — toISOString would give UTC, which is the day before for the first
+// 5.5 hours of every Indian morning.
+function todayValue(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 // The heading each report leads with. The daily one is dated rather than
 // week-numbered, since "Week 3" on a single day's numbers reads oddly.
+//
+// It uses the day the figures came from, not the day chosen or today — sheets
+// are filled in behind, so those differ, and a client must never be shown one
+// day's numbers under another day's date. Kept identical to reportHeading in
+// backend/src/services/reportSchedule.ts; change both together.
 function reportHeading(kind: ReportKind, preview: WeeklyReportPreview): string {
-  if (kind === "daily") return `📊 *Daily Update — ${new Date().toLocaleDateString()}*`;
+  if (kind === "daily") return `📊 *Daily Update — ${preview.dailyDate ?? new Date().toLocaleDateString()}*`;
   if (kind === "weekly_sku") return `📦 *SKU Update — ${preview.month}, Week ${preview.week}*`;
   if (kind === "monthly") return `📊 *Monthly Update — ${preview.month}*`;
   return `📊 *Performance Update — ${preview.month}, Week ${preview.week}*`;
@@ -89,8 +102,41 @@ function composeMessage(state: ClientReportState, kind: ReportKind): string {
   return lines.join("\n");
 }
 
+// YYYY-MM-DD as people here write dates.
+function humanDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
+
+// What a client's card says when their sheet has nothing for this report.
+// Worded per report, because "no data for July, Week 2" made no sense on a
+// daily report and had staff hunting for a week that wasn't the problem.
+function emptyMessage(kind: ReportKind, preview: WeeklyReportPreview, date: string): string {
+  if (kind === "daily") {
+    return `No numbers for ${humanDate(date)} or the week before it — this client's sheet isn't filled in yet.`;
+  }
+  if (kind === "monthly") return `No numbers for ${preview.month} yet.`;
+  if (kind === "weekly_sku") return `No SKU numbers for ${preview.month}, Week ${preview.week} yet.`;
+  return `No numbers for ${preview.month}, Week ${preview.week} yet.`;
+}
+
+// Why this client isn't in the send. Shown rather than the row simply not
+// counting: ticking five clients and reading "Send all (1)" with nothing said
+// about the other four is the screen keeping a secret.
+function notSendableReason(state: ClientReportState): string {
+  if (state.loading) return "still reading the sheet";
+  if (state.loadError) return "sheet could not be read";
+  if (!state.preview || state.preview.sections.length === 0) return "no numbers for this date";
+  if (!sendTargetFor(state)) return "no WhatsApp group or phone saved";
+  return "";
+}
+
 export default function WeeklyReports() {
   const [kind, setKind] = useState<ReportKind>("weekly_sales");
+  // Which day the report is about. Picks the day a daily report reads, and the
+  // week and month the others read, so a period already gone by can still be
+  // sent — a Monday morning weekly for the week just finished, say.
+  const [date, setDate] = useState<string>(todayValue());
   const [states, setStates] = useState<ClientReportState[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -133,7 +179,7 @@ export default function WeeklyReports() {
         const client = queue.shift();
         if (!client) return;
         try {
-          const preview = await fetchReportPreview(client.id, kind);
+          const preview = await fetchReportPreview(client.id, kind, date);
           setStates((prev) =>
             prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, preview } : s))
           );
@@ -151,12 +197,17 @@ export default function WeeklyReports() {
     }
   }
 
-  // Reloads whenever the report is switched — each report reads a different
-  // tab of the sheet, so the previews and the composed messages all change.
+  // Reloads whenever the report or the date is switched — each report reads a
+  // different tab of the sheet, and the date decides which rows of it, so the
+  // previews and the composed messages all change.
+  //
+  // Sent marks are cleared with them: they belong to the message that was on
+  // screen, and leaving them up after the numbers change would read as "this
+  // client already got this", which they did not.
   useEffect(() => {
     load();
     setRowStatus({});
-  }, [kind]);
+  }, [kind, date]);
 
   function toggleField(clientId: string, source: string, field: ReportField) {
     setStates((prev) =>
@@ -186,6 +237,9 @@ export default function WeeklyReports() {
   const anySelected = Object.values(selected).some(Boolean);
   const chosen = anySelected ? ready.filter((s) => selected[s.client.id]) : ready;
   const sendable = chosen.filter((s) => rowStatus[s.client.id] !== "sent");
+  // Ticked, but nothing can go to them. Named under the button, so the gap
+  // between "I ticked five" and "Send all (1)" is accounted for.
+  const blocked = anySelected ? states.filter((s) => selected[s.client.id] && notSendableReason(s)) : [];
 
   async function handleSendAll() {
     const targets = sendable;
@@ -239,10 +293,10 @@ export default function WeeklyReports() {
           <span className="panel-sub">Read live from each client's linked Google Sheet</span>
         </div>
         <p className="tip">
-          💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Untick anything
-          that shouldn't go out, then Send All. A client with no sheet linked (see Clients) won't show up here.
-          Each report reads its own tab of the sheet: <strong>Daily</strong>, <strong>Weekly</strong> and{" "}
-          <strong>SKU</strong>.
+          💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Pick the report and
+          the date, tick the clients you want, then Send. Tick nobody and it goes to everyone with numbers
+          ready. Untick any row inside a client to leave it out of their message. A client with no sheet
+          linked (see Clients) won't show up here.
         </p>
         <div className="panel-body">
           <div className="filter-chips">
@@ -258,22 +312,71 @@ export default function WeeklyReports() {
             ))}
           </div>
 
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
+            <div>
+              <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-date">
+                Report for
+              </label>
+              <input
+                id="report-date"
+                type="date"
+                className="field-input"
+                value={date}
+                // No future dates: those rows are blank in every sheet, so the
+                // only thing picking one can do is empty the screen.
+                max={todayValue()}
+                onChange={(e) => setDate(e.target.value || todayValue())}
+                disabled={sendingAll}
+              />
+            </div>
+            {date !== todayValue() && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => setDate(todayValue())}
+                disabled={sendingAll}
+                type="button"
+              >
+                Back to today
+              </button>
+            )}
+          </div>
+
           {states.length === 0 && (
             <p className="panel-sub">No clients have a report sheet linked yet — add one on the Clients screen.</p>
           )}
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             <button className="btn btn-primary" onClick={handleSendAll} disabled={sendingAll || sendable.length === 0}>
               {sendingAll
                 ? `Sending ${progress?.done ?? 0} of ${progress?.total ?? sendable.length}…`
                 : sendable.length === 0 && ready.length > 0
                 ? "All sent ✓"
-                : `Send all (${sendable.length})`}
+                : anySelected
+                ? `Send to ${sendable.length} selected`
+                : `Send to all (${sendable.length})`}
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setSelected(Object.fromEntries(ready.map((s) => [s.client.id, true])))}
+              disabled={sendingAll || ready.length === 0}
+              type="button"
+            >
+              Select all with numbers ({ready.length})
+            </button>
+            <button className="btn btn-ghost" onClick={() => setSelected({})} disabled={sendingAll || !anySelected} type="button">
+              Clear selection
             </button>
             <button className="btn btn-ghost" onClick={load} disabled={sendingAll} type="button">
               Refresh from sheets
             </button>
           </div>
+
+          {blocked.length > 0 && (
+            <p className="panel-sub" style={{ marginBottom: 16 }}>
+              Not going to {blocked.length} of the clients you ticked:{" "}
+              {blocked.map((s) => `${s.client.name} — ${notSendableReason(s)}`).join("; ")}
+            </p>
+          )}
 
           {states.map((state) => {
             const groups = state.client.whatsappGroups;
@@ -303,9 +406,14 @@ export default function WeeklyReports() {
                     <ErrorBanner message={state.loadError} onRetry={load} />
                   )}
                   {!state.loading && !state.loadError && state.preview && state.preview.sections.length === 0 && (
-                    <p className="panel-sub">
-                      No data found for {state.preview.month}, Week {state.preview.week} — the sheet may not have
-                      this period filled in yet.
+                    <p className="panel-sub">{emptyMessage(kind, state.preview, date)}</p>
+                  )}
+                  {/* Sheets are filled in a day or two behind, so a daily report
+                      is usually an earlier day's numbers. Said plainly here, and
+                      the message itself is headed with the same day. */}
+                  {kind === "daily" && state.preview?.dailyDate && (
+                    <p className="panel-sub" style={{ marginBottom: 8 }}>
+                      Numbers are for {state.preview.dailyDate}.
                     </p>
                   )}
                   {!state.loading && !state.loadError && state.preview && state.preview.sections.length > 0 && (

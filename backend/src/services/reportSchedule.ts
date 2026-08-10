@@ -70,7 +70,10 @@ function formatDay(date: Date): string {
 }
 
 function reportHeading(kind: ReportKind, report: WeeklyReportPreview, now: Date): string {
-  if (kind === "daily") return `📊 *Daily Update — ${formatDay(now)}*`;
+  // The day the figures are for, not the day the message is sent. The sheets
+  // are filled in a day or two behind, so those are usually different days,
+  // and heading yesterday's numbers with today's date misstates the account.
+  if (kind === "daily") return `📊 *Daily Update — ${report.dailyDate ?? formatDay(now)}*`;
   if (kind === "weekly_sku") return `📦 *SKU Update — ${report.month}, Week ${report.week}*`;
   if (kind === "monthly") return `📊 *Monthly Update — ${report.month}*`;
   return `📊 *Performance Update — ${report.month}, Week ${report.week}*`;

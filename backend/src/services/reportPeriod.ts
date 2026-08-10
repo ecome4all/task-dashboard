@@ -179,31 +179,62 @@ export function findSkuRows(
     .filter((r) => r.sku !== "" && r.fields.length > 0);
 }
 
-// Just today's row from the daily tab — what the Daily Report sends, as
-// opposed to findDailyRowsInWeek below, which surfaces the whole week for
-// someone reviewing before a weekly send.
-export function findDailyRowForDate(tab: SheetTab, referenceDate: Date): { date: string; fields: ReportField[] } | null {
+// How far back the daily report will look for the last day someone filled in.
+//
+// It used to read today's row and only today's row, which meant it almost
+// never found anything: the sheets are filled a day or two behind, because
+// Amazon's own figures arrive late, so at the hour a report is sent today's
+// row is still blank. Every client came back "no data found" and no daily
+// report could go out at all.
+//
+// A week covers a weekend, a holiday, and someone being off. Past that the
+// numbers are too old to send as an update, and saying nothing is right.
+export const DAILY_LOOK_BACK_DAYS = 7;
+
+// The most recent day in the daily tab that actually has figures, at or
+// before the reference date — the one day the Daily Report is about. Compare
+// findDailyRowsInWeek below, which surfaces the whole week for someone
+// reviewing before a weekly send.
+//
+// Never a row dated later than the reference date. Blank rows exist for every
+// remaining day of the month, and one of those going out as "today" would
+// have a client reading an empty day as their account's figures.
+//
+// Known edge: dates written without a year ("31 December") are read as the
+// reference date's year, so in the first days of January this does not reach
+// back into the previous month. Rare, and it errs towards sending nothing.
+export function findDailyRowForDate(
+  tab: SheetTab,
+  referenceDate: Date,
+  lookBackDays: number = DAILY_LOOK_BACK_DAYS
+): { date: string; fields: ReportField[] } | null {
   const dateIdx = findHeaderIndex(tab.headers, /date/i);
   if (dateIdx === -1) return null;
 
-  const match = tab.rows.find((row) => {
-    const parsed = parseSheetDate(row[dateIdx] ?? "", referenceDate);
-    return (
-      parsed !== null &&
-      parsed.getFullYear() === referenceDate.getFullYear() &&
-      parsed.getMonth() === referenceDate.getMonth() &&
-      parsed.getDate() === referenceDate.getDate()
-    );
-  });
-  if (!match) return null;
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth();
+  const day = referenceDate.getDate();
+  const latestAllowed = new Date(year, month, day, 23, 59, 59);
+  const earliestAllowed = new Date(year, month, day - lookBackDays);
 
-  const fields = usableFields(tab.headers, match, [dateIdx]);
-  // Rows exist for every day of the month, blank until the day is filled in.
-  // Such a row can still carry a stray text column (these sheets keep a
-  // keyword column alongside the metrics), which would otherwise be sent to
-  // the client on its own as the whole day's report. No figures, no report.
-  if (!fields.some((f) => looksNumeric(f.value))) return { date: match[dateIdx]!.trim(), fields: [] };
-  return { date: match[dateIdx]!.trim(), fields };
+  let best: { date: string; fields: ReportField[]; on: Date } | null = null;
+
+  for (const row of tab.rows) {
+    const parsed = parseSheetDate(row[dateIdx] ?? "", referenceDate);
+    if (!parsed || Number.isNaN(parsed.getTime())) continue;
+    if (parsed > latestAllowed || parsed < earliestAllowed) continue;
+
+    const fields = usableFields(tab.headers, row, [dateIdx]);
+    // A row can carry a stray text column with no figures beside it (these
+    // sheets keep a keyword column alongside the metrics), which once went to
+    // a client on its own as a whole day's report. No figures, no day — and
+    // the search carries on to the day before.
+    if (!fields.some((f) => looksNumeric(f.value))) continue;
+
+    if (!best || parsed > best.on) best = { date: (row[dateIdx] ?? "").trim(), fields, on: parsed };
+  }
+
+  return best ? { date: best.date, fields: best.fields } : null;
 }
 
 // Tab 2 (daily): every row whose Date falls within the current week's date

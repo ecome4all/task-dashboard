@@ -467,6 +467,11 @@ export interface WeeklyReportPreview {
   week: number;
   month: string;
   sections: ReportSection[];
+  // Daily reports only: the day the figures are actually for, worded as the
+  // sheet writes it ("9 August"). Sheets are filled in a day or two behind, so
+  // this is often an earlier day than the one asked for — which is why the
+  // message is headed with this and not with the chosen date.
+  dailyDate?: string;
 }
 
 // Live-reads this client's linked Google Sheet for the current week's
@@ -489,9 +494,14 @@ export const REPORT_KIND_LABEL: Record<ReportKind, string> = {
 
 // One specific report, rather than every tab at once like
 // fetchWeeklyReportPreview. Empty sections means that tab isn't in the
-// client's sheet, or has nothing for the current period yet.
-export function fetchReportPreview(clientId: string, kind: ReportKind): Promise<WeeklyReportPreview> {
-  return request(`/api/clients/${clientId}/report-preview/${kind}`);
+// client's sheet, or has nothing for the period asked for yet.
+//
+// `date` (YYYY-MM-DD) is the day the report is about: it picks the day a
+// daily report reads, and the week and month the other reports read. Left
+// off, it is today.
+export function fetchReportPreview(clientId: string, kind: ReportKind, date?: string): Promise<WeeklyReportPreview> {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  return request(`/api/clients/${clientId}/report-preview/${kind}${query}`);
 }
 
 // Permanent — unlike updateClient(id, { active: false }), which is reversible.

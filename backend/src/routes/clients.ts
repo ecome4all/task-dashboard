@@ -215,6 +215,37 @@ function sheetFailure(err: unknown): { status: number; error: string } {
   }
 }
 
+// The date a report is being asked about, as YYYY-MM-DD.
+//
+// Built at midday local time on purpose: a date built at midnight can fall
+// into the day before once a timezone is applied, and every period this
+// decides — the day, the week, the month — comes from the calendar date, never
+// from the clock.
+//
+// Nothing sent means today, which is the normal case. Something sent that
+// isn't a real date is not: reporting on today when a different day was asked
+// for would go out to a client under the wrong date, so it is refused rather
+// than guessed at.
+function parseDateParam(value: unknown): Date | null | "invalid" {
+  if (value === undefined || value === "") return null;
+  if (typeof value !== "string") return "invalid";
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return "invalid";
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day, 12);
+
+  // Date rolls 2026-02-31 forward into March rather than rejecting it, so the
+  // parts are checked back against what was asked for.
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return "invalid";
+  }
+  return date;
+}
+
   router.get("/:id/weekly-report-preview", requireRole(...MANAGE_ROLES), async (req, res) => {
     const client = await clientRepository.findById(req.params.id);
     if (!client) {
@@ -239,9 +270,20 @@ function sheetFailure(err: unknown): { status: number; error: string } {
   // One specific report (Daily / Weekly Sales / Weekly SKU) read live from
   // this client's sheet. Separate from /weekly-report-preview above, which
   // reads every tab at once for the combined review screen.
+  //
+  // ?date=YYYY-MM-DD picks which day the report is about — the Reports screen
+  // sends whichever date the person chose there. It decides the day a daily
+  // report reads, and the week and month the other reports read, so a report
+  // for a period already gone by can still be sent. Left off, it is today.
   router.get("/:id/report-preview/:kind", requireRole(...MANAGE_ROLES), async (req, res) => {
     if (!isReportKind(req.params.kind)) {
       res.status(400).json({ error: "unknown report" });
+      return;
+    }
+
+    const on = parseDateParam(req.query.date);
+    if (on === "invalid") {
+      res.status(400).json({ error: "That date wasn't understood. Pick one from the calendar." });
       return;
     }
 
@@ -256,7 +298,7 @@ function sheetFailure(err: unknown): { status: number; error: string } {
     }
 
     try {
-      res.json(await buildReport(client.reportSheetUrl, req.params.kind, new Date()));
+      res.json(await buildReport(client.reportSheetUrl, req.params.kind, on ?? new Date()));
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
       const failure = sheetFailure(err);

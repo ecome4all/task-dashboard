@@ -117,6 +117,13 @@ export interface WeeklyReportPreview {
   week: number;
   month: string;
   sections: ReportSection[];
+  // The day the daily figures are actually for, worded as the sheet writes it
+  // ("9 August"). Only set on a daily report, and only when a day with figures
+  // was found — which is not always the day asked for, since the sheets are
+  // filled in a day or two behind. Everything that shows a daily report to a
+  // client heads it with this rather than with today's date: the numbers must
+  // never be presented as a different day's than the one they came from.
+  dailyDate?: string;
 }
 
 function withPercentSuffix(fields: ReportField[]): ReportField[] {
@@ -154,15 +161,17 @@ export async function buildReport(
   const week = currentWeekNumber(referenceDate);
   const month = currentMonthName(referenceDate);
   const sections: ReportSection[] = [];
+  let dailyDate: string | undefined;
 
   const tab = await readTabForKind(spreadsheetId, kind);
   if (!tab) return { week, month, sections };
 
   if (kind === "daily") {
-    const today = findDailyRowForDate(tab, referenceDate);
-    const fields = today ? onlyAgreedColumns(kind, today.fields) : [];
-    if (today && fields.length > 0) {
-      sections.push({ source: `Daily — ${today.date}`, fields: withPercentSuffix(fields) });
+    const latest = findDailyRowForDate(tab, referenceDate);
+    const fields = latest ? onlyAgreedColumns(kind, latest.fields) : [];
+    if (latest && fields.length > 0) {
+      dailyDate = latest.date;
+      sections.push({ source: `Daily — ${latest.date}`, fields: withPercentSuffix(fields) });
     }
   } else if (kind === "monthly") {
     const found = findMonthlyRowFields(tab, month);
@@ -183,7 +192,7 @@ export async function buildReport(
     }
   }
 
-  return { week, month, sections };
+  return { week, month, sections, dailyDate };
 }
 
 // The combined read: the weekly and daily tables at once, for the Weekly

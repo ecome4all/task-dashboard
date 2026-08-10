@@ -116,6 +116,32 @@ describe("classifySheetError", () => {
     expect(classifySheetError(new Error("invalid_grant: account not found"))).toBe("credentials");
   });
 
+  // The shape this version of googleapis actually throws: `code` is a string
+  // and the status is on `status`. Reading `code` first meant a 403 matched
+  // nothing, so three clients whose sheets were simply never shared were told
+  // "couldn't read this sheet" — a message with no cause and no fix in it.
+  it("reads the status when the client puts a word in `code`", () => {
+    expect(classifySheetError({ code: "ERR_BAD_REQUEST", status: 403 })).toBe("not_shared");
+    expect(classifySheetError({ code: "ERR_BAD_REQUEST", response: { status: 404 } })).toBe("not_found");
+    expect(classifySheetError({ code: "ERR_BAD_RESPONSE", status: 503 })).toBe("busy");
+  });
+
+  it("takes a numeric status given as a string", () => {
+    expect(classifySheetError({ code: "403" })).toBe("not_shared");
+  });
+
+  // Some failures carry the reason only in the message.
+  it("falls back to what the message says", () => {
+    expect(classifySheetError(new Error("The caller does not have permission"))).toBe("not_shared");
+    expect(classifySheetError(new Error("Requested entity was not found."))).toBe("not_found");
+  });
+
+  // A broken key is the whole app's problem, not one client's, and must not
+  // be reported as that client's sheet needing sharing.
+  it("still calls a credentials failure a credentials failure", () => {
+    expect(classifySheetError(new Error("invalid_grant: no permission for this account"))).toBe("credentials");
+  });
+
   it("admits when it doesn't know", () => {
     expect(classifySheetError(new Error("something else entirely"))).toBe("unknown");
     expect(classifySheetError(undefined)).toBe("unknown");

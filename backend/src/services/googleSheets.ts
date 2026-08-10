@@ -79,8 +79,23 @@ export class SheetReadError extends Error {
   }
 }
 
+// The HTTP status behind a failed call, whichever shape this version of the
+// client reports it in.
+//
+// `code` used to be read first and used as-is. Newer googleapis puts a string
+// there ("ERR_BAD_REQUEST") and keeps the number on `status`, so every 403
+// arrived as a string, matched none of the checks below, and a sheet that
+// simply hadn't been shared was reported to staff as an unexplained failure —
+// the one message that names no cause and no fix.
+//
+// Numbers-only, from the most specific place first, ignoring anything that
+// isn't one.
 function statusOf(err: any): number | undefined {
-  return err?.code ?? err?.response?.status ?? err?.status;
+  for (const candidate of [err?.response?.status, err?.status, err?.code]) {
+    const value = typeof candidate === "string" ? Number(candidate) : candidate;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
 }
 
 export function classifySheetError(err: unknown): SheetProblem {
@@ -90,8 +105,15 @@ export function classifySheetError(err: unknown): SheetProblem {
   if (status === 404) return "not_found";
   if (status === 429 || (typeof status === "number" && status >= 500)) return "busy";
   // A bad key fails at the token exchange, before any request reaches Sheets,
-  // so it arrives with no HTTP status of its own.
+  // so it arrives with no HTTP status of its own. Tested before the wording
+  // checks below: a credentials failure is the whole app's problem, not one
+  // sheet's, and must not be read as a sharing problem on one client.
   if (/DECODER|invalid_grant|private key|credential/i.test(text)) return "credentials";
+  // Google's own wording, as a second way in. The status is the reliable
+  // signal when it's there — this catches the shapes where it isn't, rather
+  // than falling through to "unknown" and telling staff nothing.
+  if (/permission|not have access|forbidden/i.test(text)) return "not_shared";
+  if (/requested entity was not found|does not exist|no such spreadsheet/i.test(text)) return "not_found";
   if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|network/i.test(text)) return "busy";
   return "unknown";
 }
