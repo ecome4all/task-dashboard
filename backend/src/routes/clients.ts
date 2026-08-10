@@ -7,7 +7,7 @@ import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessa
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
-import { sheetProblemOf } from "../services/googleSheets";
+import { sheetProblemOf, sheetErrorDetail } from "../services/googleSheets";
 import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
 
 // Same audience as report-links: admins and managers are the ones who
@@ -189,20 +189,32 @@ export function createClientsRouter(channels: WhatsAppChannels) {
 // of reads, staff went looking for a sharing problem that didn't exist, on
 // sheets that were fine. Each cause now names itself, and only one of them
 // is the reader's to fix.
-function sheetFailure(err: unknown): { status: number; error: string } {
+function sheetFailure(err: unknown): { status: number; error: string; detail?: string } {
+  // Whatever Google actually said, carried alongside every one of these. The
+  // line above tells someone what to do; this tells them what happened, so a
+  // cause none of these anticipated can still be acted on rather than met with
+  // "couldn't read this sheet" and nothing else. Admin/manager screens only.
+  const detail = sheetErrorDetail(err);
+
   switch (sheetProblemOf(err)) {
     case "not_shared":
       return {
         status: 502,
+        detail,
         error:
           "This client's sheet isn't shared with the reports account yet. Open the sheet in Google Sheets, press Share, and give Viewer access to " +
           (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "the reports account") + ".",
       };
     case "not_found":
-      return { status: 502, error: "That sheet link doesn't open. Check the Report Sheet link on the Clients screen." };
+      return {
+        status: 502,
+        detail,
+        error: "That sheet link doesn't open. Check the Report Sheet link on the Clients screen.",
+      };
     case "busy":
       return {
         status: 503,
+        detail,
         error:
           "Google was busy, or too many sheets were read in the last minute. Wait a minute, then press Retry — " +
           "there's nothing wrong with this sheet.",
@@ -210,10 +222,15 @@ function sheetFailure(err: unknown): { status: number; error: string } {
     case "credentials":
       return {
         status: 502,
+        detail,
         error: "The Google connection isn't working. This affects every client, not just this one — an admin should check Google Sheets setup.",
       };
     default:
-      return { status: 502, error: "Couldn't read this client's report sheet. Press Retry, and if it keeps happening check the link and sharing." };
+      return {
+        status: 502,
+        detail,
+        error: "Couldn't read this client's report sheet. Press Retry, and if it keeps happening check the link and sharing.",
+      };
   }
 }
 
@@ -265,7 +282,7 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
       const failure = sheetFailure(err);
-      res.status(failure.status).json({ error: failure.error });
+      res.status(failure.status).json({ error: failure.error, detail: failure.detail });
     }
   });
 
@@ -304,7 +321,7 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
       const failure = sheetFailure(err);
-      res.status(failure.status).json({ error: failure.error });
+      res.status(failure.status).json({ error: failure.error, detail: failure.detail });
     }
   });
 

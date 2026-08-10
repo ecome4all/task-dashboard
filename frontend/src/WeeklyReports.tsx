@@ -20,6 +20,12 @@ function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
 
+// What the service itself said, when it said anything — carried through to the
+// screen so an unfamiliar failure can be acted on instead of guessed at.
+function errorDetail(err: unknown): string | undefined {
+  return err instanceof ApiError ? err.detail : undefined;
+}
+
 function fieldKey(source: string, field: ReportField): string {
   return `${source}::${field.label}`;
 }
@@ -37,6 +43,7 @@ interface ClientReportState {
   client: Client;
   loading: boolean;
   loadError: string;
+  loadErrorDetail?: string;
   preview: WeeklyReportPreview | null;
   included: Record<string, boolean>;
   sendVia: string; // a groupId, or "phone"
@@ -168,7 +175,9 @@ export default function WeeklyReports() {
   const [states, setStates] = useState<ClientReportState[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [loadErrorDetail, setLoadErrorDetail] = useState<string | undefined>();
   const [sendError, setSendError] = useState("");
+  const [sendErrorDetail, setSendErrorDetail] = useState<string | undefined>();
   const [rowStatus, setRowStatus] = useState<Record<string, RowStatus>>({});
   const [sendingAll, setSendingAll] = useState(false);
   // Which clients this send covers. Empty means "everyone that's ready" —
@@ -213,7 +222,11 @@ export default function WeeklyReports() {
           );
         } catch (err) {
           setStates((prev) =>
-            prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, loadError: errorMessage(err) } : s))
+            prev.map((s) =>
+              s.client.id === client.id
+                ? { ...s, loading: false, loadError: errorMessage(err), loadErrorDetail: errorDetail(err) }
+                : s
+            )
           );
         }
         return readNext();
@@ -221,6 +234,7 @@ export default function WeeklyReports() {
       await Promise.all(Array.from({ length: Math.min(4, clients.length) }, readNext));
     } catch (err) {
       setLoadError(errorMessage(err));
+      setLoadErrorDetail(errorDetail(err));
       setLoading(false);
     }
   }
@@ -304,6 +318,7 @@ export default function WeeklyReports() {
       } catch (err) {
         setRowStatus((prev) => ({ ...prev, [state.client.id]: "failed" }));
         setSendError(`Failed to send to ${state.client.name}: ${errorMessage(err)}`);
+        setSendErrorDetail(errorDetail(err));
       }
       setProgress({ done: i + 1, total: targets.length });
       if (i < targets.length - 1) {
@@ -318,11 +333,20 @@ export default function WeeklyReports() {
 
   if (loading) return <Spinner label="Loading clients…" />;
 
-  if (loadError) return <ErrorBanner message={loadError} onRetry={load} />;
+  if (loadError) return <ErrorBanner message={loadError} detail={loadErrorDetail} onRetry={load} />;
 
   return (
     <>
-      {sendError && <ErrorBanner message={sendError} onRetry={() => setSendError("")} />}
+      {sendError && (
+        <ErrorBanner
+          message={sendError}
+          detail={sendErrorDetail}
+          onRetry={() => {
+            setSendError("");
+            setSendErrorDetail(undefined);
+          }}
+        />
+      )}
 
       <div className="panel">
         <div className="panel-head">
@@ -444,7 +468,7 @@ export default function WeeklyReports() {
                 <div className="panel-body">
                   {state.loading && <Spinner label="Reading sheet…" />}
                   {!state.loading && state.loadError && (
-                    <ErrorBanner message={state.loadError} onRetry={load} />
+                    <ErrorBanner message={state.loadError} detail={state.loadErrorDetail} onRetry={load} />
                   )}
                   {!state.loading && !state.loadError && state.preview && state.preview.sections.length === 0 && (
                     <p className="panel-sub">{emptyMessage(kind, state.preview, date)}</p>

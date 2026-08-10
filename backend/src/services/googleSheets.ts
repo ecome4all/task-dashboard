@@ -141,6 +141,26 @@ export function sheetProblemOf(err: unknown): SheetProblem {
   return err instanceof SheetReadError ? err.problem : classifySheetError(err);
 }
 
+// What Google itself said, kept short and handed to the screen alongside the
+// plain-English line.
+//
+// The plain line says what to do; this says what actually happened, so a cause
+// nobody anticipated can still be acted on instead of being met with a shrug.
+// The status is included when there is one — "403" versus "404" is often the
+// whole diagnosis.
+export function sheetErrorDetail(err: unknown): string | undefined {
+  const original = err instanceof SheetReadError ? err.cause ?? err : err;
+  const message = String((original as any)?.message ?? "").trim();
+  const status = statusOf(original);
+
+  if (!message && status === undefined) return undefined;
+
+  // Google's messages run to several paragraphs of documentation links. The
+  // first line is the part that names the cause.
+  const firstLine = message.split("\n")[0]!.slice(0, 300);
+  return status === undefined ? firstLine : `${status} — ${firstLine || "no message"}`;
+}
+
 // Whether trying again could plausibly work. Deliberately narrow: retrying a
 // sheet that isn't shared just delays the same failure three times over.
 function isTransient(err: unknown): boolean {

@@ -94,14 +94,47 @@ const REPORT_COLUMNS: Record<ReportKind, string[]> = {
   ],
 };
 
+// The same figure is headed differently from one table to the next in the real
+// sheets. The Monthly Summary writes "Ad Orders", "Ad Sales", "T.Orders" and
+// "Ad Sales %" where the Daily table writes "Order", "Sales", "T.Order" and
+// "Ads Sales %".
+//
+// Matching the daily wording alone is why a monthly report went out with three
+// lines in it — Acos, T.Sales and T.Acos, the only three spelled the same in
+// both — with the spend and the sales silently missing. The client's own
+// wording is still what they are shown; this only decides whether a column is
+// one of the agreed ones.
+//
+// Deliberately a list of known spellings rather than fuzzy matching: a column
+// nobody has seen before must stay out of a client's report, which is the
+// whole point of the whitelist below.
+const HEADER_ALIASES: Record<string, string> = {
+  "ad order": "order",
+  "ad orders": "order",
+  orders: "order",
+  "ad sale": "sales",
+  "ad sales": "sales",
+  "t.orders": "t.order",
+  "t. orders": "t.order",
+  "t. order": "t.order",
+  "t. sales": "t.sales",
+  "t. acos": "t.acos",
+  "ad sales %": "ads sales %",
+  "ad sales%": "ads sales %",
+  "ads sales%": "ads sales %",
+  "organic sales%": "organic sales %",
+};
+
 // Tolerant of spacing and capitalisation, since the same column is spelled
-// "T.Acos" / "T.ACOS" / "t.acos " across sheets, but nothing beyond that —
-// an unrecognised column is dropped, not guessed at.
+// "T.Acos" / "T.ACOS" / "t.acos " across sheets, and of the known alternative
+// wordings above — but nothing beyond that. An unrecognised column is dropped,
+// not guessed at.
 function normalizeHeader(header: string): string {
-  return header.trim().toLowerCase().replace(/\s+/g, " ");
+  const cleaned = header.trim().toLowerCase().replace(/\s+/g, " ");
+  return HEADER_ALIASES[cleaned] ?? cleaned;
 }
 
-function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): ReportField[] {
+export function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): ReportField[] {
   const allowed = new Set(REPORT_COLUMNS[kind].map(normalizeHeader));
   return fields.filter((f) => allowed.has(normalizeHeader(f.label)));
 }

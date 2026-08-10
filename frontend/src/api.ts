@@ -4,7 +4,11 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export class ApiError extends Error {
-  constructor(message: string, public status?: number) {
+  // `detail` is what actually went wrong, in the underlying service's own
+  // words — Google's message and status, say. The message is what to do about
+  // it; the detail is there so a cause nobody wrote a friendly line for can
+  // still be acted on rather than met with a shrug. Shown, not swallowed.
+  constructor(message: string, public status?: number, public detail?: string) {
     super(message);
   }
 }
@@ -22,12 +26,15 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 
 // Reading the body can itself fail (already-consumed stream, non-JSON body),
 // and that must never replace the real error with a parsing one.
-async function serverErrorText(res: Response): Promise<string | null> {
+async function serverErrorText(res: Response): Promise<{ error: string | null; detail?: string }> {
   try {
     const body = await res.json();
-    return typeof body?.error === "string" && body.error.trim() ? body.error : null;
+    return {
+      error: typeof body?.error === "string" && body.error.trim() ? body.error : null,
+      detail: typeof body?.detail === "string" && body.detail.trim() ? body.detail : undefined,
+    };
   } catch {
-    return null;
+    return { error: null };
   }
 }
 
@@ -60,9 +67,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // logs in with that email"), which is far more use than a status code.
     // Falls back to the generic line when there's no JSON body, or the body
     // has no error text (an HTML error page from a proxy, say).
+    const said = await serverErrorText(res);
     throw new ApiError(
-      (await serverErrorText(res)) ?? `Something went wrong (${res.status}). Try again.`,
-      res.status
+      said.error ?? `Something went wrong (${res.status}). Try again.`,
+      res.status,
+      said.detail
     );
   }
 
