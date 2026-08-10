@@ -142,6 +142,34 @@ function humanDate(value: string): string {
   return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// Which period the figures on screen are for, so the heading says what is
+// being read rather than only where it came from.
+//
+// The week rule mirrors currentWeekNumber in backend/src/services/
+// reportPeriod.ts: weeks 1–3 are seven days each and week 4 takes whatever is
+// left of the month. That is the client's own convention, not a calendar week
+// — if it ever changes there, it has to change here too.
+//
+// Daily is worded "up to", not "for": the sheets are filled in behind, so the
+// figures are usually an earlier day's. Each client's card names the day its
+// own numbers came from.
+function periodLabel(kind: ReportKind, date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return "Read live from each client's linked Google Sheet";
+
+  const monthName = MONTH_NAMES[month - 1];
+  if (kind === "daily") return `Latest figures up to ${humanDate(date)}`;
+  if (kind === "monthly") return `${monthName} ${year}`;
+
+  const week = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+  return `${monthName} ${year}, Week ${week}`;
+}
+
 // What a client's card says when their sheet has nothing for this report.
 // Worded per report, because "no data for July, Week 2" made no sense on a
 // daily report and had staff hunting for a week that wasn't the problem.
@@ -350,8 +378,10 @@ export default function WeeklyReports() {
 
       <div className="panel">
         <div className="panel-head">
-          <span className="panel-title">Reports</span>
-          <span className="panel-sub">Read live from each client's linked Google Sheet</span>
+          <span className="panel-title">{REPORT_KIND_LABEL[kind]}</span>
+          <span className="panel-sub">
+            {periodLabel(kind, date)} — read live from each client's linked Google Sheet
+          </span>
         </div>
         <p className="tip">
           💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Pick the report and
