@@ -509,37 +509,6 @@ export function deleteClient(id: string): Promise<void> {
   return request(`/api/clients/${id}`, { method: "DELETE" });
 }
 
-export interface ReportLink {
-  id: string;
-  description: string;
-  url: string;
-  createdBy: string;
-  createdAt: string;
-  lastSentAt: string | null;
-}
-
-export function fetchReportLinks(): Promise<ReportLink[]> {
-  return request("/api/report-links");
-}
-
-export function createReportLink(description: string, url: string): Promise<ReportLink> {
-  return postJson("/api/report-links", { description, url });
-}
-
-// A saved link no longer sends its own WhatsApp message — it's attached
-// into the single combined message composed on the Send Report screen,
-// which sends via sendClientUpdate. This just records that it was used,
-// for the "Last sent" column.
-export function markReportLinkSent(id: string): Promise<ReportLink> {
-  return postJson(`/api/report-links/${id}/mark-sent`, {});
-}
-
-// Permanent — a saved link is only ever read to compose a message, so
-// removing one doesn't affect any report already sent.
-export function deleteReportLink(id: string): Promise<void> {
-  return request(`/api/report-links/${id}`, { method: "DELETE" });
-}
-
 export type ConfigOptionCategory = "marketplace" | "status" | "task_type";
 
 export interface ConfigOption {

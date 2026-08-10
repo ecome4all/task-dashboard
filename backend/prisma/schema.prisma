@@ -200,15 +200,3 @@ model ConfigOption {
   @@unique([tenantId, category, value])
 }
 
-// A saved link to a report the client owns and maintains themselves
-// (e.g. a Google Sheet) — this app never reads/writes its contents,
-// just stores the link and sends it to the client over WhatsApp.
-model ReportLink {
-  id          String   @id @default(cuid())
-  tenantId    String   @default("default")
-  description String
-  url         String
-  createdBy   String
-  createdAt   DateTime @default(now())
-  lastSentAt  DateTime?
-}
