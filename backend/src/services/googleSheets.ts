@@ -101,6 +101,14 @@ function statusOf(err: any): number | undefined {
 export function classifySheetError(err: unknown): SheetProblem {
   const status = statusOf(err);
   const text = String((err as any)?.message ?? "");
+
+  // Running the account out of its per-minute read allowance comes back as a
+  // 403 at least as often as a 429 — so this is tested before the status, or
+  // "out of quota" reads as "this sheet isn't shared" and sends staff to fix
+  // sharing on sheets that are shared perfectly well. Reading two dozen
+  // clients' sheets on one screen is exactly how the allowance runs out.
+  if (/quota|rate limit|rateLimitExceeded|RESOURCE_EXHAUSTED|too many requests/i.test(text)) return "busy";
+
   if (status === 403) return "not_shared";
   if (status === 404) return "not_found";
   if (status === 429 || (typeof status === "number" && status >= 500)) return "busy";
@@ -116,6 +124,21 @@ export function classifySheetError(err: unknown): SheetProblem {
   if (/requested entity was not found|does not exist|no such spreadsheet/i.test(text)) return "not_found";
   if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|network/i.test(text)) return "busy";
   return "unknown";
+}
+
+// What went wrong, asked of whatever the caller was handed.
+//
+// Every read leaves withRetry as a SheetReadError, which already carries the
+// answer. Re-classifying that wrapper — which is what the routes did — starts
+// again from an object with no HTTP status and the message "sheet read failed:
+// not_shared", so every cause collapsed to "unknown" and staff were told
+// "couldn't read this sheet" no matter what had actually happened. A
+// credentials failure was the one exception, by accident: its wrapper message
+// contains the word "credential".
+//
+// Callers should use this rather than classifySheetError directly.
+export function sheetProblemOf(err: unknown): SheetProblem {
+  return err instanceof SheetReadError ? err.problem : classifySheetError(err);
 }
 
 // Whether trying again could plausibly work. Deliberately narrow: retrying a

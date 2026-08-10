@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizePrivateKey, extractSpreadsheetId, classifySheetError } from "./googleSheets";
+import {
+  normalizePrivateKey,
+  extractSpreadsheetId,
+  classifySheetError,
+  sheetProblemOf,
+  SheetReadError,
+} from "./googleSheets";
 
 // Not a real key — a short base64-ish body is enough to check the reshaping,
 // and no test should carry live credentials.
@@ -142,8 +148,44 @@ describe("classifySheetError", () => {
     expect(classifySheetError(new Error("invalid_grant: no permission for this account"))).toBe("credentials");
   });
 
+  // Reading two dozen clients' sheets on one screen is how the account's
+  // per-minute allowance runs out, and Google reports that as a 403 as often
+  // as a 429. Read as a status alone it becomes "this sheet isn't shared",
+  // which sends staff to fix sharing on sheets that are shared perfectly well.
+  it("calls a quota failure busy, even when it arrives as a 403", () => {
+    expect(
+      classifySheetError({ status: 403, message: "Quota exceeded for quota metric 'Read requests'" })
+    ).toBe("busy");
+    expect(classifySheetError({ status: 403, message: "User Rate Limit Exceeded" })).toBe("busy");
+  });
+
   it("admits when it doesn't know", () => {
     expect(classifySheetError(new Error("something else entirely"))).toBe("unknown");
     expect(classifySheetError(undefined)).toBe("unknown");
+  });
+});
+
+// Every read leaves withRetry wrapped in a SheetReadError. Classifying that
+// wrapper again starts from an object with no status and the message "sheet
+// read failed: not_shared", which matches nothing — so every cause arrived at
+// the screen as "unknown", and staff were told "couldn't read this sheet" no
+// matter what had really happened.
+describe("sheetProblemOf", () => {
+  it("takes the answer the wrapper already carries", () => {
+    expect(sheetProblemOf(new SheetReadError("not_shared", { status: 403 }))).toBe("not_shared");
+    expect(sheetProblemOf(new SheetReadError("busy", { status: 429 }))).toBe("busy");
+    expect(sheetProblemOf(new SheetReadError("not_found", { status: 404 }))).toBe("not_found");
+  });
+
+  // The bug this exists to stop coming back.
+  it("does not re-read the wrapper's own message", () => {
+    const wrapped = new SheetReadError("not_shared", { status: 403 });
+    expect(classifySheetError(wrapped)).toBe("unknown"); // what the routes used to do
+    expect(sheetProblemOf(wrapped)).toBe("not_shared"); // what they do now
+  });
+
+  it("still classifies a raw error that never went through withRetry", () => {
+    expect(sheetProblemOf({ status: 404 })).toBe("not_found");
+    expect(sheetProblemOf(new Error("something else entirely"))).toBe("unknown");
   });
 });

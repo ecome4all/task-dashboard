@@ -7,7 +7,7 @@ import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessa
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
-import { classifySheetError } from "../services/googleSheets";
+import { sheetProblemOf } from "../services/googleSheets";
 import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
 
 // Same audience as report-links: admins and managers are the ones who
@@ -190,7 +190,7 @@ export function createClientsRouter(channels: WhatsAppChannels) {
 // sheets that were fine. Each cause now names itself, and only one of them
 // is the reader's to fix.
 function sheetFailure(err: unknown): { status: number; error: string } {
-  switch (classifySheetError(err)) {
+  switch (sheetProblemOf(err)) {
     case "not_shared":
       return {
         status: 502,
@@ -203,7 +203,9 @@ function sheetFailure(err: unknown): { status: number; error: string } {
     case "busy":
       return {
         status: 503,
-        error: "Google was busy and didn't answer in time. Press Retry — there's nothing wrong with this sheet.",
+        error:
+          "Google was busy, or too many sheets were read in the last minute. Wait a minute, then press Retry — " +
+          "there's nothing wrong with this sheet.",
       };
     case "credentials":
       return {
