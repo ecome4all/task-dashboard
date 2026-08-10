@@ -49,6 +49,23 @@ function looksNumeric(value: string): boolean {
   return cleaned !== "" && !Number.isNaN(Number(cleaned));
 }
 
+// A zero is the sheet saying nothing happened on that line. "Spend: 0,
+// Order: 0, Sales: 0" tells a client nothing, so a zero is never ticked to be
+// sent — but it is still read out of the sheet and still shown on the Reports
+// screen, unticked, so staff can see it is a nought rather than wondering
+// whether the line went missing. Where there is nobody to do the ticking, the
+// automatic send drops them itself (composeReportMessage).
+//
+// Blank is not zero — that is dropped in usableFields below. This is only a
+// cell that really holds a nought, in any of the ways these sheets write one:
+// "0", "0.00", "0%", "0.00%", "₹0".
+export function isZeroValue(value: string): boolean {
+  const cleaned = value.trim().replace(/[,\s%₹$]/g, "");
+  if (cleaned === "") return false;
+  const asNumber = Number(cleaned);
+  return !Number.isNaN(asNumber) && asNumber === 0;
+}
+
 function usableFields(headers: string[], row: string[], skipIndexes: number[]): ReportField[] {
   return headers
     .map((label, i) => ({ label, value: row[i] ?? "" }))

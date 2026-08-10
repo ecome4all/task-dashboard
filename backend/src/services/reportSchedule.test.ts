@@ -5,6 +5,7 @@ import {
   readScheduleConfig,
   composeReportMessage,
   composeRunSummary,
+  hasSomethingToSend,
   ScheduleConfig,
   RunResult,
 } from "./reportSchedule";
@@ -131,10 +132,84 @@ describe("composeReportMessage", () => {
     expect(msg).toContain("Daily Update — 05/08/2026");
   });
 
+  // The day the figures are for, not the day the message goes out. Sheets are
+  // filled in a day or two behind, so heading yesterday's numbers with today's
+  // date misstates the account.
+  it("heads a daily report with the day the figures came from", () => {
+    const withDay: WeeklyReportPreview = { ...REPORT, dailyDate: "9 August" };
+    expect(composeReportMessage("A", "daily", withDay, new Date(2026, 7, 10, 10, 0, 0))).toContain(
+      "Daily Update — 9 August"
+    );
+  });
+
+  // Nobody is there to untick on a scheduled send, so "Spend: 0" would go to
+  // the client as-is.
+  it("leaves noughts out", () => {
+    const withZeros: WeeklyReportPreview = {
+      ...REPORT,
+      sections: [
+        {
+          source: "Weekly — January, Week 1",
+          fields: [
+            { label: "Spend", value: "0" },
+            { label: "Sales", value: "₹1,462" },
+            { label: "Acos", value: "0.00%" },
+            { label: "Orders", value: "0" },
+          ],
+        },
+      ],
+    };
+    const msg = composeReportMessage("A", "weekly_sales", withZeros, MONDAY_10AM);
+    expect(msg).toContain("Sales: ₹1,462");
+    expect(msg).not.toContain("Spend");
+    expect(msg).not.toContain("Acos");
+    expect(msg).not.toContain("Orders");
+  });
+
+  // A section left with nothing but noughts must not print its own heading
+  // with no figures under it.
+  it("drops a section that was all noughts", () => {
+    const allZero: WeeklyReportPreview = {
+      ...REPORT,
+      sections: [{ source: "Weekly — January, Week 1", fields: [{ label: "Spend", value: "0" }] }],
+    };
+    expect(composeReportMessage("A", "weekly_sales", allZero, MONDAY_10AM)).not.toContain("Weekly — January");
+  });
+
   // Anything we send can come back through the group webhook, and a message
   // starting with the keyword would create a task out of our own report.
   it("never starts with the task keyword", () => {
     expect(composeReportMessage("A", "daily", REPORT, MONDAY_10AM).toLowerCase().startsWith("task:")).toBe(false);
+  });
+});
+
+// A client whose whole period reads zero would otherwise be sent a heading, a
+// greeting and a sign-off with nothing between them — which is worse than
+// saying nothing at all.
+describe("hasSomethingToSend", () => {
+  it("is true when a real figure survives", () => {
+    expect(hasSomethingToSend(REPORT)).toBe(true);
+  });
+
+  it("is false when every figure is a nought", () => {
+    const allZero: WeeklyReportPreview = {
+      ...REPORT,
+      sections: [
+        {
+          source: "Weekly — January, Week 1",
+          fields: [
+            { label: "Spend", value: "0" },
+            { label: "Sales", value: "₹0" },
+            { label: "Acos", value: "0.00%" },
+          ],
+        },
+      ],
+    };
+    expect(hasSomethingToSend(allZero)).toBe(false);
+  });
+
+  it("is false when the sheet had no rows at all", () => {
+    expect(hasSomethingToSend({ week: 1, month: "January", sections: [] })).toBe(false);
   });
 });
 

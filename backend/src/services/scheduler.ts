@@ -13,6 +13,7 @@ import {
   SEND_GAP_MS,
   composeReportMessage,
   composeRunSummary,
+  hasSomethingToSend,
   isDue,
   localDateKey,
   readScheduleConfig,
@@ -180,7 +181,7 @@ export async function runScheduledReports(now: Date, channels: WhatsAppChannels)
     let message: string;
     try {
       const report = await buildReport(client.reportSheetUrl!, config.kind, now);
-      if (report.sections.length === 0) {
+      if (!hasSomethingToSend(report)) {
         results.push({ clientName: client.name, sent: false, skipped: "no figures for this period" });
         continue;
       }

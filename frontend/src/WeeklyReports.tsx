@@ -55,8 +55,29 @@ function sendTargetFor(state: ClientReportState): { value: string; label: string
   return { value: chosen.groupId, label: chosen.groupName ?? chosen.groupId };
 }
 
+// A cell holding a nought, however the sheet writes it: "0", "0.00", "0%",
+// "₹0". Kept the same as isZeroValue in backend/src/services/reportPeriod.ts —
+// the automatic send applies the same rule with nobody there to tick.
+function isZeroText(value: string): boolean {
+  const cleaned = value.trim().replace(/[,\s%₹$]/g, "");
+  if (cleaned === "") return false;
+  const asNumber = Number(cleaned);
+  return !Number.isNaN(asNumber) && asNumber === 0;
+}
+
+// Everything starts ticked except a zero. "Spend: 0, Order: 0, Sales: 0" tells
+// a client nothing, so picking a client ticks the lines that say something and
+// leaves the noughts alone — still on screen, so it's clear they're noughts
+// rather than lines that went missing, and still tickable if you want one.
 function isIncluded(state: ClientReportState, source: string, field: ReportField): boolean {
-  return state.included[fieldKey(source, field)] ?? true;
+  return state.included[fieldKey(source, field)] ?? !isZeroText(field.value);
+}
+
+// Whether this client has anything left to send once the noughts are out.
+function hasSomethingToSend(state: ClientReportState): boolean {
+  return (state.preview?.sections ?? []).some((section) =>
+    section.fields.some((field) => isIncluded(state, section.source, field))
+  );
 }
 
 // Today, as the date input wants it (YYYY-MM-DD) and in the browser's own
@@ -127,6 +148,7 @@ function notSendableReason(state: ClientReportState): string {
   if (state.loading) return "still reading the sheet";
   if (state.loadError) return "sheet could not be read";
   if (!state.preview || state.preview.sections.length === 0) return "no numbers for this date";
+  if (!hasSomethingToSend(state)) return "every figure is zero — nothing to say";
   if (!sendTargetFor(state)) return "no WhatsApp group or phone saved";
   return "";
 }
@@ -233,7 +255,13 @@ export default function WeeklyReports() {
     });
   }
 
-  const ready = states.filter((s) => s.preview && s.preview.sections.length > 0 && sendTargetFor(s));
+  // Ticking a client with every figure at zero would send a heading, a
+  // greeting and a sign-off with nothing between them, so "ready" means there
+  // is something left once the noughts are out — not merely that the sheet
+  // had rows.
+  const ready = states.filter(
+    (s) => s.preview && s.preview.sections.length > 0 && hasSomethingToSend(s) && sendTargetFor(s)
+  );
   const anySelected = Object.values(selected).some(Boolean);
   const chosen = anySelected ? ready.filter((s) => selected[s.client.id]) : ready;
   const sendable = chosen.filter((s) => rowStatus[s.client.id] !== "sent");
@@ -384,6 +412,10 @@ export default function WeeklyReports() {
             const message = composeMessage(state, kind);
             return (
               <div key={state.client.id} className="panel" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
+                {/* The one tick that chooses a client. The ticks inside the
+                    table below choose lines within their message, and the two
+                    were being read as the same thing — hence the word "Send
+                    to" here, and the caption above the table. */}
                 <div className="panel-head">
                   <span className="panel-title">
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
@@ -395,7 +427,7 @@ export default function WeeklyReports() {
                         }
                         disabled={sendingAll}
                       />
-                      {state.client.name}
+                      <span style={{ fontWeight: 400, opacity: 0.7 }}>Send to</span> {state.client.name}
                     </label>
                   </span>
                   <span className="panel-sub">{rowStatusLabel(rowStatus[state.client.id])}</span>
@@ -435,6 +467,9 @@ export default function WeeklyReports() {
                             </select>
                           </div>
                         )}
+                        <div className="panel-sub" style={{ marginBottom: 8 }}>
+                          Lines to include in their message. Zeros are left out — tick one to put it back.
+                        </div>
                         {state.preview.sections.map((section) => (
                           <div key={section.source} style={{ marginBottom: 14 }}>
                             <div className="panel-sub" style={{ marginBottom: 4, fontWeight: 600 }}>{section.source}</div>

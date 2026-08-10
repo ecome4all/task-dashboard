@@ -1,4 +1,5 @@
 import { ReportKind, REPORT_KIND_LABEL, WeeklyReportPreview, isReportKind } from "./weeklyReportPreview";
+import { isZeroValue } from "./reportPeriod";
 
 // Gap between one client's message and the next. WhatsApp treats a burst of
 // identical-looking messages from one number as spam, and the account being
@@ -97,13 +98,25 @@ export function composeReportMessage(
   const lines = [reportHeading(kind, report, now), `Hi ${clientName}, here's your update:`];
 
   for (const section of report.sections) {
-    if (section.fields.length === 0) continue;
+    // Zeros are left out, the same as they are left unticked on the Reports
+    // screen: "Spend: 0, Order: 0, Sales: 0" tells a client nothing. Nobody is
+    // here to untick them on a scheduled send, so it is done for them.
+    const worthSending = section.fields.filter((f) => !isZeroValue(f.value));
+    if (worthSending.length === 0) continue;
     lines.push("", `*${section.source}*`);
-    for (const field of section.fields) lines.push(`${field.label}: ${field.value}`);
+    for (const field of worthSending) lines.push(`${field.label}: ${field.value}`);
   }
 
   lines.push("", "— Team Ecom4all");
   return lines.join("\n");
+}
+
+// Whether there is a report here at all. Sections can exist and still hold
+// nothing worth sending — a period filled in as all zeros — and without this
+// that client would get the heading, the greeting and the sign-off with no
+// figures between them.
+export function hasSomethingToSend(report: WeeklyReportPreview): boolean {
+  return report.sections.some((section) => section.fields.some((f) => !isZeroValue(f.value)));
 }
 
 export type SkipReason = "no figures for this period" | "nowhere to send it" | "couldn't open the sheet";
