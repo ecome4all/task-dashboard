@@ -113,8 +113,14 @@ function composeMessage(state: ClientReportState, kind: ReportKind): string {
   for (const section of preview.sections) {
     const includedFields = section.fields.filter((f) => isIncluded(state, section.source, f));
     if (includedFields.length === 0) continue;
+
     lines.push("");
-    lines.push(`*${section.source}*`);
+    // Only the SKU report names its sections — they are products, and the name
+    // is what tells them apart. The others have one section covering the
+    // period the heading already names, so repeating it read as a stutter:
+    // "Daily — 9 August" directly under "Daily Update — 9 August".
+    if (kind === "weekly_sku") lines.push(`*${section.source}*`);
+
     for (const f of includedFields) lines.push(`${f.label}: ${f.value}`);
   }
 
@@ -263,8 +269,11 @@ export default function WeeklyReports() {
     (s) => s.preview && s.preview.sections.length > 0 && hasSomethingToSend(s) && sendTargetFor(s)
   );
   const anySelected = Object.values(selected).some(Boolean);
-  const chosen = anySelected ? ready.filter((s) => selected[s.client.id]) : ready;
-  const sendable = chosen.filter((s) => rowStatus[s.client.id] !== "sent");
+  // Nothing is sent to a client who wasn't ticked. This used to treat an empty
+  // selection as "everyone", which put one keystroke between a quiet screen
+  // and a message to every client on the list — too close together for
+  // something that can't be taken back.
+  const sendable = ready.filter((s) => selected[s.client.id] && rowStatus[s.client.id] !== "sent");
   // Ticked, but nothing can go to them. Named under the button, so the gap
   // between "I ticked five" and "Send all (1)" is accounted for.
   const blocked = anySelected ? states.filter((s) => selected[s.client.id] && notSendableReason(s)) : [];
@@ -322,9 +331,9 @@ export default function WeeklyReports() {
         </div>
         <p className="tip">
           💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Pick the report and
-          the date, tick the clients you want, then Send. Tick nobody and it goes to everyone with numbers
-          ready. Untick any row inside a client to leave it out of their message. A client with no sheet
-          linked (see Clients) won't show up here.
+          the date, then tick the clients you want. Ticking a client picks its figures for you, leaving out any
+          that are zero — untick a row to drop it, tick a zero to put it back. Nothing is sent to a client you
+          haven't ticked. A client with no sheet linked (see Clients) won't show up here.
         </p>
         <div className="panel-body">
           <div className="filter-chips">
@@ -377,11 +386,11 @@ export default function WeeklyReports() {
             <button className="btn btn-primary" onClick={handleSendAll} disabled={sendingAll || sendable.length === 0}>
               {sendingAll
                 ? `Sending ${progress?.done ?? 0} of ${progress?.total ?? sendable.length}…`
-                : sendable.length === 0 && ready.length > 0
+                : !anySelected
+                ? "Send — tick a client first"
+                : sendable.length === 0
                 ? "All sent ✓"
-                : anySelected
-                ? `Send to ${sendable.length} selected`
-                : `Send to all (${sendable.length})`}
+                : `Send to ${sendable.length} selected`}
             </button>
             <button
               className="btn btn-ghost"
@@ -468,7 +477,9 @@ export default function WeeklyReports() {
                           </div>
                         )}
                         <div className="panel-sub" style={{ marginBottom: 8 }}>
-                          Lines to include in their message. Zeros are left out — tick one to put it back.
+                          {selected[state.client.id]
+                            ? "Lines going in their message. Zeros were left out — tick one to put it back."
+                            : `Tick "Send to ${state.client.name}" above to include this client. Its figures below will tick themselves, apart from any zeros.`}
                         </div>
                         {state.preview.sections.map((section) => (
                           <div key={section.source} style={{ marginBottom: 14 }}>
@@ -477,10 +488,17 @@ export default function WeeklyReports() {
                               <tbody>
                                 {section.fields.map((field) => (
                                   <tr key={field.label}>
+                                    {/* Dead until the client is ticked, so the
+                                        two ticks can't be mistaken for each
+                                        other: this one only decides what goes
+                                        in a message that is already going. */}
                                     <td style={{ width: 28 }}>
                                       <input
                                         type="checkbox"
-                                        checked={isIncluded(state, section.source, field)}
+                                        checked={
+                                          !!selected[state.client.id] && isIncluded(state, section.source, field)
+                                        }
+                                        disabled={!selected[state.client.id] || sendingAll}
                                         onChange={() => toggleField(state.client.id, section.source, field)}
                                       />
                                     </td>
@@ -494,7 +512,12 @@ export default function WeeklyReports() {
                         ))}
                       </div>
                       <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-                        <div className="panel-sub" style={{ marginBottom: 6 }}>Preview</div>
+                        {/* Shown whether or not the client is ticked: the point
+                            of it is to decide, and that needs seeing what would
+                            go before committing to send it. */}
+                        <div className="panel-sub" style={{ marginBottom: 6 }}>
+                          {selected[state.client.id] ? "Preview — this is what they get" : "Preview — if you tick them"}
+                        </div>
                         <pre
                           style={{
                             whiteSpace: "pre-wrap",

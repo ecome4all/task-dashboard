@@ -103,7 +103,14 @@ export function composeReportMessage(
     // here to untick them on a scheduled send, so it is done for them.
     const worthSending = section.fields.filter((f) => !isZeroValue(f.value));
     if (worthSending.length === 0) continue;
-    lines.push("", `*${section.source}*`);
+
+    lines.push("");
+    // Only the SKU report names its sections. Its sections are products, and
+    // the name is the only thing telling them apart. Every other report has
+    // one section covering the period the heading already names, so printing
+    // it again just says "Daily — 9 August" under "Daily Update — 9 August".
+    if (kind === "weekly_sku") lines.push(`*${section.source}*`);
+
     for (const field of worthSending) lines.push(`${field.label}: ${field.value}`);
   }
 

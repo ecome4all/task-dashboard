@@ -113,10 +113,39 @@ describe("composeReportMessage", () => {
   it("greets the client by name and lists the figures", () => {
     const msg = composeReportMessage("Amezia", "weekly_sales", REPORT, MONDAY_10AM);
     expect(msg).toContain("Hi Amezia, here's your update:");
-    expect(msg).toContain("*Weekly — January, Week 1*");
     expect(msg).toContain("Sales: ₹1,462");
     expect(msg).toContain("Acos: 37.66%");
     expect(msg).toContain("— Team Ecom4all");
+  });
+
+  // The heading already names the period. Printing the section's own name
+  // under it read as a stutter — "Daily — 9 August" directly beneath
+  // "Daily Update — 9 August".
+  it("doesn't repeat the period it already put in the heading", () => {
+    const daily: WeeklyReportPreview = {
+      ...REPORT,
+      dailyDate: "9 August",
+      sections: [{ source: "Daily — 9 August", fields: [{ label: "Spend", value: "402" }] }],
+    };
+    const msg = composeReportMessage("A", "daily", daily, new Date(2026, 7, 10, 10, 0, 0));
+    expect(msg).toContain("Daily Update — 9 August");
+    expect(msg).not.toContain("*Daily — 9 August*");
+    expect(msg).toContain("Spend: 402");
+  });
+
+  // The SKU report is the exception: its sections are products, and the name
+  // is the only thing telling one block of figures from the next.
+  it("keeps the SKU name, since that is what tells the blocks apart", () => {
+    const sku: WeeklyReportPreview = {
+      ...REPORT,
+      sections: [
+        { source: "TR04-B", fields: [{ label: "Sales", value: "₹900" }] },
+        { source: "TR05-C", fields: [{ label: "Sales", value: "₹120" }] },
+      ],
+    };
+    const msg = composeReportMessage("A", "weekly_sku", sku, MONDAY_10AM);
+    expect(msg).toContain("*TR04-B*");
+    expect(msg).toContain("*TR05-C*");
   });
 
   it("heads each report its own way", () => {
@@ -166,14 +195,19 @@ describe("composeReportMessage", () => {
     expect(msg).not.toContain("Orders");
   });
 
-  // A section left with nothing but noughts must not print its own heading
-  // with no figures under it.
+  // A section left with nothing but noughts must not print its own name with
+  // no figures under it.
   it("drops a section that was all noughts", () => {
     const allZero: WeeklyReportPreview = {
       ...REPORT,
-      sections: [{ source: "Weekly — January, Week 1", fields: [{ label: "Spend", value: "0" }] }],
+      sections: [
+        { source: "TR04-B", fields: [{ label: "Spend", value: "0" }] },
+        { source: "TR05-C", fields: [{ label: "Sales", value: "₹120" }] },
+      ],
     };
-    expect(composeReportMessage("A", "weekly_sales", allZero, MONDAY_10AM)).not.toContain("Weekly — January");
+    const msg = composeReportMessage("A", "weekly_sku", allZero, MONDAY_10AM);
+    expect(msg).not.toContain("TR04-B");
+    expect(msg).toContain("*TR05-C*");
   });
 
   // Anything we send can come back through the group webhook, and a message
