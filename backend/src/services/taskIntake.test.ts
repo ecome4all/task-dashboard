@@ -5,6 +5,7 @@ import { clientRepository } from "../repositories/clientRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { taskNoteRepository } from "../repositories/taskNoteRepository";
+import { configOptionRepository } from "../repositories/configOptionRepository";
 import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
@@ -23,6 +24,17 @@ vi.mock("../repositories/taskNoteRepository", () => ({
 vi.mock("../repositories/unrecognizedMessageRepository", () => ({
   unrecognizedMessageRepository: { create: vi.fn() },
 }));
+// Read on every task message, to match a marketplace named in it against the
+// live list — see parser/taskDetails.ts.
+vi.mock("../repositories/configOptionRepository", () => ({
+  configOptionRepository: { list: vi.fn() },
+}));
+
+const MARKETPLACE_OPTIONS = [
+  { value: "amazon", label: "Amazon" },
+  { value: "flipkart", label: "Flipkart" },
+  { value: "other", label: "Other" },
+];
 
 function fakeAdapter() {
   return { sendMessage: vi.fn().mockResolvedValue(undefined) } satisfies WhatsAppAdapter;
@@ -45,6 +57,8 @@ describe("handleIncomingTaskMessage", () => {
     vi.mocked(employeeRepository.findByName).mockReset();
     vi.mocked(employeeRepository.findByName).mockResolvedValue(null as any);
     vi.mocked(unrecognizedMessageRepository.create).mockReset();
+    vi.mocked(configOptionRepository.list).mockReset();
+    vi.mocked(configOptionRepository.list).mockResolvedValue(MARKETPLACE_OPTIONS as any);
   });
 
   it("creates a task and acknowledges on the same channel for a known client", async () => {
@@ -71,6 +85,72 @@ describe("handleIncomingTaskMessage", () => {
     expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
     expect(unrecognizedMessageRepository.create).not.toHaveBeenCalled();
     expect(task).toEqual({ id: "task-1" });
+  });
+
+  // The marketplace and the due date written into the message itself — the
+  // parsing is covered in parser/taskDetails.test.ts; what matters here is
+  // that both reach the task, and that the client is told what was read.
+  it("puts the marketplace and due date from the message onto the task", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Forensic Files" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+    const channels = fakeChannels();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "1234@g.us",
+      text: "task: listing not live on flipkart due 20/8/2026",
+      channels,
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith({
+      source: "whatsapp_group",
+      sourceRef: "1234@g.us",
+      // The date phrase is gone; the marketplace word stays in the sentence.
+      description: "listing not live on flipkart",
+      clientName: "Forensic Files",
+      marketplace: "flipkart",
+      dueDate: new Date("2026-08-20T00:00:00.000Z"),
+    });
+  });
+
+  it("repeats back what it read, so a misread date is caught by whoever typed it", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Forensic Files" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+    const channels = fakeChannels();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "1234@g.us",
+      text: "task: amazon claim pending due 20/8/2026",
+      channels,
+    });
+
+    expect(channels.whapi.sendMessage).toHaveBeenCalledWith(
+      "1234@g.us",
+      "✅ Got it, logged — Amazon, due 20 Aug 2026."
+    );
+  });
+
+  // A message naming neither must behave exactly as it always did.
+  it("leaves a message with no marketplace or date completely alone", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Forensic Files" } as any);
+    vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
+    const channels = fakeChannels();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "1234@g.us",
+      text: "task: fix the listing images",
+      channels,
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith({
+      source: "whatsapp_group",
+      sourceRef: "1234@g.us",
+      description: "fix the listing images",
+      clientName: "Forensic Files",
+    });
+    expect(channels.whapi.sendMessage).toHaveBeenCalledWith("1234@g.us", "✅ Got it, logged.");
   });
 
   it("does nothing and returns null for a non-task message", async () => {
@@ -235,6 +315,8 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
     vi.mocked(employeeRepository.findByName).mockReset();
     vi.mocked(employeeRepository.findByName).mockResolvedValue({ ...SHIVANI, active: true } as any);
     vi.mocked(unrecognizedMessageRepository.create).mockReset();
+    vi.mocked(configOptionRepository.list).mockReset();
+    vi.mocked(configOptionRepository.list).mockResolvedValue(MARKETPLACE_OPTIONS as any);
   });
 
   it("assigns the task to the tagged employee and drops the number from the text", async () => {

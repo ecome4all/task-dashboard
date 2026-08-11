@@ -277,6 +277,29 @@ table.data-table tr:last-child td { border-bottom: none; }
    narrow screen rather than pushing the table sideways. */
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .filter-row select.field-select { flex: 0 1 auto; min-width: 0; }
+/* The Task board's filters are the same type-to-search dropdowns the rows
+   use. Their trigger is a button, sized to fill a table cell by default —
+   here it sizes to its own text instead, like the plain selects beside it. */
+.filter-row .searchable-select-trigger { width: auto; flex: 0 1 auto; min-width: 150px; }
+
+/* Created and Due Date ranges, on the line under the dropdowns. Each end is
+   optional, so a group is a heading and two boxes with "to" between them. */
+.filter-dates { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.filter-date-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.filter-date-group .fact-label { margin-bottom: 0; white-space: nowrap; }
+
+/* ---- new task form ---- */
+/* Auto-fit columns rather than a fixed count: the same form reads as one row
+   on a wide screen and stacks on a phone without a breakpoint of its own.
+   align-items: end keeps the buttons on the baseline of the boxes beside
+   them, since each field is a label stacked over its input. */
+.new-task-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+/* What the task actually is gets the full width — it's a sentence, not a
+   dropdown value. */
+.new-task-description { grid-column: 1 / -1; }
+.new-task-form .fact-label { display: block; }
+.new-task-form .field-input { width: 100%; }
+.new-task-actions { display: flex; gap: 8px; }
 
 /* ---- status filter chips ---- */
 /* Still used by the Client Details screen, which filters one client's own

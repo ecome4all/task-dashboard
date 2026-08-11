@@ -227,6 +227,35 @@ export function fetchTasks(): Promise<Task[]> {
   return request("/api/tasks");
 }
 
+// Raising a task by hand instead of waiting for one to arrive over WhatsApp —
+// work that came in by phone, in a meeting, or that Ecom4all set itself.
+// Admins and managers only, enforced server-side.
+//
+// clientId is what decides where updates on this task can be sent: the
+// client's linked WhatsApp group, or their number if they have no group. With
+// no client picked the task is internal — a perfectly good task, just with
+// nobody to send to (its Send button stays off).
+export interface NewTask {
+  description: string;
+  clientId?: string | null;
+  assignee?: string | null;
+  taskType?: string | null;
+  marketplace?: string | null;
+  // Same rule as on the board: only an admin or manager can set one.
+  dueDate?: string | null;
+}
+
+export function createTask(task: NewTask): Promise<Task> {
+  return postJson("/api/tasks", task);
+}
+
+// Whether this task has a client WhatsApp group or number behind it. Tasks
+// that arrived over WhatsApp always do; one raised by hand with no client
+// picked has nowhere to send, so the Send button is off for it.
+export function canSendToClient(task: Task): boolean {
+  return Boolean(task.sourceRef);
+}
+
 export function updateTask(
   id: string,
   changes: Partial<Pick<Task, "assignee" | "status" | "taskType" | "marketplace" | "dueDate">>

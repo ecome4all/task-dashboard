@@ -19,6 +19,22 @@ export function formatDate(date: Date | null): string {
   return date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Not set";
 }
 
+// The reply a client gets the moment their message becomes a task. It now
+// repeats back whatever was read out of that message (see
+// parser/taskDetails.ts): a date understood wrongly — 8/9 read as September
+// when they meant August — is only catchable by the person who typed it, and
+// they are never going to open the dashboard to check. Nothing read means the
+// plain acknowledgement, exactly as before.
+export function composeIntakeAck(details: {
+  marketplaceLabel?: string | null;
+  dueDate?: Date | null;
+}): string {
+  const parts: string[] = [];
+  if (details.marketplaceLabel) parts.push(details.marketplaceLabel);
+  if (details.dueDate) parts.push(`due ${formatDate(details.dueDate)}`);
+  return parts.length > 0 ? `✅ Got it, logged — ${parts.join(", ")}.` : "✅ Got it, logged.";
+}
+
 // Fields any WhatsApp update (automatic status notification, or the manual
 // Send button) can report on. Deliberately excludes:
 //   - the task's creation date — the client already gets an automatic

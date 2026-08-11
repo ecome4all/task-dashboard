@@ -4,6 +4,7 @@ import { taskRepository } from "../repositories/taskRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
 import { isFrequency, firstRunAt } from "../services/recurrence";
+import { taskVisibilityFor } from "../services/taskVisibility";
 
 // Same audience as due dates: setting up work that will keep appearing on
 // everyone's board is a scheduling decision, not day-to-day triage.
@@ -13,9 +14,11 @@ export function createRecurringTasksRouter() {
   const router = Router();
 
   // Readable by any logged-in employee — a member seeing why a task keeps
-  // reappearing is useful, and there's nothing sensitive in the list.
-  router.get("/", async (_req, res) => {
-    res.json(await recurringTaskRepository.list());
+  // reappearing is useful. Limited to their own repeats, though, by the same
+  // rule that limits their board: a repeat set up for a manager is a manager's
+  // work, and every task it goes on to produce would be hidden from them too.
+  router.get("/", async (req, res) => {
+    res.json(await recurringTaskRepository.list(taskVisibilityFor(req.employee)));
   });
 
   // "Repeat this" on an existing task: copies that task's details into a

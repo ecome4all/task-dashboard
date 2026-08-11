@@ -13,6 +13,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import SearchableSelect from "./SearchableSelect";
 import Pagination, { usePaged } from "./Paged";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 
@@ -239,20 +240,22 @@ export default function ClientDetail({
 
       <div className="panel">
         <div className="panel-body" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 16 }}>
-          <label className="panel-sub" htmlFor="client-picker">Showing</label>
-          <select
-            id="client-picker"
-            className="field-select"
-            value={clientId ?? ""}
-            onChange={(e) => onSelectClient(e.target.value)}
-            style={{ minWidth: 200 }}
-          >
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}{c.active ? "" : " (not active)"}
-              </option>
-            ))}
-          </select>
+          <span className="panel-sub">Showing</span>
+          {/* Type-to-search rather than a plain <select>: this list is every
+              client on the books and only grows, and picking one by typing
+              two letters of the name beats scrolling for it. */}
+          <div style={{ minWidth: 220 }}>
+            <SearchableSelect
+              value={clientId ?? ""}
+              placeholder="Pick a client"
+              allowClear={false}
+              options={clients.map((c) => ({
+                value: c.id,
+                label: `${c.name}${c.active ? "" : " (not active)"}`,
+              }))}
+              onChange={onSelectClient}
+            />
+          </div>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => clientId && loadClient(clientId)}

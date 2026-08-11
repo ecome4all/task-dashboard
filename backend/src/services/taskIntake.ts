@@ -1,12 +1,15 @@
 import { parseTaskMessage } from "../parser/taskParser";
 import { containsPhoneNumber, findEmployeeMention } from "../parser/employeeMention";
+import { extractTaskDetails } from "../parser/taskDetails";
 import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { taskRepository } from "../repositories/taskRepository";
 import { clientRepository } from "../repositories/clientRepository";
+import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
 import { notifyAssignee } from "./assignmentNotice";
+import { composeIntakeAck } from "./taskMessages";
 
 export interface TaskIntakeParams {
   source: string;
@@ -82,6 +85,16 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     }
   }
 
+  // The marketplace and the due date, read out of the message itself — see
+  // parser/taskDetails.ts. "task: listing not live on flipkart due 20/8"
+  // lands on the board already carrying both, instead of waiting on someone
+  // to pick them from two dropdowns. Matched against the live marketplace
+  // list, so an option added in Settings is understood from the next message
+  // on. The due-date phrase is taken out of the description; the marketplace
+  // word is left where it is, since it's part of the sentence.
+  const marketplaceOptions = await configOptionRepository.list("marketplace");
+  const details = extractTaskDetails(parsed.description, marketplaceOptions);
+
   // Tagging someone's WhatsApp number in the message assigns the task to
   // them on the way in — "task: fix the listing @919876543210" arrives
   // already triaged instead of sitting unassigned until someone opens the
@@ -89,8 +102,11 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
   // client tagging their own colleague, or quoting an order number, changes
   // nothing. The employee table is only queried when the message actually
   // contains something number-shaped.
-  const mention = containsPhoneNumber(parsed.description)
-    ? findEmployeeMention(parsed.description, await employeeRepository.list())
+  //
+  // Run on the text the due date has already been taken out of, so a date
+  // written "20-08-2026" can't be picked over as a number first.
+  const mention = containsPhoneNumber(details.description)
+    ? findEmployeeMention(details.description, await employeeRepository.list())
     : null;
 
   const task = await taskRepository.create({
@@ -98,20 +114,29 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     sourceRef: params.chatId,
     // The tagged number itself is dropped from the description — see
     // findEmployeeMention. It addressed a person, it isn't part of the work.
-    description: mention ? mention.description : parsed.description,
+    description: mention ? mention.description : details.description,
     chatName: params.chatName,
     clientName: client.name,
     ...(mention && { assignee: mention.employee.name }),
+    ...(details.marketplace && { marketplace: details.marketplace }),
+    ...(details.dueDate && { dueDate: details.dueDate }),
   });
 
   // Best-effort: the task is already saved above, and this ack is just a
   // courtesy — a failed send (network blip, bad chat_id, provider outage)
   // must not crash the webhook handler, since an uncaught rejection here
   // would take down the whole server, not just this one message.
+  //
+  // The ack repeats back the marketplace and due date that were read out of
+  // the message, so a date understood wrongly is caught by the one person who
+  // knows what was meant, straight away.
   try {
     await resolveAdapterForSource(params.source, params.channels).sendMessage(
       params.chatId,
-      "✅ Got it, logged."
+      composeIntakeAck({
+        marketplaceLabel: marketplaceOptions.find((o) => o.value === details.marketplace)?.label,
+        dueDate: details.dueDate,
+      })
     );
   } catch (err) {
     console.error("Failed to send task acknowledgement:", err);

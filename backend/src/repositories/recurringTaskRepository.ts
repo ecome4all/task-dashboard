@@ -1,5 +1,6 @@
 import { prisma } from "../db";
 import { Frequency } from "../services/recurrence";
+import { TaskVisibility } from "../services/taskVisibility";
 
 const TENANT_ID = "default";
 
@@ -18,9 +19,15 @@ export interface CreateRecurringTaskInput {
 }
 
 export const recurringTaskRepository = {
-  list() {
+  // Same rule as the task board: a member sees the repeats that will land on
+  // them, plus unassigned ones, and not a manager's. A repeat they can't see
+  // would only produce tasks they can't see either.
+  list(visibility: TaskVisibility | null = null) {
     return prisma.recurringTask.findMany({
-      where: { tenantId: TENANT_ID },
+      where: {
+        tenantId: TENANT_ID,
+        ...(visibility ? { OR: [{ assignee: visibility.ownName }, { assignee: null }] } : {}),
+      },
       orderBy: [{ active: "desc" }, { nextRunAt: "asc" }],
     });
   },

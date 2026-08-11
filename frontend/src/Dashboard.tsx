@@ -4,6 +4,7 @@ import {
   TaskStatus,
   Marketplace,
   Employee,
+  Client,
   ConfigOption,
   CurrentUser,
   ApiError,
@@ -12,10 +13,13 @@ import {
   fetchTasks,
   updateTask,
   fetchEmployees,
+  fetchClients,
   fetchConfigOptions,
   sendTaskUpdate,
   deleteTask,
+  createTask,
   createRecurringTask,
+  canSendToClient,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
@@ -61,6 +65,40 @@ function toDateInputValue(dueDate: string | null): string {
   return dueDate ? dueDate.slice(0, 10) : "";
 }
 
+// The day a timestamp falls on where the person reading the screen is, as
+// yyyy-mm-dd. Not toISOString().slice(0, 10), which is UTC — a task created
+// at 8pm in India would report the day before, and then not show up when
+// someone filters for the day they actually created it.
+function localDay(timestamp: string): string {
+  const date = new Date(timestamp);
+  return [
+    date.getFullYear(),
+    `${date.getMonth() + 1}`.padStart(2, "0"),
+    `${date.getDate()}`.padStart(2, "0"),
+  ].join("-");
+}
+
+// Both ends are inclusive, and either can be left empty for an open-ended
+// range ("everything up to the 15th", "everything from the 1st on").
+// yyyy-mm-dd strings compare correctly as text, so no date maths is needed.
+//
+// A task with no date at all (nothing has a due date until someone sets one)
+// is not in any range: asked for work due this week, "no due date" isn't an
+// answer.
+function withinDateRange(timestamp: string | null, from: string, to: string): boolean {
+  if (!from && !to) return true;
+  if (!timestamp) return false;
+  const day = localDay(timestamp);
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
+// A task typed onto the board with no client picked has no group or number
+// behind it, so there is nobody to send to — the button says why rather than
+// looking broken.
+const NO_SEND_TARGET_HINT = "No client WhatsApp group or number for this task";
+
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -70,10 +108,17 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [clients, setClients] = useState<Client[]>([]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [marketplaceFilter, setMarketplaceFilter] = useState<string | null>(null);
   const [employeeFilter, setEmployeeFilter] = useState<string | null>(null);
+  // Date ranges, as yyyy-mm-dd from <input type="date">. Empty means that end
+  // is open — see withinDateRange.
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const [justSentTaskId, setJustSentTaskId] = useState<string | null>(null);
   const [openNotesTaskId, setOpenNotesTaskId] = useState<string | null>(null);
@@ -84,6 +129,16 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [openRepeatTaskId, setOpenRepeatTaskId] = useState<string | null>(null);
   const [repeatFrequency, setRepeatFrequency] = useState<Frequency>("weekly");
   const [repeatStartAt, setRepeatStartAt] = useState("");
+  // The "New task" form: open or not, and what's been typed into it. Nothing
+  // is created until Add task is pressed.
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newDescription, setNewDescription] = useState("");
+  const [newClientId, setNewClientId] = useState("");
+  const [newMarketplace, setNewMarketplace] = useState("");
+  const [newTaskType, setNewTaskType] = useState("");
+  const [newAssignee, setNewAssignee] = useState("");
+  const [newDueDate, setNewDueDate] = useState("");
+  const [creating, setCreating] = useState(false);
 
   // Same rule as due dates: setting up work that will keep reappearing on
   // everyone's board is a scheduling decision, not day-to-day triage.
@@ -92,23 +147,32 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   // Members raise and work tasks; they don't remove them. Matched by the
   // server, which is what actually enforces it.
   const canDelete = canSetDueDate;
+  // A task typed straight onto the board can carry a client, an employee and
+  // a deadline nobody asked for over WhatsApp — same two roles again, and the
+  // same two the client list is readable by, which the form needs.
+  const canCreate = canSetDueDate;
 
   async function load() {
     setLoading(true);
     setLoadError("");
     try {
-      const [taskList, employeeList, statusList, taskTypeList, marketplaceList] = await Promise.all([
+      const [taskList, employeeList, statusList, taskTypeList, marketplaceList, clientList] = await Promise.all([
         fetchTasks(),
         fetchEmployees(),
         fetchConfigOptions("status"),
         fetchConfigOptions("task_type"),
         fetchConfigOptions("marketplace"),
+        // Only for the "New task" form's client picker. A member can't read
+        // the client list at all (the server refuses it), so asking for it
+        // would fail their whole board, not just this one list.
+        canCreate ? fetchClients() : Promise.resolve([] as Client[]),
       ]);
       setTasks(taskList);
       setEmployees(employeeList);
       setStatusOptions(statusList);
       setTaskTypeOptions(taskTypeList);
       setMarketplaceOptions(marketplaceList);
+      setClients(clientList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -145,6 +209,64 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   function selectEmployeeFilter(employee: string) {
     setEmployeeFilter(employee || null);
     paged.reset();
+  }
+
+  // Every date box goes through here so page 3 of the old result doesn't
+  // survive a narrower filter — same reason the dropdowns above reset it.
+  function setDateFilter(set: (value: string) => void, value: string) {
+    set(value);
+    paged.reset();
+  }
+
+  const anyDateFilter = Boolean(createdFrom || createdTo || dueFrom || dueTo);
+
+  function clearDateFilters() {
+    setCreatedFrom("");
+    setCreatedTo("");
+    setDueFrom("");
+    setDueTo("");
+    paged.reset();
+  }
+
+  function closeNewTaskForm() {
+    setNewTaskOpen(false);
+    setNewDescription("");
+    setNewClientId("");
+    setNewMarketplace("");
+    setNewTaskType("");
+    setNewAssignee("");
+    setNewDueDate("");
+  }
+
+  // A task raised on the board rather than over WhatsApp. The client picked
+  // here is what decides where its updates can be sent — see the create route
+  // in the backend. The new task goes to the top of the list, which is where
+  // the board's newest-first order would put it anyway.
+  async function handleCreateTask() {
+    if (!newDescription.trim()) {
+      setActionError("Write what the task is.");
+      return;
+    }
+    setActionError("");
+    setCreating(true);
+    try {
+      const task = await createTask({
+        description: newDescription.trim(),
+        clientId: newClientId || null,
+        assignee: newAssignee || null,
+        taskType: newTaskType || null,
+        marketplace: newMarketplace || null,
+        // Sent as a whole day, the same way the board's due-date column sets
+        // it — nothing on a task is scheduled to a time of day.
+        dueDate: newDueDate ? new Date(newDueDate).toISOString() : null,
+      });
+      setTasks((prev) => [task, ...prev]);
+      closeNewTaskForm();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setCreating(false);
+    }
   }
 
   // Updates the row immediately with the picked value (so the dropdown
@@ -269,7 +391,9 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
       (!statusFilter || t.status === statusFilter) &&
       matchesTypeFilter(t, typeFilter) &&
       matchesMarketplaceFilter(t, marketplaceFilter) &&
-      matchesEmployeeFilter(t, employeeFilter)
+      matchesEmployeeFilter(t, employeeFilter) &&
+      withinDateRange(t.createdAt, createdFrom, createdTo) &&
+      withinDateRange(t.dueDate, dueFrom, dueTo)
   );
   const paged = usePaged(filteredTasks, PAGE_SIZE);
 
@@ -282,61 +406,208 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     <>
       {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError("")} />}
 
+      {/* Raising a task by hand, for work that came in by phone or in a
+          meeting rather than over WhatsApp. Everything the board holds is on
+          the one form, so a new task doesn't have to be made and then triaged
+          in five separate edits. */}
+      {canCreate && (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">New task</span>
+            <button
+              className={`btn btn-sm ${newTaskOpen ? "btn-ghost" : "btn-primary"}`}
+              onClick={() => (newTaskOpen ? closeNewTaskForm() : setNewTaskOpen(true))}
+              type="button"
+            >
+              {newTaskOpen ? "Close" : "Add a task"}
+            </button>
+          </div>
+          {newTaskOpen && (
+            <div className="panel-body">
+              <div className="new-task-form">
+                <div className="new-task-description">
+                  <label className="fact-label" htmlFor="new-task-description">What is the task</label>
+                  <input
+                    id="new-task-description"
+                    className="field-input"
+                    type="text"
+                    placeholder="e.g. Fix the listing images for the new SKU"
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                  />
+                </div>
+                <div>
+                  {/* The client is also what decides where updates on this
+                      task can be sent — their WhatsApp group, or their number
+                      if they have no group. Left empty, the task stays
+                      internal and its Send button is off. */}
+                  <span className="fact-label">Client</span>
+                  <SearchableSelect
+                    value={newClientId}
+                    placeholder="No client"
+                    options={clients.map((client) => ({ value: client.id, label: client.name }))}
+                    onChange={setNewClientId}
+                  />
+                </div>
+                <div>
+                  <span className="fact-label">Platform</span>
+                  <SearchableSelect
+                    value={newMarketplace}
+                    placeholder="Unset"
+                    options={marketplaceOptions.map((mp) => ({ value: mp.value, label: mp.label }))}
+                    onChange={setNewMarketplace}
+                  />
+                </div>
+                <div>
+                  <span className="fact-label">Type</span>
+                  <SearchableSelect
+                    value={newTaskType}
+                    placeholder="Not Set"
+                    options={taskTypeOptions.map((type) => ({ value: type.value, label: type.label }))}
+                    onChange={setNewTaskType}
+                  />
+                </div>
+                <div>
+                  <span className="fact-label">Employee</span>
+                  <SearchableSelect
+                    value={newAssignee}
+                    placeholder="Unassigned"
+                    options={employees.map((employee) => ({ value: employee.name, label: employee.name }))}
+                    onChange={setNewAssignee}
+                  />
+                </div>
+                <div>
+                  <label className="fact-label" htmlFor="new-task-due">Due date</label>
+                  <input
+                    id="new-task-due"
+                    className="field-input"
+                    type="date"
+                    value={newDueDate}
+                    onChange={(e) => setNewDueDate(e.target.value)}
+                  />
+                </div>
+                <div className="new-task-actions">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleCreateTask}
+                    disabled={creating || !newDescription.trim()}
+                    type="button"
+                  >
+                    {creating ? "Adding…" : "Add task"}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={closeNewTaskForm} type="button">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+              <p className="panel-sub" style={{ marginTop: 10 }}>
+                Picking an employee sends them a WhatsApp message straight away, the same as
+                putting them on a task from the board.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Tasks</span>
           <span className="panel-sub">{filteredTasks.length} shown of {tasks.length} total</span>
         </div>
         <div className="panel-body">
+          {/* Every filter is a type-to-search dropdown, the same one the rows
+              use: these lists are admin-editable and keep growing, and a
+              plain <select> gives no way to find an option by typing it. The
+              "All …" row at the top of each is what clears that filter. */}
           <div className="filter-row">
             {/* Status sits with the other filters as a dropdown rather than a
                 row of chips — the counts that made the chips worth their width
                 are kept on each option. */}
-            <select
-              className="field-select"
+            <SearchableSelect
               value={statusFilter ?? ""}
-              onChange={(e) => selectStatusFilter(e.target.value || null)}
-            >
-              <option value="">All Statuses ({tasks.length})</option>
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label} ({tasks.filter((t) => t.status === option.value).length})
-                </option>
-              ))}
-            </select>
-            <select
-              className="field-select"
+              placeholder={`All Statuses (${tasks.length})`}
+              options={statusOptions.map((option) => ({
+                value: option.value,
+                label: `${option.label} (${tasks.filter((t) => t.status === option.value).length})`,
+              }))}
+              onChange={(value) => selectStatusFilter(value || null)}
+            />
+            <SearchableSelect
               value={marketplaceFilter ?? ""}
-              onChange={(e) => selectMarketplaceFilter(e.target.value)}
-            >
-              <option value="">All Marketplaces</option>
-              {marketplaceOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-              <option value={UNSET_MARKETPLACE}>Unset</option>
-            </select>
-            <select
-              className="field-select"
+              placeholder="All Marketplaces"
+              options={[
+                ...marketplaceOptions.map((option) => ({ value: option.value, label: option.label })),
+                { value: UNSET_MARKETPLACE, label: "Unset" },
+              ]}
+              onChange={selectMarketplaceFilter}
+            />
+            <SearchableSelect
               value={employeeFilter ?? ""}
-              onChange={(e) => selectEmployeeFilter(e.target.value)}
-            >
-              <option value="">All Employees</option>
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.name}>{employee.name}</option>
-              ))}
-              <option value={UNASSIGNED}>Unassigned</option>
-            </select>
-            <select
-              className="field-select"
+              placeholder="All Employees"
+              options={[
+                ...employees.map((employee) => ({ value: employee.name, label: employee.name })),
+                { value: UNASSIGNED, label: "Unassigned" },
+              ]}
+              onChange={selectEmployeeFilter}
+            />
+            <SearchableSelect
               value={typeFilter ?? ""}
-              onChange={(e) => selectTypeFilter(e.target.value)}
-            >
-              <option value="">All Types</option>
-              {taskTypeOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-              <option value={UNSET_TYPE}>Not Set</option>
-            </select>
+              placeholder="All Types"
+              options={[
+                ...taskTypeOptions.map((option) => ({ value: option.value, label: option.label })),
+                { value: UNSET_TYPE, label: "Not Set" },
+              ]}
+              onChange={selectTypeFilter}
+            />
+          </div>
+
+          {/* Date ranges get their own line: four boxes in the row above would
+              push the dropdowns onto a second line anyway, and "from/to" only
+              reads clearly with its heading next to it. Both ends are
+              optional — one box on its own means everything before, or
+              everything after. */}
+          <div className="filter-dates">
+            <div className="filter-date-group">
+              <span className="fact-label">Created</span>
+              <input
+                className="field-input"
+                type="date"
+                aria-label="Created from"
+                value={createdFrom}
+                onChange={(e) => setDateFilter(setCreatedFrom, e.target.value)}
+              />
+              <span className="panel-sub">to</span>
+              <input
+                className="field-input"
+                type="date"
+                aria-label="Created to"
+                value={createdTo}
+                onChange={(e) => setDateFilter(setCreatedTo, e.target.value)}
+              />
+            </div>
+            <div className="filter-date-group">
+              <span className="fact-label">Due Date</span>
+              <input
+                className="field-input"
+                type="date"
+                aria-label="Due date from"
+                value={dueFrom}
+                onChange={(e) => setDateFilter(setDueFrom, e.target.value)}
+              />
+              <span className="panel-sub">to</span>
+              <input
+                className="field-input"
+                type="date"
+                aria-label="Due date to"
+                value={dueTo}
+                onChange={(e) => setDateFilter(setDueTo, e.target.value)}
+              />
+            </div>
+            {anyDateFilter && (
+              <button className="btn btn-ghost btn-sm" onClick={clearDateFilters} type="button">
+                Clear dates
+              </button>
+            )}
           </div>
 
           <table className="data-table">
@@ -439,9 +710,19 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     </td>
                   )}
                   <td>
+                    {/* A task raised on the board with no client picked has no
+                        group or number behind it — the button is off, and says
+                        why rather than looking broken. */}
                     <button
-                      className={`btn btn-sm ${task.pendingSendFields.length > 0 ? "btn-primary" : "btn-ghost"}`}
-                      disabled={task.pendingSendFields.length === 0 || sendingTaskId === task.id}
+                      className={`btn btn-sm ${
+                        task.pendingSendFields.length > 0 && canSendToClient(task) ? "btn-primary" : "btn-ghost"
+                      }`}
+                      title={canSendToClient(task) ? undefined : NO_SEND_TARGET_HINT}
+                      disabled={
+                        task.pendingSendFields.length === 0 ||
+                        !canSendToClient(task) ||
+                        sendingTaskId === task.id
+                      }
                       onClick={() => handleSendUpdate(task)}
                     >
                       {sendingTaskId === task.id ? "Sending…" : justSentTaskId === task.id ? "Sent ✓" : "Send"}

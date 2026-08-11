@@ -198,6 +198,109 @@ condition buried in the route. Deactivating stays the right answer for someone
 who has left: `Task.assignee` holds a name rather than a foreign key, so past
 work keeps the name of whoever did it either way.
 
+## Who sees which task
+
+A **member sees only their own work**: tasks assigned to them, plus tasks
+nobody has been put on yet (which anyone can pick up). Everything assigned to
+someone else — a manager's or an admin's in particular — is off their board
+entirely. Admins and managers go on seeing all of it, since triage means
+looking at everyone's work.
+
+The rule is one tested function, `services/taskVisibility.ts`, turned on the
+**viewer's** role rather than the assignee's. Written the other way round
+("hide tasks whose assignee is a manager") every request would have to re-read
+the role behind every assignee name to answer the same question, and it would
+still get a member's own work wrong the moment two people shared a name.
+
+It is applied in the **query**, not after it (`taskRepository.list`), so hidden
+rows never leave the database. Reaching a task by id is covered too — notes,
+editing and sending all answer **404** for a task that isn't on your board,
+the same answer as a wrong id, so "hidden from you" and "doesn't exist" can't
+be told apart. Repeating tasks follow the same rule: a repeat set up for a
+manager only ever produces tasks a member couldn't see anyway.
+
+Unchanged: the daily reminder and the "a new task is yours" alert were always
+per-person, and Clients / Client Details / Reports were already admin and
+manager only.
+
+## Marketplace and due date, read out of the message
+
+`parser/taskDetails.ts`. **"task: listing not live on flipkart due 20/8"**
+lands on the board already carrying both, instead of waiting for someone to
+pick them from two dropdowns. Same principle as the tagged-number assignment:
+the message is plain text on every channel, so this needs no provider-specific
+mention data and works from a group, the official channel and Periskope alike.
+
+**Marketplace** is matched against the **live option list**, so one an admin
+adds in Settings is understood from the next message on with nothing to change
+here. Whole words only — "amazon" in "amazonbasics" isn't a mention — and the
+earliest one named wins, so "flipkart order rejected, not amazon" is Flipkart.
+The generic **`other` option is skipped**: "waiting for other details" is
+ordinary English, and reading it as a marketplace would be wrong far more often
+than right.
+
+**Due date** is introduced by `due`, `due date`, `deadline` or `by`, followed
+by `20/8`, `20-08-2026`, `20.8.26`, `20 Aug`, `20th August 2026`, `Aug 20`,
+`today` or `tomorrow`. **Day first**, as dates are written in India — 8/9 is 8
+September. A two-digit year is this century. No year means this year, unless
+that has already gone more than six months by, so "due 5/1" written in December
+is next January rather than eleven months ago. A date that doesn't exist
+(31/2) is ignored rather than rolled forward.
+
+`by` only counts when a date-shaped value actually follows it, so "rejected by
+amazon" and "sent by the client" set nothing. Dates are read **before** the
+tagged-number match, so "20-08-2026" can't be picked over as a phone number
+first. "today" is worked out in **India's own day** (fixed +5:30), not the
+server's — Railway runs UTC, where a message sent at 2am India time falls on
+the previous day and "due today" would arrive already overdue.
+
+**The due-date phrase is cut out of the description** ("fix the listing, due
+20 Aug" → "fix the listing"): it's a column now, and leaving it in would quote
+it back to the client inside every update. **The marketplace word is left
+where it is** — "due 20/8" is bookkeeping bolted onto a sentence, but "listing
+not live on flipkart" *is* the sentence.
+
+Nothing here can invent a value: an unrecognized marketplace or an unreadable
+date simply isn't set, and the task looks exactly as it did before. The
+acknowledgement now repeats back what was read — **"✅ Got it, logged —
+Flipkart, due 20 Aug 2026."** — because a date understood wrongly is only
+catchable by the person who typed it, and they are never going to open the
+dashboard to check.
+
+## Raising a task by hand
+
+`POST /api/tasks`, admin and manager — the same two roles that can set a due
+date or a repeat. **New task** on the board takes what the task is, the
+client, the platform, the type, the employee and the due date on one form, so
+a task doesn't have to be created and then triaged in five separate edits.
+
+The **client picked is what decides where its updates go back to**: their
+linked WhatsApp group (stored exactly as intake would have stored it, so Send
+and the automatic stage messages work on it like any other task), or their
+saved number if they have no group. With no client picked, the task is
+internal — `source: "manual"` with nothing to send to, and its Send button is
+off and says why rather than failing at the click. Picking an employee
+messages them straight away, the same as assigning from the board.
+
+## Filters and dropdowns on the board
+
+- **Created and Due Date ranges** sit under the dropdowns. Both ends are
+  optional — one box on its own reads as "everything up to" or "everything
+  from". Days are compared in the **browser's own timezone**, not UTC: a task
+  created at 8pm in India otherwise reports the day before and doesn't show up
+  when you filter for the day you made it. A task with no due date is in no
+  due-date range — asked for work due this week, "no due date" isn't an answer.
+- **Every filter is now type-to-search** (`SearchableSelect`), like the row
+  dropdowns already were, since these lists are admin-editable and only grow.
+  The Client Details client picker too.
+- **Fixed: options below the fold were unreachable.** The panel closes on
+  scroll, because it's positioned from the trigger's on-screen position and a
+  scroll makes that stale — but the listener is on the capture phase, so it
+  also heard the option list's *own* scroll and closed the dropdown on the way
+  down to anything past its 220px (roughly the first seven). A newly added
+  option looked simply absent. Scrolls originating inside the panel are now
+  ignored. Enter also takes the top match rather than only an only-match.
+
 ## Employees and logins
 
 An **employee row is not a login.** "Add employee" creates somebody who can be given tasks, picked in the assignee dropdown and messaged on WhatsApp — with no email, no password, and no way to sign in. Giving them one is a separate, deliberate step, and there is no public sign-up route anywhere in the app.

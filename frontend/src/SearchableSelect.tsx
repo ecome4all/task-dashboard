@@ -91,16 +91,28 @@ export default function SearchableSelect({
     // The Task table scrolls independently of the page — if that scroll
     // (or a window resize) happens while open, the panel's position would
     // go stale, so just close it rather than trying to track it live.
-    function handleScrollOrResize() {
+    //
+    // Except when what scrolled is the panel's own option list. This listener
+    // is on the capture phase (scroll events don't bubble), so it hears
+    // scrolls from every element on the page including that list — and the
+    // list is exactly what has to scroll when there are more options than fit
+    // its 220px — about seven. Without this check, reaching for an option
+    // below that fold closed the dropdown on the way down, which is why a
+    // newly added option looked as though it simply wasn't there.
+    function handleScroll(e: Event) {
+      if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
+      close();
+    }
+    function handleResize() {
       close();
     }
     document.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("scroll", handleScrollOrResize, true);
-    window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("scroll", handleScrollOrResize, true);
-      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
     };
   }, [open]);
 
@@ -144,7 +156,11 @@ export default function SearchableSelect({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") close();
-                if (e.key === "Enter" && filtered.length === 1) select(filtered[0].value);
+                // Enter takes the top match, not only an only-match: typing
+                // "trac" and pressing Enter should pick Tracker without
+                // having to reach for the mouse, even while "Tracking" is
+                // still on the list below it.
+                if (e.key === "Enter" && filtered.length > 0) select(filtered[0].value);
               }}
             />
             <ul className="searchable-select-list">

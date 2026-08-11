@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { TaskVisibility } from "../services/taskVisibility";
 
 const TENANT_ID = "default";
 
@@ -11,10 +12,21 @@ export interface CreateTaskInput {
   // Never set by WhatsApp intake — nothing is auto-triaged there. Present
   // for repeating tasks (see scheduler.ts), which copy the triage off the
   // task they were created from, so a repeat doesn't come back stripped of
-  // the employee and type someone already picked.
+  // the employee and type someone already picked, and for a task raised by
+  // hand on the board, where all of it is filled in on the form.
   assignee?: string | null;
   taskType?: string | null;
   marketplace?: string | null;
+  // Only ever set by the "New task" form (admins and managers), never by
+  // intake — the same two roles that can set a due date on an existing task.
+  dueDate?: Date | null;
+}
+
+// A member's board is limited to their own work — see services/taskVisibility.
+// Null means no limit, which is every other role.
+function visibilityWhere(visibility: TaskVisibility | null) {
+  if (!visibility) return {};
+  return { OR: [{ assignee: visibility.ownName }, { assignee: null }] };
 }
 
 export type TaskStatus =
@@ -40,9 +52,12 @@ export const taskRepository = {
     });
   },
 
-  list() {
+  // Filtered in the query rather than after it: a member's own board is
+  // usually a small slice of everything, and the tasks they can't see must
+  // never leave the database in the first place.
+  list(visibility: TaskVisibility | null = null) {
     return prisma.task.findMany({
-      where: { tenantId: TENANT_ID },
+      where: { tenantId: TENANT_ID, ...visibilityWhere(visibility) },
       orderBy: { createdAt: "desc" },
     });
   },
