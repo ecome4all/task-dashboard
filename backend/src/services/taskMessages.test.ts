@@ -53,6 +53,49 @@ describe("composeSendUpdateMessage", () => {
     expect(message).toBe('"hello just testing" — is now assigned to Test Member.');
   });
 
+  // Notes marked for the client used to be a WhatsApp message of their own,
+  // sent the instant the note was saved. They now ride along with the update,
+  // so a client gets one message about their request rather than a status
+  // change followed a second later by a loose paragraph.
+  it("carries a note along with the change it belongs to", () => {
+    const message = composeSendUpdateMessage({
+      ...base,
+      fields: ["status"],
+      notes: ["Amazon has the invoice, waiting on them."],
+    });
+    expect(message).toBe(
+      '"hello just testing" — task status changed to Done.\n\nAmazon has the invoice, waiting on them.'
+    );
+  });
+
+  it("carries several notes in the order they were written", () => {
+    const message = composeSendUpdateMessage({
+      ...base,
+      fields: ["status"],
+      notes: ["Raised with Amazon.", "They asked for the invoice."],
+    });
+    expect(message).toContain("Raised with Amazon.\nThey asked for the invoice.");
+  });
+
+  // A note is reason enough to message a client on its own — nothing about
+  // the task itself has to have moved for "we've chased Amazon" to be worth
+  // saying.
+  it("sends the note by itself when no field changed", () => {
+    const message = composeSendUpdateMessage({ ...base, fields: [], notes: ["We've chased Amazon again."] });
+    expect(message).toBe('"hello just testing"\n\nWe\'ve chased Amazon again.');
+  });
+
+  // Nothing to say means nothing sent, rather than a bare task name.
+  it("says nothing at all when there is neither a change nor a note", () => {
+    expect(composeSendUpdateMessage({ ...base, fields: [] })).toBe("");
+  });
+
+  it("is unchanged for a task with no notes waiting", () => {
+    expect(composeSendUpdateMessage({ ...base, fields: ["status"], notes: [] })).toBe(
+      '"hello just testing" — task status changed to Done.'
+    );
+  });
+
   it("joins two fields with 'and'", () => {
     const message = composeSendUpdateMessage({ ...base, fields: ["marketplace", "assignee"] });
     expect(message).toBe('"hello just testing" — marketplace set to Meesho and is now assigned to Test Member.');

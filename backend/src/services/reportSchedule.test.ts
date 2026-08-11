@@ -118,6 +118,35 @@ describe("composeReportMessage", () => {
     expect(msg).toContain("— Team Ecom4all");
   });
 
+  // A client selling on two marketplaces gets two messages. Without the
+  // marketplace in the heading they'd be two identically-headed reports
+  // holding different numbers, which is worse than either one alone.
+  it("names the marketplace in the heading when one is given", () => {
+    const msg = composeReportMessage("Amezia", "weekly_sales", REPORT, MONDAY_10AM, "Flipkart");
+    expect(msg).toContain("*Performance Update (Flipkart) — January, Week 1*");
+  });
+
+  // A client with a single sheet must get exactly the message they got before
+  // report sheets became per-marketplace.
+  it("says nothing about a marketplace when none is given", () => {
+    const msg = composeReportMessage("Amezia", "weekly_sales", REPORT, MONDAY_10AM);
+    expect(msg).toContain("*Performance Update — January, Week 1*");
+    expect(msg).not.toContain("(");
+  });
+
+  it("names the marketplace on every kind of report", () => {
+    const daily: WeeklyReportPreview = { ...REPORT, dailyDate: "9 August" };
+    expect(composeReportMessage("A", "daily", daily, MONDAY_10AM, "Amazon")).toContain(
+      "*Daily Update (Amazon) — 9 August*"
+    );
+    expect(composeReportMessage("A", "weekly_sku", REPORT, MONDAY_10AM, "Amazon")).toContain(
+      "*SKU Update (Amazon) —"
+    );
+    expect(composeReportMessage("A", "monthly", REPORT, MONDAY_10AM, "Amazon")).toContain(
+      "*Monthly Update (Amazon) — January*"
+    );
+  });
+
   // The heading already names the period. Printing the section's own name
   // under it read as a stutter — "Daily — 9 August" directly beneath
   // "Daily Update — 9 August".

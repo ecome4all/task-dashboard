@@ -4,6 +4,7 @@ import { clientRepository } from "../repositories/clientRepository";
 import { taskRepository } from "../repositories/taskRepository";
 import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
+import { configOptionRepository } from "../repositories/configOptionRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
@@ -13,6 +14,35 @@ import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
 // Same audience as report-links: admins and managers are the ones who
 // send reports to clients, so they're the ones who maintain the directory.
 const MANAGE_ROLES = ["admin", "manager"];
+
+interface LinkedSheet {
+  id: string;
+  marketplace: string;
+  sheetUrl: string;
+}
+
+// Which of a client's sheets a report route should read.
+//
+// A marketplace asked for in the query wins. With none asked for and only one
+// sheet linked there's nothing to be ambiguous about, so that one is used —
+// which is also what keeps every client who had a single sheet before this
+// change working untouched. With several linked and nothing asked for, this
+// refuses rather than picking: sending a client their Flipkart figures headed
+// "Amazon" is worse than answering with an error.
+function pickReportSheet(
+  sheets: LinkedSheet[],
+  asked: unknown
+): { sheet: LinkedSheet } | { error: string } {
+  if (sheets.length === 0) return { error: "No report sheet linked for this client." };
+
+  if (typeof asked === "string" && asked.trim()) {
+    const sheet = sheets.find((s) => s.marketplace === asked.trim());
+    return sheet ? { sheet } : { error: "No report sheet linked for this client on that marketplace." };
+  }
+
+  if (sheets.length > 1) return { error: "This client has sheets for more than one marketplace. Pick which one." };
+  return { sheet: sheets[0] };
+}
 
 export function createClientsRouter(channels: WhatsAppChannels) {
   const router = Router();
@@ -85,7 +115,9 @@ export function createClientsRouter(channels: WhatsAppChannels) {
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { name, phone, notes, active, reportSheetUrl } = req.body;
+    // Report sheets are not here: a client has one per marketplace now, added
+    // and removed through /:id/report-sheets below rather than as a field.
+    const { name, phone, notes, active } = req.body;
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       res.status(400).json({ error: "name must be a non-empty string" });
       return;
@@ -99,9 +131,57 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       ...(phone !== undefined && { phone }),
       ...(notes !== undefined && { notes }),
       ...(active !== undefined && { active }),
-      ...(reportSheetUrl !== undefined && { reportSheetUrl: reportSheetUrl?.trim() || null }),
     });
     res.json(client);
+  });
+
+  // Linking a report sheet, one marketplace at a time. A client selling on
+  // both Amazon and Flipkart keeps a separate sheet for each — the figures
+  // are per marketplace, and one sheet can't hold two accounts' numbers in
+  // the same columns.
+  router.post("/:id/report-sheets", requireRole(...MANAGE_ROLES), async (req, res) => {
+    const { marketplace, sheetUrl } = req.body;
+    if (typeof sheetUrl !== "string" || !sheetUrl.trim()) {
+      res.status(400).json({ error: "Paste the link to the sheet." });
+      return;
+    }
+    if (typeof marketplace !== "string" || !marketplace.trim()) {
+      res.status(400).json({ error: "Pick which marketplace this sheet is for." });
+      return;
+    }
+
+    // Checked against the live list, like every other marketplace value —
+    // a sheet filed under a marketplace no dropdown offers could never be
+    // picked to send, and would look like the link simply hadn't saved.
+    const marketplaceOptions = await configOptionRepository.list("marketplace");
+    if (!marketplaceOptions.some((option) => option.value === marketplace)) {
+      res.status(400).json({ error: "That marketplace isn't on the list." });
+      return;
+    }
+
+    const client = await clientRepository.findById(req.params.id);
+    if (!client) {
+      res.status(404).json({ error: "client not found" });
+      return;
+    }
+
+    try {
+      res.status(201).json(await clientRepository.addReportSheet(client.id, marketplace, sheetUrl.trim()));
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        const label = marketplaceOptions.find((o) => o.value === marketplace)?.label ?? marketplace;
+        res.status(409).json({
+          error: `${client.name} already has a ${label} sheet. Remove that one first if you're replacing it.`,
+        });
+        return;
+      }
+      throw err;
+    }
+  });
+
+  router.delete("/:id/report-sheets/:sheetId", requireRole(...MANAGE_ROLES), async (req, res) => {
+    await clientRepository.removeReportSheet(req.params.sheetId);
+    res.status(204).send();
   });
 
   // Hard delete — separate from the active/inactive toggle in PATCH above,
@@ -284,13 +364,14 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
       res.status(404).json({ error: "client not found" });
       return;
     }
-    if (!client.reportSheetUrl) {
-      res.status(400).json({ error: "No report sheet linked for this client." });
+    const picked = pickReportSheet(client.reportSheets, req.query.marketplace);
+    if ("error" in picked) {
+      res.status(400).json({ error: picked.error });
       return;
     }
 
     try {
-      const preview = await buildWeeklyReportPreview(client.reportSheetUrl, new Date());
+      const preview = await buildWeeklyReportPreview(picked.sheet.sheetUrl, new Date());
       res.json(preview);
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
@@ -324,13 +405,14 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
       res.status(404).json({ error: "client not found" });
       return;
     }
-    if (!client.reportSheetUrl) {
-      res.status(400).json({ error: "No report sheet linked for this client." });
+    const picked = pickReportSheet(client.reportSheets, req.query.marketplace);
+    if ("error" in picked) {
+      res.status(400).json({ error: picked.error });
       return;
     }
 
     try {
-      res.json(await buildReport(client.reportSheetUrl, req.params.kind, on ?? new Date()));
+      res.json(await buildReport(picked.sheet.sheetUrl, req.params.kind, on ?? new Date()));
     } catch (err) {
       console.error(`Failed to read report sheet for client ${client.id}:`, err);
       const failure = sheetFailure(err);

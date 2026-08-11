@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   Client,
+  ClientReportSheet,
+  ConfigOption,
   ReportField,
   ReportKind,
   REPORT_KIND_LABEL,
   WeeklyReportPreview,
   ApiError,
   fetchClients,
+  fetchConfigOptions,
   fetchReportPreview,
   sendClientUpdate,
 } from "./api";
@@ -39,14 +42,37 @@ function rowStatusLabel(status: RowStatus | undefined): string {
   return "";
 }
 
+// One row per *sheet*, not per client: a client selling on Amazon and
+// Flipkart keeps a separate sheet for each and gets a separate report from
+// each, so they appear here twice, tick separately, and send separately.
 interface ClientReportState {
   client: Client;
+  sheet: ClientReportSheet;
+  // What to call this row's marketplace on screen and in the message. Only
+  // shown when the client has more than one — naming the marketplace on a
+  // client who only sells on one adds nothing.
+  marketplaceLabel: string;
+  showMarketplace: boolean;
   loading: boolean;
   loadError: string;
   loadErrorDetail?: string;
   preview: WeeklyReportPreview | null;
   included: Record<string, boolean>;
   sendVia: string; // a groupId, or "phone"
+}
+
+// Everything on this screen is tracked per row — which are ticked, which are
+// sending, which fields are included — and two rows can now share a client,
+// so the sheet's own id is the identity, not the client's.
+function rowKey(state: ClientReportState): string {
+  return state.sheet.id;
+}
+
+// What to call this row. A client with one sheet is just their name, as
+// before; a client with two would otherwise show as the same name twice with
+// no way to tell which set of figures is which.
+function rowTitle(state: ClientReportState): string {
+  return state.showMarketplace ? `${state.client.name} — ${state.marketplaceLabel}` : state.client.name;
 }
 
 // Where this client's message actually goes: a specific group if it has one
@@ -95,11 +121,19 @@ function todayValue(): string {
 // are filled in behind, so those differ, and a client must never be shown one
 // day's numbers under another day's date. Kept identical to reportHeading in
 // backend/src/services/reportSchedule.ts; change both together.
-function reportHeading(kind: ReportKind, preview: WeeklyReportPreview): string {
-  if (kind === "daily") return `📊 *Daily Update — ${preview.dailyDate ?? new Date().toLocaleDateString()}*`;
-  if (kind === "weekly_sku") return `📦 *SKU Update — ${preview.month}, Week ${preview.week}*`;
-  if (kind === "monthly") return `📊 *Monthly Update — ${preview.month}*`;
-  return `📊 *Performance Update — ${preview.month}, Week ${preview.week}*`;
+function reportHeading(
+  kind: ReportKind,
+  preview: WeeklyReportPreview,
+  // Named right after the report's own name — "Daily Update (Amazon)" — for a
+  // client who gets more than one of these. Without it they'd receive two
+  // identically-headed reports with different numbers in them.
+  marketplaceLabel?: string
+): string {
+  const name = (base: string) => (marketplaceLabel ? `${base} (${marketplaceLabel})` : base);
+  if (kind === "daily") return `📊 *${name("Daily Update")} — ${preview.dailyDate ?? new Date().toLocaleDateString()}*`;
+  if (kind === "weekly_sku") return `📦 *${name("SKU Update")} — ${preview.month}, Week ${preview.week}*`;
+  if (kind === "monthly") return `📊 *${name("Monthly Update")} — ${preview.month}*`;
+  return `📊 *${name("Performance Update")} — ${preview.month}, Week ${preview.week}*`;
 }
 
 function composeMessage(state: ClientReportState, kind: ReportKind): string {
@@ -107,7 +141,7 @@ function composeMessage(state: ClientReportState, kind: ReportKind): string {
   if (!preview) return "";
 
   const lines: string[] = [];
-  lines.push(reportHeading(kind, preview));
+  lines.push(reportHeading(kind, preview, state.showMarketplace ? state.marketplaceLabel : undefined));
   lines.push(`Hi ${client.name}, here's your update:`);
 
   for (const section of preview.sections) {
@@ -224,41 +258,56 @@ export default function WeeklyReports() {
     setLoading(true);
     setLoadError("");
     try {
-      const clients = (await fetchClients()).filter((c) => c.reportSheetUrl);
-      const initial: ClientReportState[] = clients.map((client) => ({
-        client,
-        loading: true,
-        loadError: "",
-        preview: null,
-        included: {},
-        sendVia: "",
-      }));
+      const [clients, marketplaceOptions] = await Promise.all([
+        fetchClients(),
+        fetchConfigOptions("marketplace"),
+      ]);
+      const marketplaceLabels = Object.fromEntries(
+        marketplaceOptions.map((option: ConfigOption) => [option.value, option.label])
+      );
+
+      // One row per sheet. A client with sheets for two marketplaces appears
+      // twice — separate figures, separate ticks, separate message — and a
+      // client with none doesn't appear at all.
+      const initial: ClientReportState[] = clients.flatMap((client) =>
+        client.reportSheets.map((sheet) => ({
+          client,
+          sheet,
+          marketplaceLabel: marketplaceLabels[sheet.marketplace] ?? sheet.marketplace,
+          showMarketplace: client.reportSheets.length > 1,
+          loading: true,
+          loadError: "",
+          preview: null,
+          included: {},
+          sendVia: "",
+        }))
+      );
       setStates(initial);
       setLoading(false);
 
-      // Each client's sheet is read independently — one client's sheet being
-      // unshared shouldn't stop the rest of the list appearing — but a few at
-      // a time, not all at once.
+      // Each sheet is read independently — one client's sheet being unshared
+      // shouldn't stop the rest of the list appearing — but a few at a time,
+      // not all at once.
       //
       // Asking for nineteen sheets in one breath is what put "couldn't read
       // this client's report sheet" beside healthy clients: Google answers a
       // burst unevenly, some come back 429, and the screen reported that as a
       // problem with those sheets. The backend retries a busy answer now, and
       // this stops provoking it in the first place. Rows still fill in as
-      // each one lands, so it doesn't feel slower.
-      const queue = [...clients];
+      // each one lands, so it doesn't feel slower. The limit counts sheets
+      // rather than clients, since that is what actually hits Google.
+      const queue = [...initial];
       const readNext = async (): Promise<void> => {
-        const client = queue.shift();
-        if (!client) return;
+        const row = queue.shift();
+        if (!row) return;
+        const id = row.sheet.id;
         try {
-          const preview = await fetchReportPreview(client.id, kind, date);
-          setStates((prev) =>
-            prev.map((s) => (s.client.id === client.id ? { ...s, loading: false, preview } : s))
-          );
+          const preview = await fetchReportPreview(row.client.id, kind, date, row.sheet.marketplace);
+          setStates((prev) => prev.map((s) => (s.sheet.id === id ? { ...s, loading: false, preview } : s)));
         } catch (err) {
           setStates((prev) =>
             prev.map((s) =>
-              s.client.id === client.id
+              s.sheet.id === id
                 ? { ...s, loading: false, loadError: errorMessage(err), loadErrorDetail: errorDetail(err) }
                 : s
             )
@@ -266,7 +315,7 @@ export default function WeeklyReports() {
         }
         return readNext();
       };
-      await Promise.all(Array.from({ length: Math.min(4, clients.length) }, readNext));
+      await Promise.all(Array.from({ length: Math.min(4, initial.length) }, readNext));
     } catch (err) {
       setLoadError(errorMessage(err));
       setLoadErrorDetail(errorDetail(err));
@@ -286,26 +335,26 @@ export default function WeeklyReports() {
     setRowStatus({});
   }, [kind, date]);
 
-  function toggleField(clientId: string, source: string, field: ReportField) {
+  function toggleField(rowId: string, source: string, field: ReportField) {
     setStates((prev) =>
       prev.map((s) => {
-        if (s.client.id !== clientId) return s;
+        if (rowKey(s) !== rowId) return s;
         const key = fieldKey(source, field);
         return { ...s, included: { ...s.included, [key]: !isIncluded(s, source, field) } };
       })
     );
-    clearStatus(clientId);
+    clearStatus(rowId);
   }
 
-  function setSendVia(clientId: string, value: string) {
-    setStates((prev) => prev.map((s) => (s.client.id === clientId ? { ...s, sendVia: value } : s)));
-    clearStatus(clientId);
+  function setSendVia(rowId: string, value: string) {
+    setStates((prev) => prev.map((s) => (rowKey(s) === rowId ? { ...s, sendVia: value } : s)));
+    clearStatus(rowId);
   }
 
-  function clearStatus(clientId: string) {
+  function clearStatus(rowId: string) {
     setRowStatus((prev) => {
-      if (!(clientId in prev)) return prev;
-      const { [clientId]: _, ...rest } = prev;
+      if (!(rowId in prev)) return prev;
+      const { [rowId]: _, ...rest } = prev;
       return rest;
     });
   }
@@ -321,10 +370,10 @@ export default function WeeklyReports() {
   // selection as "everyone", which put one keystroke between a quiet screen
   // and a message to every client on the list — too close together for
   // something that can't be taken back.
-  const sendable = ready.filter((s) => selected[s.client.id] && rowStatus[s.client.id] !== "sent");
+  const sendable = ready.filter((s) => selected[rowKey(s)] && rowStatus[rowKey(s)] !== "sent");
   // Ticked, but nothing can go to them. Named under the button, so the gap
   // between "I ticked five" and "Send all (1)" is accounted for.
-  const blocked = anySelected ? states.filter((s) => selected[s.client.id] && notSendableReason(s)) : [];
+  const blocked = anySelected ? states.filter((s) => selected[rowKey(s)] && notSendableReason(s)) : [];
 
   async function handleSendAll() {
     const targets = sendable;
@@ -344,14 +393,14 @@ export default function WeeklyReports() {
       const state = targets[i];
       const target = sendTargetFor(state);
       if (!target) continue;
-      setRowStatus((prev) => ({ ...prev, [state.client.id]: "sending" }));
+      setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "sending" }));
       try {
         const message = composeMessage(state, kind);
-        await sendClientUpdate(state.client.id, { phone: target.value, channel: "whapi", message });
-        setRowStatus((prev) => ({ ...prev, [state.client.id]: "sent" }));
+        await sendClientUpdate(rowKey(state), { phone: target.value, channel: "whapi", message });
+        setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "sent" }));
       } catch (err) {
-        setRowStatus((prev) => ({ ...prev, [state.client.id]: "failed" }));
-        setSendError(`Failed to send to ${state.client.name}: ${errorMessage(err)}`);
+        setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "failed" }));
+        setSendError(`Failed to send to ${rowTitle(state)}: ${errorMessage(err)}`);
         setSendErrorDetail(errorDetail(err));
       }
       setProgress({ done: i + 1, total: targets.length });
@@ -501,7 +550,7 @@ export default function WeeklyReports() {
             </button>
             <button
               className="btn btn-ghost"
-              onClick={() => setSelected(Object.fromEntries(ready.map((s) => [s.client.id, true])))}
+              onClick={() => setSelected(Object.fromEntries(ready.map((s) => [rowKey(s), true])))}
               disabled={sendingAll || ready.length === 0}
               type="button"
             >
@@ -518,7 +567,7 @@ export default function WeeklyReports() {
           {blocked.length > 0 && (
             <p className="panel-sub" style={{ marginBottom: 16 }}>
               Not going to {blocked.length} of the clients you ticked:{" "}
-              {blocked.map((s) => `${s.client.name} — ${notSendableReason(s)}`).join("; ")}
+              {blocked.map((s) => `${rowTitle(s)} — ${notSendableReason(s)}`).join("; ")}
             </p>
           )}
 
@@ -527,7 +576,7 @@ export default function WeeklyReports() {
             const target = sendTargetFor(state);
             const message = composeMessage(state, kind);
             return (
-              <div key={state.client.id} className="panel" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
+              <div key={rowKey(state)} className="panel" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
                 {/* The one tick that chooses a client. The ticks inside the
                     table below choose lines within their message, and the two
                     were being read as the same thing — hence the word "Send
@@ -537,16 +586,16 @@ export default function WeeklyReports() {
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                       <input
                         type="checkbox"
-                        checked={!!selected[state.client.id]}
+                        checked={!!selected[rowKey(state)]}
                         onChange={(e) =>
-                          setSelected((prev) => ({ ...prev, [state.client.id]: e.target.checked }))
+                          setSelected((prev) => ({ ...prev, [rowKey(state)]: e.target.checked }))
                         }
                         disabled={sendingAll}
                       />
-                      <span style={{ fontWeight: 400, opacity: 0.7 }}>Send to</span> {state.client.name}
+                      <span style={{ fontWeight: 400, opacity: 0.7 }}>Send to</span> {rowTitle(state)}
                     </label>
                   </span>
-                  <span className="panel-sub">{rowStatusLabel(rowStatus[state.client.id])}</span>
+                  <span className="panel-sub">{rowStatusLabel(rowStatus[rowKey(state)])}</span>
                 </div>
                 <div className="panel-body">
                   {state.loading && <Spinner label="Reading sheet…" />}
@@ -573,7 +622,7 @@ export default function WeeklyReports() {
                             <select
                               className="field-select"
                               value={state.sendVia === "phone" ? "phone" : target?.value ?? groups[0].groupId}
-                              onChange={(e) => setSendVia(state.client.id, e.target.value)}
+                              onChange={(e) => setSendVia(rowKey(state), e.target.value)}
                               disabled={sendingAll}
                             >
                               {groups.map((g) => (
@@ -584,7 +633,7 @@ export default function WeeklyReports() {
                           </div>
                         )}
                         <div className="panel-sub" style={{ marginBottom: 8 }}>
-                          {selected[state.client.id]
+                          {selected[rowKey(state)]
                             ? "Lines going in their message — untick any you don't want."
                             : `Tick "Send to ${state.client.name}" above to include this client. All of its figures below will tick themselves.`}
                         </div>
@@ -603,10 +652,10 @@ export default function WeeklyReports() {
                                       <input
                                         type="checkbox"
                                         checked={
-                                          !!selected[state.client.id] && isIncluded(state, section.source, field)
+                                          !!selected[rowKey(state)] && isIncluded(state, section.source, field)
                                         }
-                                        disabled={!selected[state.client.id] || sendingAll}
-                                        onChange={() => toggleField(state.client.id, section.source, field)}
+                                        disabled={!selected[rowKey(state)] || sendingAll}
+                                        onChange={() => toggleField(rowKey(state), section.source, field)}
                                       />
                                     </td>
                                     <td>{field.label}</td>
@@ -623,7 +672,7 @@ export default function WeeklyReports() {
                             of it is to decide, and that needs seeing what would
                             go before committing to send it. */}
                         <div className="panel-sub" style={{ marginBottom: 6 }}>
-                          {selected[state.client.id] ? "Preview — this is what they get" : "Preview — if you tick them"}
+                          {selected[rowKey(state)] ? "Preview — this is what they get" : "Preview — if you tick them"}
                         </div>
                         <pre
                           style={{

@@ -111,6 +111,23 @@ export interface ComposeSendUpdateMessageInput {
   dueDate: Date | null;
   statusLabels: Record<string, string>;
   marketplaceLabels: Record<string, string>;
+  // Note bodies waiting to go to the client, oldest first — see appendNotes.
+  // Left off when there are none.
+  notes?: string[];
+}
+
+// Notes the client is meant to see, carried by whatever update goes out next.
+//
+// They used to be a WhatsApp message of their own, sent the moment the note
+// was saved. A client watching a request move should get one message about
+// it, not a status change followed a second later by a loose paragraph with
+// no context — so a note now waits and travels with the update.
+function appendNotes(message: string, notes: string[]): string {
+  if (notes.length === 0) return message;
+  // Blank line, then one note per line. No "Note:" label — the client doesn't
+  // need to know these came from a different box on our screen; to them it's
+  // simply the rest of the update.
+  return [message, "", ...notes].join("\n");
 }
 
 // The single template both the automatic status-change notification and
@@ -130,7 +147,17 @@ export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): 
       clauses.push(`due date set to ${formatDate(input.dueDate)}`); // dueDate
     }
   }
-  return `"${input.description}" — ${joinClauses(clauses)}.`;
+
+  // A note on its own is a perfectly good reason to message a client ("we've
+  // asked Amazon for the invoice, waiting on them") — so with notes waiting
+  // and no field changed, the notes are the message rather than nothing
+  // being sent at all.
+  const notes = input.notes ?? [];
+  if (clauses.length === 0) {
+    return notes.length > 0 ? appendNotes(`"${input.description}"`, notes) : "";
+  }
+
+  return appendNotes(`"${input.description}" — ${joinClauses(clauses)}.`, notes);
 }
 
 // A note sent to the client's group. Opens with the quoted task description
@@ -142,6 +169,11 @@ export function composeSendUpdateMessage(input: ComposeSendUpdateMessageInput): 
 // straight back through the webhook. Starting with anything other than the
 // task: prefix is what stops it being read as a brand new task. Pinned by a
 // test in parser/noLoop.test.ts.
+// No longer used to send anything: a note marked for the client now travels
+// inside the next update message (see appendNotes) instead of going out on its
+// own. Kept because parser/noLoop.test.ts checks that anything we send can't
+// come back through the webhook and become a task — which stays true of every
+// shape of message this file has ever produced.
 export function composeNoteMessage(description: string, body: string): string {
   return `📝 *${description}*\n${body}`;
 }

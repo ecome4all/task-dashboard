@@ -69,14 +69,31 @@ function formatDay(date: Date): string {
   return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
 }
 
-function reportHeading(kind: ReportKind, report: WeeklyReportPreview, now: Date): string {
+// The marketplace a report is about, named right after the report's own name —
+// "Daily Update (Amazon)". A client selling on two marketplaces now gets two
+// messages, and without this they'd be two identically-headed reports with
+// different numbers in them, which is worse than either one alone.
+//
+// Left off when a client has only the one sheet: naming a marketplace they
+// don't have a second of adds nothing.
+function withMarketplace(name: string, marketplaceLabel?: string): string {
+  return marketplaceLabel ? `${name} (${marketplaceLabel})` : name;
+}
+
+function reportHeading(
+  kind: ReportKind,
+  report: WeeklyReportPreview,
+  now: Date,
+  marketplaceLabel?: string
+): string {
+  const name = (base: string) => withMarketplace(base, marketplaceLabel);
   // The day the figures are for, not the day the message is sent. The sheets
   // are filled in a day or two behind, so those are usually different days,
   // and heading yesterday's numbers with today's date misstates the account.
-  if (kind === "daily") return `📊 *Daily Update — ${report.dailyDate ?? formatDay(now)}*`;
-  if (kind === "weekly_sku") return `📦 *SKU Update — ${report.month}, Week ${report.week}*`;
-  if (kind === "monthly") return `📊 *Monthly Update — ${report.month}*`;
-  return `📊 *Performance Update — ${report.month}, Week ${report.week}*`;
+  if (kind === "daily") return `📊 *${name("Daily Update")} — ${report.dailyDate ?? formatDay(now)}*`;
+  if (kind === "weekly_sku") return `📦 *${name("SKU Update")} — ${report.month}, Week ${report.week}*`;
+  if (kind === "monthly") return `📊 *${name("Monthly Update")} — ${report.month}*`;
+  return `📊 *${name("Performance Update")} — ${report.month}, Week ${report.week}*`;
 }
 
 // The message a client receives. Deliberately identical in shape to the one
@@ -92,9 +109,12 @@ export function composeReportMessage(
   clientName: string,
   kind: ReportKind,
   report: WeeklyReportPreview,
-  now: Date
+  now: Date,
+  // Only passed when the client has sheets for more than one marketplace and
+  // this is one of several messages — see withMarketplace.
+  marketplaceLabel?: string
 ): string {
-  const lines = [reportHeading(kind, report, now), `Hi ${clientName}, here's your update:`];
+  const lines = [reportHeading(kind, report, now, marketplaceLabel), `Hi ${clientName}, here's your update:`];
 
   for (const section of report.sections) {
     // Zeros go out too, at Ecom4all's request: a zero is a real figure about

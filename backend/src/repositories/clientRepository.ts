@@ -10,8 +10,11 @@ const PUBLIC_FIELDS = {
   notes: true,
   active: true,
   createdAt: true,
-  reportSheetUrl: true,
   whatsappGroups: { select: { id: true, groupId: true, groupName: true } },
+  // One report sheet per marketplace — see ClientReportSheet. Always sent
+  // with the client, since every screen that shows a client shows what it
+  // can report on.
+  reportSheets: { select: { id: true, marketplace: true, sheetUrl: true } },
 } as const;
 
 // Staff type a bare 10-digit Indian mobile number most of the time — this
@@ -53,7 +56,7 @@ export const clientRepository = {
 
   update(
     id: string,
-    changes: { name?: string; phone?: string; notes?: string; active?: boolean; reportSheetUrl?: string | null }
+    changes: { name?: string; phone?: string; notes?: string; active?: boolean }
   ) {
     return prisma.client.update({
       where: { id },
@@ -66,23 +69,51 @@ export const clientRepository = {
     return prisma.client.findFirst({ where: { id, tenantId: TENANT_ID }, select: PUBLIC_FIELDS });
   },
 
-  // Active clients with a report sheet linked — what the Weekly Reports
-  // screen loads to know who to pull this week's numbers for.
+  // Active clients with at least one report sheet linked — what the Weekly
+  // Reports screen and the automatic round load to know whose numbers to
+  // pull. A client with sheets for two marketplaces comes back once, holding
+  // both; the caller decides what to do per sheet.
   listWithReportSheet() {
     return prisma.client.findMany({
-      where: { tenantId: TENANT_ID, active: true, reportSheetUrl: { not: null } },
+      where: { tenantId: TENANT_ID, active: true, reportSheets: { some: {} } },
       orderBy: { name: "asc" },
       select: PUBLIC_FIELDS,
     });
   },
 
-  // Hard delete, unlike the active/inactive toggle above — nothing else
-  // references a Client by foreign key except its own ClientWhatsappGroup
-  // rows (cascaded via Prisma's onDelete default of Restrict... actually
-  // deleted explicitly below), so this is a clean delete with no orphaned
-  // rows left over elsewhere.
+  // Linking a sheet, one marketplace at a time. Throws Prisma P2002 if this
+  // client already has a sheet for that marketplace — the caller turns that
+  // into a clear message rather than quietly replacing a link somebody set.
+  addReportSheet(clientId: string, marketplace: string, sheetUrl: string) {
+    return prisma.clientReportSheet.create({
+      data: { tenantId: TENANT_ID, clientId, marketplace, sheetUrl },
+      select: { id: true, marketplace: true, sheetUrl: true },
+    });
+  },
+
+  removeReportSheet(sheetRowId: string) {
+    return prisma.clientReportSheet.delete({ where: { id: sheetRowId } });
+  },
+
+  // The sheet to read for one client on one marketplace, or null if they
+  // have none for it. Nothing falls back to another marketplace's sheet:
+  // sending a client Flipkart figures headed "Amazon" would be worse than
+  // sending nothing.
+  findReportSheet(clientId: string, marketplace: string) {
+    return prisma.clientReportSheet.findFirst({
+      where: { tenantId: TENANT_ID, clientId, marketplace },
+    });
+  },
+
+  // Hard delete, unlike the active/inactive toggle above. Two tables point at
+  // a Client by foreign key — its WhatsApp groups and its report sheets — and
+  // both are deleted explicitly here rather than by a cascade, so this stays a
+  // clean delete with nothing orphaned. Anything else that ever references a
+  // Client has to be added here too, or the delete starts failing on the
+  // foreign key.
   async delete(id: string) {
     await prisma.clientWhatsappGroup.deleteMany({ where: { clientId: id } });
+    await prisma.clientReportSheet.deleteMany({ where: { clientId: id } });
     await prisma.client.delete({ where: { id } });
   },
 

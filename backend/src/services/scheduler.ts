@@ -166,46 +166,72 @@ export async function runScheduledReports(now: Date, channels: WhatsAppChannels)
   lastReportRunOn = localDateKey(now);
 
   const clients = await clientRepository.listWithReportSheet();
+  const marketplaceLabels = Object.fromEntries(
+    (await configOptionRepository.list("marketplace")).map((option) => [option.value, option.label])
+  );
+
+  // One send per sheet, not per client: a client selling on Amazon and
+  // Flipkart has two separate sets of figures and gets two messages, each
+  // headed with its own marketplace. Flattened up front so the gap between
+  // sends, and the "was that the last one" check, count actual messages.
+  const sends = clients.flatMap((client) =>
+    client.reportSheets.map((sheet) => ({ client, sheet }))
+  );
   const results: RunResult[] = [];
 
-  for (const client of clients) {
+  for (const [index, { client, sheet }] of sends.entries()) {
+    // Every result is named by client *and* marketplace, so the summary that
+    // goes to staff afterwards can say which of a client's two reports failed.
+    const marketplaceLabel = marketplaceLabels[sheet.marketplace] ?? sheet.marketplace;
+    const reportedAs = `${client.name} (${marketplaceLabel})`;
+
     // Groups first, phone second — the same order the Weekly Reports screen
     // defaults to, so an automatic send lands in the same chat a manual one
     // would have.
     const target = client.whatsappGroups[0]?.groupId ?? client.phone?.trim();
     if (!target) {
-      results.push({ clientName: client.name, sent: false, skipped: "nowhere to send it" });
+      results.push({ clientName: reportedAs, sent: false, skipped: "nowhere to send it" });
       continue;
     }
 
     let message: string;
     try {
-      const report = await buildReport(client.reportSheetUrl!, config.kind, now);
+      const report = await buildReport(sheet.sheetUrl, config.kind, now);
       if (!hasSomethingToSend(report)) {
-        results.push({ clientName: client.name, sent: false, skipped: "no figures for this period" });
+        results.push({ clientName: reportedAs, sent: false, skipped: "no figures for this period" });
         continue;
       }
-      message = composeReportMessage(client.name, config.kind, report, now);
+      // Named in the message only when there's more than one to tell apart.
+      // A client with a single sheet gets exactly the message they got
+      // before this change.
+      message = composeReportMessage(
+        client.name,
+        config.kind,
+        report,
+        now,
+        client.reportSheets.length > 1 ? marketplaceLabel : undefined
+      );
     } catch (err) {
-      console.error(`[scheduler] couldn't build ${client.name}'s report:`, err);
-      results.push({ clientName: client.name, sent: false, skipped: "couldn't open the sheet" });
+      console.error(`[scheduler] couldn't build ${reportedAs}'s report:`, err);
+      results.push({ clientName: reportedAs, sent: false, skipped: "couldn't open the sheet" });
       continue;
     }
 
     try {
       await channels.whapi.sendMessage(target, message);
-      results.push({ clientName: client.name, sent: true });
-      console.log(`[scheduler] sent ${config.kind} report to ${client.name}`);
+      results.push({ clientName: reportedAs, sent: true });
+      console.log(`[scheduler] sent ${config.kind} report to ${reportedAs}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message.slice(0, 120) : "send failed";
-      console.error(`[scheduler] failed to send ${client.name}'s report:`, err);
-      results.push({ clientName: client.name, sent: false, failed: reason });
+      console.error(`[scheduler] failed to send ${reportedAs}'s report:`, err);
+      results.push({ clientName: reportedAs, sent: false, failed: reason });
     }
 
     // Only between sends — no point holding the round open after the last one.
     // Counted over attempts rather than successes: a rejected send still cost
-    // the connected number a request.
-    if (client !== clients[clients.length - 1]) {
+    // the connected number a request. Two sheets on one client are two
+    // messages to the same chat, so the gap matters more here, not less.
+    if (index < sends.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, SEND_GAP_MS));
     }
   }

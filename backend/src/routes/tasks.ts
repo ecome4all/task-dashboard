@@ -6,7 +6,6 @@ import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
 import {
   composeSendUpdateMessage,
-  composeNoteMessage,
   changedFieldsSince,
   buildSnapshot,
   shouldAnnounceStageChange,
@@ -59,9 +58,13 @@ export function createTasksRouter(channels: WhatsAppChannels) {
   const router = Router();
 
   router.get("/", async (req, res) => {
-    const [tasks, noteCounts] = await Promise.all([
+    const [tasks, noteCounts, withPendingNotes] = await Promise.all([
       taskRepository.list(taskVisibilityFor(req.employee)),
       taskNoteRepository.countsByTask(),
+      // Which tasks have a note waiting to go to the client. The Send button
+      // turns on for these even when no field has changed — otherwise a note
+      // written on a task nobody edits again could never reach anyone.
+      taskNoteRepository.taskIdsWithPendingNotes(),
     ]);
     // The Send button needs to know, per task, whether anything's changed
     // since the last send — computed here rather than trusting the client
@@ -72,6 +75,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
         ...task,
         pendingSendFields: changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null),
         noteCount: noteCounts[task.id] ?? 0,
+        hasNoteForClient: withPendingNotes.has(task.id),
       }))
     );
   });
@@ -182,6 +186,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       ...task,
       pendingSendFields: changedFieldsSince(task, null),
       noteCount: 0,
+      hasNoteForClient: false,
     });
   });
 
@@ -213,29 +218,28 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       return;
     }
 
-    let note = await taskNoteRepository.create({
+    // Sending is opted into per note — most are internal working detail the
+    // client must never see.
+    //
+    // Ticking the box no longer sends anything from here. The note is marked
+    // for the client and waits, going out as part of the next update this
+    // task sends — the automatic stage-change message, or the Send button. A
+    // client watching a request move should get one message about it, not a
+    // status change followed a second later by a loose paragraph with no
+    // context.
+    //
+    // Which also means saving a note can no longer half-fail: it either saves
+    // or it doesn't, and nothing about WhatsApp can go wrong on this route.
+    const note = await taskNoteRepository.create({
       taskId: task.id,
       authorId: author.id,
       authorName: author.name,
       body: body.trim(),
+      // A task raised on the board with no client chat behind it has nowhere
+      // to send to (see MANUAL_SOURCE), so marking a note for the client
+      // there would leave it waiting for an update that can never go.
+      sendToClient: sendToWhatsapp === true && Boolean(task.sourceRef),
     });
-
-    // Sending is opted into per note — most are internal working detail the
-    // client must never see. The note is saved first either way: if the send
-    // fails, the writing isn't lost, and sentAt staying null is what tells
-    // the screen to show it as unsent rather than claiming success.
-    // A task raised on the board with no client chat behind it has nowhere to
-    // send to (see MANUAL_SOURCE) — the note is kept, internal, rather than
-    // the send being attempted against an empty address.
-    if (sendToWhatsapp === true && task.sourceRef) {
-      try {
-        const whatsapp = resolveAdapterForSource(task.source, channels);
-        await whatsapp.sendMessage(task.sourceRef, composeNoteMessage(task.description, note.body));
-        note = await taskNoteRepository.markSent(note.id);
-      } catch (err) {
-        console.error("Failed to send task note to WhatsApp:", err);
-      }
-    }
 
     res.status(201).json(note);
   });
@@ -402,11 +406,17 @@ export function createTasksRouter(channels: WhatsAppChannels) {
         newStatus: task.status,
         disabled: process.env.DISABLE_AUTO_STATUS_UPDATES === "true",
       });
+    let notesSent = 0;
     if (stageChanged) {
       try {
         const whatsapp = resolveAdapterForSource(task.source, channels);
         const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
         const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
+        // This is the message notes are written to travel with: whoever
+        // moved the stage along has usually just written the note explaining
+        // it, and the client should get the two together rather than a bare
+        // "status changed to Submitted" and a separate paragraph.
+        const pendingNotes = await taskNoteRepository.listPendingForClient(task.id);
         const message = composeSendUpdateMessage({
           description: task.description,
           fields: ["status"],
@@ -416,6 +426,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
           dueDate: task.dueDate,
           statusLabels,
           marketplaceLabels,
+          notes: pendingNotes.map((note) => note.body),
         });
         await whatsapp.sendMessage(task.sourceRef, message);
         // Merge just the status field into the existing snapshot, so a
@@ -423,12 +434,26 @@ export function createTasksRouter(channels: WhatsAppChannels) {
         // already announced automatically here.
         currentSnapshot = { ...currentSnapshot, status: task.status };
         await taskRepository.updateSnapshot(task.id, currentSnapshot);
+        // Marked only after the send came back — a failure leaves them
+        // pending for the next update rather than losing them.
+        if (pendingNotes.length > 0) {
+          await taskNoteRepository.markManySent(pendingNotes.map((note) => note.id));
+          notesSent = pendingNotes.length;
+        }
       } catch (err) {
         console.error("Failed to send WhatsApp status update:", err);
       }
     }
 
-    res.json({ ...task, pendingSendFields: changedFieldsSince(task, currentSnapshot) });
+    // hasNoteForClient tells the board whether the Send button should stay
+    // lit: a note that just went out with this announcement is no longer
+    // waiting, but one written while the task sat untouched still is.
+    res.json({
+      ...task,
+      pendingSendFields: changedFieldsSince(task, currentSnapshot),
+      hasNoteForClient:
+        notesSent === 0 && (await taskNoteRepository.listPendingForClient(task.id)).length > 0,
+    });
   });
 
   // Manual send: unlike the automatic status-change notification above,
@@ -448,8 +473,15 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       return;
     }
 
+    // Notes marked for the client travel with this message rather than having
+    // been sent on their own when they were written — see the notes route
+    // above. A note alone is reason enough to send: "we've asked Amazon for
+    // the invoice, waiting on them" is exactly the kind of update a client
+    // wants, and no field on the task has to move for it to be true.
+    const pendingNotes = await taskNoteRepository.listPendingForClient(task.id);
+
     const fields = changedFieldsSince(task, task.sentSnapshot as TaskSnapshot | null);
-    if (fields.length === 0) {
+    if (fields.length === 0 && pendingNotes.length === 0) {
       res.status(400).json({ error: "Nothing new to send since the last update." });
       return;
     }
@@ -475,6 +507,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       dueDate: task.dueDate,
       statusLabels,
       marketplaceLabels,
+      notes: pendingNotes.map((note) => note.body),
     });
 
     try {
@@ -487,7 +520,13 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     }
 
     await taskRepository.updateSnapshot(task.id, buildSnapshot(task));
-    res.json({ sent: true, fields });
+    // Only now that the message has actually gone. A failed send above
+    // returns before this, leaving the notes pending so they ride along with
+    // the next attempt rather than being quietly dropped.
+    if (pendingNotes.length > 0) {
+      await taskNoteRepository.markManySent(pendingNotes.map((note) => note.id));
+    }
+    res.json({ sent: true, fields, notesSent: pendingNotes.length });
   });
 
   return router;

@@ -63,10 +63,18 @@ model TaskNote {
   authorName String
   body       String
   createdAt  DateTime @default(now())
-  // When this note was sent to the client's WhatsApp group, if it ever was.
-  // Notes are internal by default; sending is opted into per note, because
-  // plenty of them ("client hasn't paid yet") must never reach the client.
-  // Null means it stayed internal.
+  // Whether this note is meant for the client at all. Internal by default,
+  // because plenty of them ("client hasn't paid yet") must never reach the
+  // client — ticking the box on the note form is what sets this.
+  //
+  // Saying yes does not send anything on its own. The note waits and goes out
+  // as part of the next update the task sends, rather than arriving as a
+  // WhatsApp message of its own: a client watching a request move should get
+  // one message about it, not a status change followed by a loose paragraph.
+  sendToClient Boolean @default(false)
+  // When this note actually reached the client's group, if it has yet. Null
+  // with sendToClient true means it is still waiting for the next update;
+  // null with sendToClient false means it was never meant to go.
   sentAt     DateTime?
 
   @@index([taskId])
@@ -133,12 +141,38 @@ model Client {
   active         Boolean               @default(true)
   createdAt      DateTime              @default(now())
   whatsappGroups ClientWhatsappGroup[]
-  // Google Sheet the client (or Ecom4all staff, on the client's behalf)
-  // maintains their own performance numbers in — read-only from this app's
-  // side via a service account the sheet is shared with (see
-  // services/googleSheets.ts). Whole-account tracker, not per-SKU: no ASIN
-  // column, every row is a time period (a week or a date).
-  reportSheetUrl String?
+  reportSheets   ClientReportSheet[]
+}
+
+// The Google Sheet a client's performance numbers are kept in — read-only
+// from this app's side, via a service account the sheet is shared with (see
+// services/googleSheets.ts). Whole-account tracker, not per-SKU: no ASIN
+// column, every row is a time period (a week or a date).
+//
+// One sheet per marketplace, not one per client: a client selling on both
+// Amazon and Flipkart has two separate sets of figures, and one sheet can't
+// hold two accounts' numbers in the same columns. Was a single
+// `Client.reportSheetUrl` until then — the migration moved every existing
+// sheet onto "amazon", which is what all of them were.
+//
+// A client with no row here simply gets no report, the same as an empty
+// reportSheetUrl did.
+model ClientReportSheet {
+  id       String @id @default(cuid())
+  tenantId String @default("default")
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+  // A ConfigOption "marketplace" value — "amazon", "flipkart" — the same
+  // values a task carries, so a report and a task agree on what to call it.
+  marketplace String
+  sheetUrl    String
+  createdAt   DateTime @default(now())
+
+  // One sheet per marketplace per client: linking a second Amazon sheet is a
+  // mistake, not a second account, and silently sending from whichever came
+  // back first would be worse than refusing it.
+  @@unique([tenantId, clientId, marketplace])
+  @@index([clientId])
 }
 
 // One of possibly several WhatsApp groups a client's tasks come from (whapi

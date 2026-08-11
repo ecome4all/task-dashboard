@@ -99,6 +99,14 @@ function withinDateRange(timestamp: string | null, from: string, to: string): bo
 // looking broken.
 const NO_SEND_TARGET_HINT = "No client WhatsApp group or number for this task";
 
+// What makes the Send button worth pressing: something about the task has
+// changed since the client was last told, or a note is waiting to go out with
+// the next update. Without the second half, a note written on a task nobody
+// edits again could never reach anyone.
+function hasSomethingToSend(task: Task): boolean {
+  return task.pendingSendFields.length > 0 || task.hasNoteForClient;
+}
+
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -320,7 +328,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     setSendingTaskId(task.id);
     try {
       await sendTaskUpdate(task.id);
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, pendingSendFields: [] } : t)));
+      // Both halves are cleared: any waiting note went out inside that same
+      // message, so the button goes quiet until something else changes.
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, pendingSendFields: [], hasNoteForClient: false } : t))
+      );
       setJustSentTaskId(task.id);
       setTimeout(() => setJustSentTaskId((id) => (id === task.id ? null : id)), 1500);
     } catch (err) {
@@ -715,11 +727,17 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                         why rather than looking broken. */}
                     <button
                       className={`btn btn-sm ${
-                        task.pendingSendFields.length > 0 && canSendToClient(task) ? "btn-primary" : "btn-ghost"
+                        hasSomethingToSend(task) && canSendToClient(task) ? "btn-primary" : "btn-ghost"
                       }`}
-                      title={canSendToClient(task) ? undefined : NO_SEND_TARGET_HINT}
+                      title={
+                        !canSendToClient(task)
+                          ? NO_SEND_TARGET_HINT
+                          : task.hasNoteForClient
+                          ? "A note is waiting to go with this update"
+                          : undefined
+                      }
                       disabled={
-                        task.pendingSendFields.length === 0 ||
+                        !hasSomethingToSend(task) ||
                         !canSendToClient(task) ||
                         sendingTaskId === task.id
                       }

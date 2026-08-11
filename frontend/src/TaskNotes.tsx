@@ -60,11 +60,6 @@ export default function TaskNotes({
         return next;
       });
       setDraft("");
-      // The note saved, but WhatsApp didn't take it. Say so plainly rather
-      // than leaving someone thinking the client has been told.
-      if (alsoSend && !note.sentAt) {
-        setError("Note saved, but it could not be sent to WhatsApp. Try sending it another way.");
-      }
       setAlsoSend(false);
     } catch (err) {
       setError(errorMessage(err));
@@ -101,9 +96,17 @@ export default function TaskNotes({
           <div className="note-head">
             <span className="note-author">{note.authorName}</span>
             <span className="note-time">{new Date(note.createdAt).toLocaleString()}</span>
+            {/* Three states, not two: kept internal, waiting to go out with
+                the next update, or already gone. The middle one is new — a
+                note marked for the client is no longer sent the moment it is
+                written. */}
             {note.sentAt ? (
               <span className="note-sent" title={`Sent to the group on ${new Date(note.sentAt).toLocaleString()}`}>
                 Sent to client ✓
+              </span>
+            ) : note.sendToClient ? (
+              <span className="note-pending" title="Goes to the client with the next update on this task">
+                Goes with next update
               </span>
             ) : (
               <span className="note-internal">Team only</span>
@@ -129,9 +132,13 @@ export default function TaskNotes({
             onChange={(e) => setDraft(e.target.value)}
           />
           <div className="note-add-actions">
+            {/* Ticking this sends nothing now. The note is kept for the
+                client and goes out inside the next update this task sends,
+                so they get one message about their request rather than a
+                status change and a loose paragraph. */}
             <label className="note-send-toggle">
               <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} />
-              Also send to the client on WhatsApp
+              Send this to the client with the next update
             </label>
             <button
               className="btn btn-primary btn-sm"
@@ -139,7 +146,7 @@ export default function TaskNotes({
               disabled={saving || !draft.trim()}
               type="button"
             >
-              {saving ? (alsoSend ? "Sending…" : "Saving…") : alsoSend ? "Add and send" : "Add note"}
+              {saving ? "Saving…" : "Add note"}
             </button>
           </div>
         </div>

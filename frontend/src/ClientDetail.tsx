@@ -79,6 +79,9 @@ export default function ClientDetail({
   // a client id that hasn't changed, so there's nothing else for the effect
   // below to key off to run it again.
   const [reportReload, setReportReload] = useState(0);
+  // Which marketplace's sheet the numbers panel is showing, for a client with
+  // more than one. Empty means "whichever is first".
+  const [reportMarketplace, setReportMarketplace] = useState("");
 
   // The client list and the dropdown option lists don't change when you
   // switch clients, so they're loaded once rather than on every switch.
@@ -138,12 +141,20 @@ export default function ClientDetail({
   // Read separately from the overview, and only for a client that actually
   // has a sheet linked: it's a live Google Sheets call, so a slow or
   // misconfigured sheet would otherwise hold up the whole screen.
+  // Which of this client's sheets the numbers below are read from. A client
+  // with one sheet never sees the choice; one with sheets for two
+  // marketplaces starts on the first and can switch.
+  const shownSheet =
+    client?.reportSheets.find((sheet) => sheet.marketplace === reportMarketplace) ??
+    client?.reportSheets[0] ??
+    null;
+
   useEffect(() => {
-    if (!client?.reportSheetUrl) return;
+    if (!client || !shownSheet) return;
     let cancelled = false;
     setReportLoading(true);
     setReportError("");
-    fetchWeeklyReportPreview(client.id)
+    fetchWeeklyReportPreview(client.id, shownSheet.marketplace)
       .then((preview) => {
         if (!cancelled) setReport(preview);
       })
@@ -156,7 +167,7 @@ export default function ClientDetail({
     return () => {
       cancelled = true;
     };
-  }, [client?.id, client?.reportSheetUrl, reportReload]);
+  }, [client?.id, shownSheet?.id, reportReload]);
 
   async function handleNotesSave() {
     if (!client || notesDraft === null || notesDraft === (client.notes ?? "")) {
@@ -378,13 +389,19 @@ export default function ClientDetail({
                   </div>
                 </div>
                 <div>
-                  <div className="fact-label">Report sheet</div>
+                  {/* One sheet per marketplace — a client selling on Amazon
+                      and Flipkart keeps a separate set of figures for each. */}
+                  <div className="fact-label">Report sheets</div>
                   <div className="fact-value">
-                    {client.reportSheetUrl ? (
-                      <a href={client.reportSheetUrl} target="_blank" rel="noreferrer">Open sheet</a>
-                    ) : (
-                      "Not saved"
-                    )}
+                    {client.reportSheets.length === 0
+                      ? "Not saved"
+                      : client.reportSheets.map((sheet) => (
+                          <div key={sheet.id}>
+                            <a href={sheet.sheetUrl} target="_blank" rel="noreferrer">
+                              {marketplaceLabels[sheet.marketplace] ?? sheet.marketplace}
+                            </a>
+                          </div>
+                        ))}
                   </div>
                 </div>
               </div>
@@ -453,13 +470,28 @@ export default function ClientDetail({
             </div>
           </div>
 
-          {client.reportSheetUrl && (
+          {shownSheet && (
             <div className="panel">
               <div className="panel-head">
                 <span className="panel-title">This week's numbers</span>
                 <span className="panel-sub">Read live from this client's report sheet</span>
               </div>
               <div className="panel-body">
+                {/* Only worth showing when there's a choice to make. */}
+                {client.reportSheets.length > 1 && (
+                  <div className="filter-chips">
+                    {client.reportSheets.map((sheet) => (
+                      <button
+                        key={sheet.id}
+                        className={`chip ${sheet.id === shownSheet.id ? "active" : ""}`}
+                        onClick={() => setReportMarketplace(sheet.marketplace)}
+                        type="button"
+                      >
+                        {marketplaceLabels[sheet.marketplace] ?? sheet.marketplace}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {reportLoading && <Spinner label="Reading sheet…" />}
                 {!reportLoading && reportError && (
                   <ErrorBanner message={reportError} onRetry={() => setReportReload((n) => n + 1)} />

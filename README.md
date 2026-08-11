@@ -223,6 +223,78 @@ Unchanged: the daily reminder and the "a new task is yours" alert were always
 per-person, and Clients / Client Details / Reports were already admin and
 manager only.
 
+## Database changes apply themselves on deploy
+
+`startCommand` in `backend/railway.json` is `npx prisma migrate deploy && npm
+start`. Until 11 Aug 2026 nothing in the deploy path applied a migration, so
+every schema change needed someone to remember to run it by hand against the
+live database — and forgetting once ships code whose tables don't exist yet,
+which fails at runtime in a way that reads as random. Three migrations were in
+fact sitting unapplied when this was noticed.
+
+`migrate deploy` only applies migrations that haven't run, in order, and never
+generates or edits one — so a redeploy with nothing new is a no-op. It runs
+before the server starts, so a failed migration stops the release rather than
+letting a half-migrated app serve requests.
+
+**It still runs against the live database, because there is only one.** A
+migration that drops or rewrites a column is irreversible the moment it
+deploys, with no pause to look at it. Write those defensively: copy data
+before dropping it, in the same migration.
+
+## One report sheet per marketplace
+
+`ClientReportSheet`. A client selling on both Amazon and Flipkart has two
+separate sets of figures, and one sheet can't hold two accounts' numbers in
+the same columns — so `Client.reportSheetUrl` became a row per marketplace,
+linked from the Clients screen (`POST/DELETE /api/clients/:id/report-sheets`).
+One sheet per marketplace per client, enforced by a unique index: a second
+Amazon sheet is a mistake, not a second account.
+
+**They send separately.** A client with two sheets appears twice on the
+Reports screen — separate figures, separate ticks, separate message — and the
+automatic round sends one message per sheet, five seconds apart. The heading
+names the marketplace (`📊 *Performance Update (Flipkart) — August, Week 2*`)
+**only when the client has more than one**, so every client who had a single
+sheet before this change gets exactly the message they got before. As ever,
+`composeReportMessage` and `composeMessage` in `WeeklyReports.tsx` must be
+changed together.
+
+**Nothing falls back.** A client with no Flipkart sheet gets no Flipkart
+report — sending them Amazon figures headed "Flipkart" would be worse than
+sending nothing. Asking for a preview without naming a marketplace works only
+when the client has exactly one sheet; with several the route refuses rather
+than guessing.
+
+**The migration moved every existing sheet onto `amazon`** — all 19 linked so
+far are Amazon trackers, confirmed before it ran. That step is in the same
+migration as the `DROP COLUMN`, so it is the only chance to keep those links;
+don't reorder it.
+
+## Notes go out with the update, not on their own
+
+A note ticked for the client no longer sends a WhatsApp message the moment
+it's saved. It's marked (`TaskNote.sendToClient`) and waits, going out inside
+the next update the task sends — the automatic stage-change message, or the
+Send button. A client watching a request move should get one message about it,
+not a status change followed a second later by a loose paragraph with no
+context.
+
+- **`sendToClient` is the intent, `sentAt` is the fact.** Until now ticking the
+  box sent immediately, so "was it meant to go?" and "did it go?" were the same
+  question. The thread shows all three states: Team only, Goes with next
+  update, Sent to client ✓.
+- **A note alone is reason enough to send.** With notes waiting and no field
+  changed, the notes are the message — "we've chased Amazon again" is exactly
+  what a client wants and needs no field to have moved. So the Send button also
+  turns on for `hasNoteForClient`, or a note on a task nobody edits again could
+  never reach anyone.
+- **Marked sent only after the send returns.** A failed send leaves the notes
+  pending so they ride along with the next attempt rather than being silently
+  lost — the same rule the field snapshot already followed.
+- Saving a note can no longer half-fail, so the screen no longer has to say
+  "saved, but not sent".
+
 ## Marketplace and due date, read out of the message
 
 `parser/taskDetails.ts`. **"task: listing not live on flipkart due 20/8"**

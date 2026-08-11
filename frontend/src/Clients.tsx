@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Client,
+  ConfigOption,
   UnrecognizedSender,
   Task,
   ApiError,
@@ -8,14 +9,18 @@ import {
   fetchUnrecognizedSenders,
   ignoreUnrecognizedSender,
   fetchTasks,
+  fetchConfigOptions,
   createClient,
   updateClient,
   deleteClient,
   addClientWhatsappGroup,
   removeClientWhatsappGroup,
+  addClientReportSheet,
+  removeClientReportSheet,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import SearchableSelect from "./SearchableSelect";
 import Pagination, { usePaged } from "./Paged";
 
 function errorMessage(err: unknown): string {
@@ -38,7 +43,12 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   const [newClientGroupId, setNewClientGroupId] = useState("");
   const [newClientGroupName, setNewClientGroupName] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
-  const [reportSheetDrafts, setReportSheetDrafts] = useState<Record<string, string>>({});
+  // A client keeps one report sheet per marketplace, so linking one takes two
+  // values, held per client while they're being typed.
+  const [newSheetUrl, setNewSheetUrl] = useState<Record<string, string>>({});
+  const [newSheetMarketplace, setNewSheetMarketplace] = useState<Record<string, string>>({});
+  const [sheetError, setSheetError] = useState<Record<string, string>>({});
+  const [marketplaceOptions, setMarketplaceOptions] = useState<ConfigOption[]>([]);
   const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
   const [newGroupId, setNewGroupId] = useState<Record<string, string>>({});
   const [newGroupName, setNewGroupName] = useState<Record<string, string>>({});
@@ -49,18 +59,29 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   // rather than only in the banner at the top of a long list.
   const [groupError, setGroupError] = useState<Record<string, string>>({});
 
+  // A sheet stores the marketplace's stable value ("amazon"); the screen shows
+  // whatever an admin has named it. An option since renamed or deactivated
+  // falls back to the stored value rather than showing an empty cell.
+  function marketplaceLabel(value: string): string {
+    return marketplaceOptions.find((option) => option.value === value)?.label ?? value;
+  }
+
   async function load() {
     setLoading(true);
     setLoadError("");
     try {
-      const [clientList, senders, taskList] = await Promise.all([
+      const [clientList, senders, taskList, marketplaceList] = await Promise.all([
         fetchAllClients(),
         fetchUnrecognizedSenders(),
         fetchTasks(),
+        // For the report-sheet picker: a sheet is linked against a marketplace
+        // from the same admin-editable list the task board uses.
+        fetchConfigOptions("marketplace"),
       ]);
       setClients(clientList);
       setUnrecognizedSenders(senders);
       setTasks(taskList);
+      setMarketplaceOptions(marketplaceList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -117,17 +138,45 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     }
   }
 
-  async function handleReportSheetSave(client: Client) {
-    const reportSheetUrl = reportSheetDrafts[client.id] ?? client.reportSheetUrl ?? "";
-    setReportSheetDrafts((prev) => {
-      const { [client.id]: _, ...rest } = prev;
-      return rest;
-    });
-    if (reportSheetUrl === (client.reportSheetUrl ?? "")) return;
+  // Linking a sheet, one marketplace at a time. Errors land beside the button
+  // rather than only in the banner at the top — on a list of 23 clients that
+  // banner is well out of view by the time you're adding a sheet.
+  async function handleAddSheet(client: Client) {
+    const sheetUrl = (newSheetUrl[client.id] ?? "").trim();
+    const marketplace = newSheetMarketplace[client.id] ?? "";
+    setSheetError((prev) => ({ ...prev, [client.id]: "" }));
+
+    if (!sheetUrl) {
+      setSheetError((prev) => ({ ...prev, [client.id]: "Paste the link to the sheet first." }));
+      return;
+    }
+    if (!marketplace) {
+      setSheetError((prev) => ({ ...prev, [client.id]: "Pick which marketplace this sheet is for." }));
+      return;
+    }
+
     setActionError("");
     try {
-      const updated = await updateClient(client.id, { reportSheetUrl });
-      setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+      const sheet = await addClientReportSheet(client.id, marketplace, sheetUrl);
+      setClients((prev) =>
+        prev.map((c) => (c.id === client.id ? { ...c, reportSheets: [...c.reportSheets, sheet] } : c))
+      );
+      setNewSheetUrl((prev) => ({ ...prev, [client.id]: "" }));
+      setNewSheetMarketplace((prev) => ({ ...prev, [client.id]: "" }));
+    } catch (err) {
+      setSheetError((prev) => ({ ...prev, [client.id]: errorMessage(err) }));
+    }
+  }
+
+  async function handleRemoveSheet(client: Client, sheetId: string) {
+    setActionError("");
+    try {
+      await removeClientReportSheet(client.id, sheetId);
+      setClients((prev) =>
+        prev.map((c) =>
+          c.id === client.id ? { ...c, reportSheets: c.reportSheets.filter((s) => s.id !== sheetId) } : c
+        )
+      );
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -468,16 +517,64 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                       </div>
                     )}
                   </td>
+                  {/* One sheet per marketplace: a client selling on Amazon and
+                      Flipkart keeps a separate sheet for each, and gets a
+                      separate report from each. */}
                   <td>
-                    <input
-                      className="field-input"
-                      type="text"
-                      value={reportSheetDrafts[client.id] ?? client.reportSheetUrl ?? ""}
-                      placeholder="No sheet saved"
-                      onChange={(e) => setReportSheetDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                      onBlur={() => handleReportSheetSave(client)}
-                      style={{ width: 180 }}
-                    />
+                    {client.reportSheets.length === 0 && (
+                      <div className="panel-sub" style={{ marginBottom: 4 }}>No sheet saved</div>
+                    )}
+                    {client.reportSheets.map((sheet) => (
+                      <div key={sheet.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <div style={{ minWidth: 120 }}>
+                          <div>{marketplaceLabel(sheet.marketplace)}</div>
+                          <a
+                            className="panel-sub"
+                            href={sheet.sheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={sheet.sheetUrl}
+                          >
+                            Open sheet
+                          </a>
+                        </div>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleRemoveSheet(client, sheet.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "flex-start" }}>
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Paste sheet link"
+                        value={newSheetUrl[client.id] ?? ""}
+                        title={newSheetUrl[client.id] ?? ""}
+                        onChange={(e) => setNewSheetUrl((prev) => ({ ...prev, [client.id]: e.target.value }))}
+                        style={{ width: 180, fontSize: 12 }}
+                      />
+                      <div style={{ width: 120 }}>
+                        <SearchableSelect
+                          value={newSheetMarketplace[client.id] ?? ""}
+                          placeholder="Marketplace"
+                          options={marketplaceOptions.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                          onChange={(value) =>
+                            setNewSheetMarketplace((prev) => ({ ...prev, [client.id]: value }))
+                          }
+                        />
+                      </div>
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleAddSheet(client)}>
+                        + Add
+                      </button>
+                    </div>
+                    {sheetError[client.id] && (
+                      <div style={{ color: "var(--danger, #b42318)", fontSize: 12, marginTop: 6, maxWidth: 300 }}>
+                        {sheetError[client.id]}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <button

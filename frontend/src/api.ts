@@ -121,6 +121,10 @@ export interface Task {
   // How many notes this task has. The notes themselves are only fetched
   // when a row is actually opened — see fetchTaskNotes.
   noteCount: number;
+  // Whether a note is waiting to go to the client. The Send button turns on
+  // for this even when no field has changed, since otherwise a note on a task
+  // nobody edits again could never reach anyone.
+  hasNoteForClient: boolean;
 }
 
 export interface TaskNote {
@@ -130,8 +134,13 @@ export interface TaskNote {
   authorName: string;
   body: string;
   createdAt: string;
-  // When this note was sent to the client's WhatsApp group. Null means it
-  // stayed internal — notes are not sent unless that is asked for.
+  // Whether this note is meant for the client at all. Ticking the box when
+  // writing it sets this — and sends nothing: the note waits and goes out
+  // inside the next update this task sends.
+  sendToClient: boolean;
+  // When it actually reached the client's group. Null with sendToClient true
+  // means it is still waiting for that next update; null with sendToClient
+  // false means it was never meant to go.
   sentAt: string | null;
 }
 
@@ -140,9 +149,10 @@ export function fetchTaskNotes(taskId: string): Promise<TaskNote[]> {
   return request(`/api/tasks/${taskId}/notes`);
 }
 
-// sendToWhatsapp is opted into per note. If the send fails the note is still
-// saved, and comes back with sentAt still null — so the screen can say it
-// wasn't sent rather than pretending it was.
+// sendToWhatsapp is opted into per note, and no longer sends anything by
+// itself: it marks the note for the client, and the note goes out inside the
+// next update this task sends. So this call either saves or it doesn't —
+// there is no half-success to report any more.
 export function addTaskNote(
   taskId: string,
   body: string,
@@ -403,10 +413,33 @@ export interface Client {
   notes: string | null;
   active: boolean;
   createdAt: string;
-  // Google Sheet the client tracks their own performance numbers in — see
-  // fetchWeeklyReportPreview. Read-only from this app; nothing here writes
-  // to it.
-  reportSheetUrl: string | null;
+  // The Google Sheets this client's performance numbers are read from — one
+  // per marketplace, since a client selling on Amazon and Flipkart has two
+  // separate sets of figures. Empty means no reports can be sent for them.
+  // Read-only from this app; nothing here writes to a sheet.
+  reportSheets: ClientReportSheet[];
+}
+
+export interface ClientReportSheet {
+  id: string;
+  // A marketplace value from the admin-editable list — "amazon", "flipkart".
+  marketplace: string;
+  sheetUrl: string;
+}
+
+// One sheet per marketplace per client. Fails with 409 if this client already
+// has one for that marketplace — remove it first to replace it, rather than
+// having a link somebody set be silently overwritten.
+export function addClientReportSheet(
+  clientId: string,
+  marketplace: string,
+  sheetUrl: string
+): Promise<ClientReportSheet> {
+  return postJson(`/api/clients/${clientId}/report-sheets`, { marketplace, sheetUrl });
+}
+
+export function removeClientReportSheet(clientId: string, sheetId: string): Promise<void> {
+  return request(`/api/clients/${clientId}/report-sheets/${sheetId}`, { method: "DELETE" });
 }
 
 export interface ClientOverview {
@@ -466,7 +499,7 @@ export function sendClientUpdate(
 
 export function updateClient(
   id: string,
-  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active" | "reportSheetUrl">>
+  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
 ): Promise<Client> {
   return request(`/api/clients/${id}`, {
     method: "PATCH",
@@ -512,11 +545,19 @@ export interface WeeklyReportPreview {
   dailyDate?: string;
 }
 
-// Live-reads this client's linked Google Sheet for the current week's
-// numbers (see Client.reportSheetUrl) — no caching, always reflects
-// whatever's currently in the sheet.
-export function fetchWeeklyReportPreview(clientId: string): Promise<WeeklyReportPreview> {
-  return request(`/api/clients/${clientId}/weekly-report-preview`);
+// Live-reads one of this client's linked Google Sheets for the current week's
+// numbers (see Client.reportSheets) — no caching, always reflects whatever's
+// currently in the sheet.
+//
+// `marketplace` picks which sheet. It can be left off only when the client has
+// exactly one; with several linked the server refuses to guess rather than
+// answering with the wrong marketplace's figures.
+export function fetchWeeklyReportPreview(
+  clientId: string,
+  marketplace?: string
+): Promise<WeeklyReportPreview> {
+  const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : "";
+  return request(`/api/clients/${clientId}/weekly-report-preview${query}`);
 }
 
 // The three reports that can be sent to a client, each read from its own tab
@@ -537,8 +578,18 @@ export const REPORT_KIND_LABEL: Record<ReportKind, string> = {
 // `date` (YYYY-MM-DD) is the day the report is about: it picks the day a
 // daily report reads, and the week and month the other reports read. Left
 // off, it is today.
-export function fetchReportPreview(clientId: string, kind: ReportKind, date?: string): Promise<WeeklyReportPreview> {
-  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+// `marketplace` picks which of the client's sheets to read — see
+// fetchWeeklyReportPreview.
+export function fetchReportPreview(
+  clientId: string,
+  kind: ReportKind,
+  date?: string,
+  marketplace?: string
+): Promise<WeeklyReportPreview> {
+  const params = new URLSearchParams();
+  if (date) params.set("date", date);
+  if (marketplace) params.set("marketplace", marketplace);
+  const query = params.toString() ? `?${params}` : "";
   return request(`/api/clients/${clientId}/report-preview/${kind}${query}`);
 }
 

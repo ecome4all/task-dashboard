@@ -25,12 +25,50 @@ export const taskNoteRepository = {
     return Object.fromEntries(rows.map((r) => [r.taskId, r._count._all]));
   },
 
-  create(input: { taskId: string; authorId: string; authorName: string; body: string }) {
+  create(input: {
+    taskId: string;
+    authorId: string;
+    authorName: string;
+    body: string;
+    sendToClient?: boolean;
+  }) {
     return prisma.taskNote.create({ data: { ...input, tenantId: TENANT_ID } });
   },
 
   findById(id: string) {
     return prisma.taskNote.findFirst({ where: { id, tenantId: TENANT_ID } });
+  },
+
+  // Notes on this task that are meant for the client and haven't gone yet —
+  // what the next update message carries along with it. Oldest first, so they
+  // read in the order they were written.
+  listPendingForClient(taskId: string) {
+    return prisma.taskNote.findMany({
+      where: { tenantId: TENANT_ID, taskId, sendToClient: true, sentAt: null },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  // Same question for the whole board at once: which tasks have a note
+  // waiting to go. The Send button turns on for these even when no field has
+  // changed, since otherwise a note on a task nobody edits again could never
+  // reach the client.
+  async taskIdsWithPendingNotes(): Promise<Set<string>> {
+    const rows = await prisma.taskNote.groupBy({
+      by: ["taskId"],
+      where: { tenantId: TENANT_ID, sendToClient: true, sentAt: null },
+    });
+    return new Set(rows.map((row) => row.taskId));
+  },
+
+  // Marked only after the message carrying them actually went. A failed send
+  // leaves them pending, so they ride along with the next attempt rather than
+  // being quietly dropped.
+  markManySent(ids: string[]) {
+    return prisma.taskNote.updateMany({
+      where: { id: { in: ids } },
+      data: { sentAt: new Date() },
+    });
   },
 
   markSent(id: string) {
