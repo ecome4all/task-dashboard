@@ -101,6 +101,17 @@ export const clientRepository = {
     return prisma.clientWhatsappGroup.delete({ where: { id: groupRowId } });
   },
 
+  // Which client holds a given WhatsApp group, if any. Used to answer "already
+  // linked" with the name of the client holding it — without it, staff had 23
+  // rows to search to find out where the group had gone.
+  async findByGroupId(groupId: string) {
+    const row = await prisma.clientWhatsappGroup.findFirst({
+      where: { tenantId: TENANT_ID, groupId },
+      include: { client: true },
+    });
+    return row?.client ?? null;
+  },
+
   // Links a group to a client automatically, from task intake — see
   // taskIntake.ts for when this fires. Deliberately never *reassigns*: a
   // group already linked (to this client or any other) is left exactly as

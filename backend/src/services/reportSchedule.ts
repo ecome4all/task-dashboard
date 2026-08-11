@@ -1,5 +1,4 @@
 import { ReportKind, REPORT_KIND_LABEL, WeeklyReportPreview, isReportKind } from "./weeklyReportPreview";
-import { isZeroValue } from "./reportPeriod";
 
 // Gap between one client's message and the next. WhatsApp treats a burst of
 // identical-looking messages from one number as spam, and the account being
@@ -98,11 +97,11 @@ export function composeReportMessage(
   const lines = [reportHeading(kind, report, now), `Hi ${clientName}, here's your update:`];
 
   for (const section of report.sections) {
-    // Zeros are left out, the same as they are left unticked on the Reports
-    // screen: "Spend: 0, Order: 0, Sales: 0" tells a client nothing. Nobody is
-    // here to untick them on a scheduled send, so it is done for them.
-    const worthSending = section.fields.filter((f) => !isZeroValue(f.value));
-    if (worthSending.length === 0) continue;
+    // Zeros go out too, at Ecom4all's request: a zero is a real figure about
+    // the account — nothing spent, nothing sold — and a line missing from an
+    // otherwise complete report raises a question a zero doesn't. Spreadsheet
+    // error cells are still dropped upstream; those are not figures.
+    if (section.fields.length === 0) continue;
 
     lines.push("");
     // Only the SKU report names its sections. Its sections are products, and
@@ -111,19 +110,22 @@ export function composeReportMessage(
     // it again just says "Daily — 9 August" under "Daily Update — 9 August".
     if (kind === "weekly_sku") lines.push(`*${section.source}*`);
 
-    for (const field of worthSending) lines.push(`${field.label}: ${field.value}`);
+    for (const field of section.fields) lines.push(`${field.label}: ${field.value}`);
   }
 
   lines.push("", "— Team Ecom4all");
   return lines.join("\n");
 }
 
-// Whether there is a report here at all. Sections can exist and still hold
-// nothing worth sending — a period filled in as all zeros — and without this
-// that client would get the heading, the greeting and the sign-off with no
-// figures between them.
+// Whether there is a report here at all. A section can exist with no fields
+// left in it — every column blank, or holding a spreadsheet error — and
+// without this that client would get the heading, the greeting and the
+// sign-off with nothing between them.
+//
+// A period of genuine zeros counts as a report: zeros are sent, at Ecom4all's
+// request. See composeReportMessage.
 export function hasSomethingToSend(report: WeeklyReportPreview): boolean {
-  return report.sections.some((section) => section.fields.some((f) => !isZeroValue(f.value)));
+  return report.sections.some((section) => section.fields.length > 0);
 }
 
 export type SkipReason = "no figures for this period" | "nowhere to send it" | "couldn't open the sheet";

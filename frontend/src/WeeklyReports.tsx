@@ -62,25 +62,18 @@ function sendTargetFor(state: ClientReportState): { value: string; label: string
   return { value: chosen.groupId, label: chosen.groupName ?? chosen.groupId };
 }
 
-// A cell holding a nought, however the sheet writes it: "0", "0.00", "0%",
-// "₹0". Kept the same as isZeroValue in backend/src/services/reportPeriod.ts —
-// the automatic send applies the same rule with nobody there to tick.
-function isZeroText(value: string): boolean {
-  const cleaned = value.trim().replace(/[,\s%₹$]/g, "");
-  if (cleaned === "") return false;
-  const asNumber = Number(cleaned);
-  return !Number.isNaN(asNumber) && asNumber === 0;
-}
-
-// Everything starts ticked except a zero. "Spend: 0, Order: 0, Sales: 0" tells
-// a client nothing, so picking a client ticks the lines that say something and
-// leaves the noughts alone — still on screen, so it's clear they're noughts
-// rather than lines that went missing, and still tickable if you want one.
+// Everything starts ticked, noughts included.
+//
+// They were left unticked for a while, on the reasoning that "Spend: 0,
+// Order: 0, Sales: 0" tells a client nothing. Ecom4all asked for the opposite:
+// a zero is a real figure about their account — it says nothing was spent and
+// nothing sold that day — and a line quietly missing from an otherwise
+// complete report raises a question a zero doesn't. Untick one to leave it out.
 function isIncluded(state: ClientReportState, source: string, field: ReportField): boolean {
-  return state.included[fieldKey(source, field)] ?? !isZeroText(field.value);
+  return state.included[fieldKey(source, field)] ?? true;
 }
 
-// Whether this client has anything left to send once the noughts are out.
+// Whether this client has anything ticked to send.
 function hasSomethingToSend(state: ClientReportState): boolean {
   return (state.preview?.sections ?? []).some((section) =>
     section.fields.some((field) => isIncluded(state, section.source, field))
@@ -203,7 +196,7 @@ function notSendableReason(state: ClientReportState): string {
   if (state.loading) return "still reading the sheet";
   if (state.loadError) return "sheet could not be read";
   if (!state.preview || state.preview.sections.length === 0) return "no numbers for this date";
-  if (!hasSomethingToSend(state)) return "every figure is zero — nothing to say";
+  if (!hasSomethingToSend(state)) return "every line has been unticked";
   if (!sendTargetFor(state)) return "no WhatsApp group or phone saved";
   return "";
 }
@@ -317,10 +310,9 @@ export default function WeeklyReports() {
     });
   }
 
-  // Ticking a client with every figure at zero would send a heading, a
-  // greeting and a sign-off with nothing between them, so "ready" means there
-  // is something left once the noughts are out — not merely that the sheet
-  // had rows.
+  // "Ready" means there is at least one line ticked. Untick every line of a
+  // client's report and they would otherwise be sent a heading, a greeting and
+  // a sign-off with nothing between them.
   const ready = states.filter(
     (s) => s.preview && s.preview.sections.length > 0 && hasSomethingToSend(s) && sendTargetFor(s)
   );
@@ -399,9 +391,9 @@ export default function WeeklyReports() {
         </div>
         <p className="tip">
           💡 Pulls the numbers straight from each client's report sheet — nothing to paste. Pick the report and
-          the period, then tick the clients you want. Ticking a client picks its figures for you, leaving out any
-          that are zero — untick a row to drop it, tick a zero to put it back. Nothing is sent to a client you
-          haven't ticked. A client with no sheet linked (see Clients) won't show up here.
+          the period, then tick the clients you want. Ticking a client picks all of its figures, zeros included —
+          untick any row you don't want in their message. Nothing is sent to a client you haven't ticked. A
+          client with no sheet linked (see Clients) won't show up here.
         </p>
         <div className="panel-body">
           <div className="filter-chips">
@@ -593,8 +585,8 @@ export default function WeeklyReports() {
                         )}
                         <div className="panel-sub" style={{ marginBottom: 8 }}>
                           {selected[state.client.id]
-                            ? "Lines going in their message. Zeros were left out — tick one to put it back."
-                            : `Tick "Send to ${state.client.name}" above to include this client. Its figures below will tick themselves, apart from any zeros.`}
+                            ? "Lines going in their message — untick any you don't want."
+                            : `Tick "Send to ${state.client.name}" above to include this client. All of its figures below will tick themselves.`}
                         </div>
                         {state.preview.sections.map((section) => (
                           <div key={section.source} style={{ marginBottom: 14 }}>

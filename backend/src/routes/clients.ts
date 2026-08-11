@@ -132,8 +132,21 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     } catch (err) {
       // P2002: unique constraint on (tenantId, groupId) — this chat_id is
       // already linked to some client (maybe this one, maybe another).
+      //
+      // Which client is the whole answer. A group belongs to one client, so
+      // the fix is either "unlink it there first" or "you already have it" —
+      // and "already linked to a client" left staff hunting through 23 rows
+      // to find out which. Two clients here are called Amezia and Amrezia,
+      // and the same group had been typed into both.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        res.status(409).json({ error: "This WhatsApp group is already linked to a client." });
+        const owner = await clientRepository.findByGroupId(groupId.trim());
+        res.status(409).json({
+          error: owner
+            ? owner.id === req.params.id
+              ? `${owner.name} already has this WhatsApp group.`
+              : `This WhatsApp group belongs to ${owner.name}. Unlink it there first, then add it here.`
+            : "This WhatsApp group is already linked to a client.",
+        });
         return;
       }
       throw err;

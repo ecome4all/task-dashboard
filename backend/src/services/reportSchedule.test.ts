@@ -171,9 +171,10 @@ describe("composeReportMessage", () => {
     );
   });
 
-  // Nobody is there to untick on a scheduled send, so "Spend: 0" would go to
-  // the client as-is.
-  it("leaves noughts out", () => {
+  // Ecom4all asked for these: a zero is a real figure about the account —
+  // nothing spent, nothing sold — and a line missing from an otherwise
+  // complete report raises a question a zero doesn't.
+  it("sends noughts like any other figure", () => {
     const withZeros: WeeklyReportPreview = {
       ...REPORT,
       sections: [
@@ -183,29 +184,27 @@ describe("composeReportMessage", () => {
             { label: "Spend", value: "0" },
             { label: "Sales", value: "₹1,462" },
             { label: "Acos", value: "0.00%" },
-            { label: "Orders", value: "0" },
           ],
         },
       ],
     };
     const msg = composeReportMessage("A", "weekly_sales", withZeros, MONDAY_10AM);
+    expect(msg).toContain("Spend: 0");
     expect(msg).toContain("Sales: ₹1,462");
-    expect(msg).not.toContain("Spend");
-    expect(msg).not.toContain("Acos");
-    expect(msg).not.toContain("Orders");
+    expect(msg).toContain("Acos: 0.00%");
   });
 
-  // A section left with nothing but noughts must not print its own name with
-  // no figures under it.
-  it("drops a section that was all noughts", () => {
-    const allZero: WeeklyReportPreview = {
+  // A section with nothing left in it — every column blank, or an error cell
+  // dropped upstream — must not print its own name with no figures under it.
+  it("drops a section that has no figures left at all", () => {
+    const empty: WeeklyReportPreview = {
       ...REPORT,
       sections: [
-        { source: "TR04-B", fields: [{ label: "Spend", value: "0" }] },
+        { source: "TR04-B", fields: [] },
         { source: "TR05-C", fields: [{ label: "Sales", value: "₹120" }] },
       ],
     };
-    const msg = composeReportMessage("A", "weekly_sku", allZero, MONDAY_10AM);
+    const msg = composeReportMessage("A", "weekly_sku", empty, MONDAY_10AM);
     expect(msg).not.toContain("TR04-B");
     expect(msg).toContain("*TR05-C*");
   });
@@ -225,7 +224,9 @@ describe("hasSomethingToSend", () => {
     expect(hasSomethingToSend(REPORT)).toBe(true);
   });
 
-  it("is false when every figure is a nought", () => {
+  // A period of genuine zeros is a report — nothing was spent and nothing
+  // sold, which is a fact about the account rather than a gap in it.
+  it("is true when the figures are all noughts", () => {
     const allZero: WeeklyReportPreview = {
       ...REPORT,
       sections: [
@@ -234,12 +235,15 @@ describe("hasSomethingToSend", () => {
           fields: [
             { label: "Spend", value: "0" },
             { label: "Sales", value: "₹0" },
-            { label: "Acos", value: "0.00%" },
           ],
         },
       ],
     };
-    expect(hasSomethingToSend(allZero)).toBe(false);
+    expect(hasSomethingToSend(allZero)).toBe(true);
+  });
+
+  it("is false when a section has no figures left in it", () => {
+    expect(hasSomethingToSend({ ...REPORT, sections: [{ source: "TR04-B", fields: [] }] })).toBe(false);
   });
 
   it("is false when the sheet had no rows at all", () => {

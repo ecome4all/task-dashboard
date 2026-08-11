@@ -45,6 +45,9 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  // Per client, so a failed "+ Add" is answered beside the button that failed
+  // rather than only in the banner at the top of a long list.
+  const [groupError, setGroupError] = useState<Record<string, string>>({});
 
   async function load() {
     setLoading(true);
@@ -169,7 +172,14 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
 
   async function handleAddGroup(client: Client) {
     const groupId = (newGroupId[client.id] ?? "").trim();
-    if (!groupId) return;
+    setGroupError((prev) => ({ ...prev, [client.id]: "" }));
+
+    // Pressing Add with an empty box used to do nothing and say nothing.
+    if (!groupId) {
+      setGroupError((prev) => ({ ...prev, [client.id]: "Paste the group id first." }));
+      return;
+    }
+
     setActionError("");
     try {
       const group = await addClientWhatsappGroup(client.id, groupId, newGroupName[client.id]?.trim());
@@ -179,7 +189,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
       setNewGroupId((prev) => ({ ...prev, [client.id]: "" }));
       setNewGroupName((prev) => ({ ...prev, [client.id]: "" }));
     } catch (err) {
-      setActionError(errorMessage(err));
+      setGroupError((prev) => ({ ...prev, [client.id]: errorMessage(err) }));
     }
   }
 
@@ -440,6 +450,16 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                         + Add
                       </button>
                     </div>
+                    {/* Beside the button that failed. This used to report only
+                        into the banner at the top of the screen, which on a
+                        list of 23 clients is well out of view by the time you
+                        are adding a group — so "+ Add" looked like it did
+                        nothing at all. */}
+                    {groupError[client.id] && (
+                      <div style={{ color: "var(--danger, #b42318)", fontSize: 12, marginTop: 6, maxWidth: 260 }}>
+                        {groupError[client.id]}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <input
