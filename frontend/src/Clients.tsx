@@ -433,10 +433,17 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                       <input
                         className="field-input"
                         type="text"
-                        placeholder="Group id"
+                        placeholder="Group id, e.g. 1203634…@g.us"
                         value={newGroupId[client.id] ?? ""}
                         onChange={(e) => setNewGroupId((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                        style={{ width: 110, fontSize: 12 }}
+                        // Every WhatsApp group id begins 120363…, so the part
+                        // that identifies one is the end. At 110px the whole
+                        // of that was off-screen: you could not see what you
+                        // had pasted, and two different groups looked
+                        // identical — which matters here, where one client's
+                        // number can have a separate group per marketplace.
+                        title={newGroupId[client.id] ?? ""}
+                        style={{ width: 230, fontSize: 12 }}
                       />
                       <input
                         className="field-input"
