@@ -109,6 +109,28 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     ? findEmployeeMention(details.description, await employeeRepository.list())
     : null;
 
+  // seenMessages.ts already turns a redelivered webhook away by its message
+  // id, but it holds those ids in memory — a redelivery arriving either side
+  // of a restart or a redeploy finds an empty list and gets straight through.
+  // That is what produced two tasks, two "Got it, logged" replies and two
+  // alerts from one client message. This catches it on what was written
+  // rather than on what the provider called it, so a restart doesn't matter.
+  //
+  // Returning early skips the acknowledgement as well as the task: the client
+  // was already told the first time, and being answered twice for one message
+  // is the part they actually see.
+  const alreadyLogged = await taskRepository.findDuplicateOf(
+    { description: mention ? mention.description : details.description, sourceRef: params.chatId },
+    new Date()
+  );
+  if (alreadyLogged) {
+    console.log(
+      `[intake] "${alreadyLogged.description}" was logged moments ago from the same chat — ` +
+        `treating this as a redelivery of the same message, not a second task.`
+    );
+    return alreadyLogged;
+  }
+
   const task = await taskRepository.create({
     source: params.source,
     sourceRef: params.chatId,

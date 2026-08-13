@@ -5,6 +5,7 @@ import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
 import { isFrequency, firstRunAt } from "../services/recurrence";
 import { taskVisibilityFor } from "../services/taskVisibility";
+import { whyRepeatWouldDuplicate } from "../services/repeatDuplicates";
 
 // Same audience as due dates: setting up work that will keep appearing on
 // everyone's board is a scheduling decision, not day-to-day triage.
@@ -52,6 +53,21 @@ export function createRecurringTasksRouter() {
     const task = await taskRepository.findById(taskId);
     if (!task) {
       res.status(404).json({ error: "task not found" });
+      return;
+    }
+
+    // Checked against every repeat, not only the ones this person can see:
+    // a member's board hides a manager's repeats, but a hidden duplicate
+    // still fires. Refusing is right rather than merely warning — the cost of
+    // a wrong refusal is one visit to the Repeating Tasks screen, and the cost
+    // of a wrong allow is a second copy of a task every week from then on,
+    // messaged to whoever it lands on each time.
+    const duplicate = whyRepeatWouldDuplicate(
+      { description: task.description, assignee: task.assignee },
+      await recurringTaskRepository.list()
+    );
+    if (duplicate) {
+      res.status(409).json({ error: duplicate });
       return;
     }
 

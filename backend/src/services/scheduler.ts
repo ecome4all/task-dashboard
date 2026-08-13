@@ -44,34 +44,66 @@ function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-// Creates the Task a repeat is due for, then moves its clock forward. Order
-// matters: if creating the task throws, the clock is left alone so the next
-// tick retries rather than silently skipping this run.
+// Moves a due repeat's clock forward, then creates the Task it was due for.
+// Claiming first is what stops the same run producing two identical tasks —
+// see recurringTaskRepository.claim. A claim that fails means another pass
+// already has this run, so this one leaves it alone.
 export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels): Promise<number> {
   const due = await recurringTaskRepository.due(now);
   let created = 0;
 
   for (const repeat of due) {
     try {
-      // Carries the triage across too (employee/type/marketplace), so a
-      // repeat doesn't come back on the board stripped of decisions someone
-      // already made on the task it was created from.
-      const task = await taskRepository.create({
-        source: repeat.source,
-        sourceRef: repeat.sourceRef,
-        description: repeat.description,
-        chatName: repeat.chatName ?? undefined,
-        clientName: repeat.clientName ?? undefined,
-        assignee: repeat.assignee,
-        taskType: repeat.taskType,
-        marketplace: repeat.marketplace,
-      });
-
-      await recurringTaskRepository.markRun(
+      const claimed = await recurringTaskRepository.claim(
         repeat.id,
+        repeat.nextRunAt,
         now,
         advanceNextRunAt(repeat.nextRunAt, repeat.frequency as Frequency, now)
       );
+      if (!claimed) {
+        console.log(`[scheduler] repeat "${repeat.description}" already run by another pass — left alone`);
+        continue;
+      }
+
+      // Two repeats of the same work can already exist — setting them up is
+      // refused now, but the pairs made before that still fire, a second apart
+      // in this very loop. The first one through creates the task; the second
+      // finds it here and stops, so nobody gets told twice about one job.
+      const alreadyThere = await taskRepository.findDuplicateOf(
+        { description: repeat.description, sourceRef: repeat.sourceRef },
+        now
+      );
+      if (alreadyThere) {
+        console.log(
+          `[scheduler] "${repeat.description}" was already created a moment ago — ` +
+            `this repeat is a duplicate of another one. Remove it on the Repeating Tasks screen.`
+        );
+        continue;
+      }
+
+      let task;
+      try {
+        // Carries the triage across too (employee/type/marketplace), so a
+        // repeat doesn't come back on the board stripped of decisions someone
+        // already made on the task it was created from.
+        task = await taskRepository.create({
+          source: repeat.source,
+          sourceRef: repeat.sourceRef,
+          description: repeat.description,
+          chatName: repeat.chatName ?? undefined,
+          clientName: repeat.clientName ?? undefined,
+          assignee: repeat.assignee,
+          taskType: repeat.taskType,
+          marketplace: repeat.marketplace,
+        });
+      } catch (err) {
+        // Nothing was created, so hand the run back: the clock returns to what
+        // it was and the next tick tries again. Only the claim is undone — a
+        // repeat is never left further ahead than it started.
+        await recurringTaskRepository.releaseClaim(repeat.id, repeat.nextRunAt, repeat.lastRunAt);
+        throw err;
+      }
+
       created += 1;
 
       // A repeat that carries an assignee is a fresh piece of work landing on
@@ -270,30 +302,52 @@ async function tellStaffWhatWentOut(
   }
 }
 
+// A tick has no time limit of its own, and one of them can genuinely outlast
+// the five minutes until the next: a report round sends every client five
+// seconds apart, and reads a Google sheet for each. setInterval doesn't wait,
+// so without this two passes would run over each other — both seeing the same
+// due repeats, both about to create the same tasks. The claim in
+// runDueRecurringTasks would now catch that, but a tick skipped whole is
+// cheaper than one raced and half-discarded, and it keeps the report round
+// single-file too.
+let ticking = false;
+
 async function tick(channels: WhatsAppChannels) {
+  if (ticking) {
+    console.log("[scheduler] previous pass still running — skipping this one");
+    return;
+  }
+  ticking = true;
   const now = new Date();
 
+  // finally, not the end of the happy path: a throw that escaped the three
+  // guards below would otherwise leave this stuck on, and the scheduler would
+  // never run again until the next redeploy.
   try {
-    await runDueRecurringTasks(now, channels);
-  } catch (err) {
-    console.error("[scheduler] recurring task pass failed:", err);
-  }
-
-  try {
-    await runScheduledReports(now, channels);
-  } catch (err) {
-    console.error("[scheduler] scheduled report round failed:", err);
-  }
-
-  try {
-    const today = dateKey(now);
-    if (now.getHours() === reminderHour() && lastReminderDate !== today) {
-      lastReminderDate = today;
-      const sent = await sendEmployeeReminders(now, channels);
-      console.log(`[scheduler] sent ${sent} employee reminder(s)`);
+    try {
+      await runDueRecurringTasks(now, channels);
+    } catch (err) {
+      console.error("[scheduler] recurring task pass failed:", err);
     }
-  } catch (err) {
-    console.error("[scheduler] reminder pass failed:", err);
+
+    try {
+      await runScheduledReports(now, channels);
+    } catch (err) {
+      console.error("[scheduler] scheduled report round failed:", err);
+    }
+
+    try {
+      const today = dateKey(now);
+      if (now.getHours() === reminderHour() && lastReminderDate !== today) {
+        lastReminderDate = today;
+        const sent = await sendEmployeeReminders(now, channels);
+        console.log(`[scheduler] sent ${sent} employee reminder(s)`);
+      }
+    } catch (err) {
+      console.error("[scheduler] reminder pass failed:", err);
+    }
+  } finally {
+    ticking = false;
   }
 }
 

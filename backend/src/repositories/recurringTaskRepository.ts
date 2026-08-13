@@ -57,13 +57,28 @@ export const recurringTaskRepository = {
     });
   },
 
-  // Records that a run happened and when the next one is due. Kept as one
-  // write so a crash between "task created" and "clock advanced" can't leave
-  // a repeat that fires again on the very next scheduler tick.
-  markRun(id: string, ranAt: Date, nextRunAt: Date) {
-    return prisma.recurringTask.update({
-      where: { id },
+  // Takes a due repeat *before* its task is made, and says whether it got it.
+  // Guarded on the nextRunAt that was read a moment ago, so if two passes are
+  // ever in flight over the same repeat — a tick that ran long and overlapped
+  // the next one, or a second copy of the backend — only the first one to
+  // write matches the row. The other is told no, and creates nothing.
+  //
+  // Claiming first is the opposite of what this did before, when the task was
+  // created and the clock moved afterwards. That order retried a failed run on
+  // the next tick, which is the nicer failure; but its other half was creating
+  // the same task twice, which reaches whoever it lands on. releaseClaim below
+  // keeps the retry without the duplicate.
+  async claim(id: string, expectedNextRunAt: Date, ranAt: Date, nextRunAt: Date): Promise<boolean> {
+    const { count } = await prisma.recurringTask.updateMany({
+      where: { id, tenantId: TENANT_ID, nextRunAt: expectedNextRunAt },
       data: { lastRunAt: ranAt, nextRunAt },
     });
+    return count === 1;
+  },
+
+  // Puts the clock back when the task a claim was taken for could not be
+  // created, so the next tick tries that run again rather than skipping it.
+  releaseClaim(id: string, nextRunAt: Date, lastRunAt: Date | null) {
+    return prisma.recurringTask.update({ where: { id }, data: { nextRunAt, lastRunAt } });
   },
 };

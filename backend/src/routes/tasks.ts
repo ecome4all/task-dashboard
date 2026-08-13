@@ -158,6 +158,20 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       }
     }
 
+    // A second submit of the same form — a double click, a slow save pressed
+    // again, the page restored and sent twice — gives back the task that was
+    // already made instead of a second copy of it. Deliberately not an error:
+    // from the person's side the task they asked for exists, which is what
+    // they wanted, and an error would have them press it a third time.
+    const alreadyThere = await taskRepository.findDuplicateOf(
+      { description: description.trim(), sourceRef },
+      new Date()
+    );
+    if (alreadyThere) {
+      res.status(200).json(alreadyThere);
+      return;
+    }
+
     const task = await taskRepository.create({
       source,
       sourceRef,

@@ -10,7 +10,7 @@ import { WhatsAppAdapter } from "../whatsapp/whatsappAdapter";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 
 vi.mock("../repositories/taskRepository", () => ({
-  taskRepository: { create: vi.fn() },
+  taskRepository: { create: vi.fn(), findDuplicateOf: vi.fn() },
 }));
 vi.mock("../repositories/clientRepository", () => ({
   clientRepository: { findByChatId: vi.fn(), ensureGroupLinked: vi.fn() },
@@ -49,6 +49,10 @@ function fakeChannels(): WhatsAppChannels & { whapi: ReturnType<typeof fakeAdapt
 describe("handleIncomingTaskMessage", () => {
   beforeEach(() => {
     vi.mocked(taskRepository.create).mockReset();
+    // Nothing logged a moment ago, unless a test says otherwise — see the
+    // redelivery case at the bottom of this file.
+    vi.mocked(taskRepository.findDuplicateOf).mockReset();
+    vi.mocked(taskRepository.findDuplicateOf).mockResolvedValue(null);
     vi.mocked(clientRepository.findByChatId).mockReset();
     vi.mocked(clientRepository.ensureGroupLinked).mockReset();
     vi.mocked(clientRepository.ensureGroupLinked).mockResolvedValue(null);
@@ -304,6 +308,10 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
 
   beforeEach(() => {
     vi.mocked(taskRepository.create).mockReset();
+    // Nothing logged a moment ago, unless a test says otherwise — see the
+    // redelivery case at the bottom of this file.
+    vi.mocked(taskRepository.findDuplicateOf).mockReset();
+    vi.mocked(taskRepository.findDuplicateOf).mockResolvedValue(null);
     vi.mocked(clientRepository.findByChatId).mockReset();
     vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "BagsGuru" } as any);
     vi.mocked(clientRepository.ensureGroupLinked).mockReset();
@@ -481,5 +489,73 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
     });
 
     expect(taskNoteRepository.create).not.toHaveBeenCalled();
+  });
+
+  // A webhook redelivery either side of a restart, which seenMessages.ts
+  // cannot catch — it holds message ids in memory. What the client sees is
+  // the part that matters: one message, one reply.
+  describe("a message that has already been logged", () => {
+    beforeEach(() => {
+      vi.mocked(clientRepository.findByChatId).mockResolvedValue({
+        id: "client-1",
+        name: "Forensic Files",
+      } as any);
+      vi.mocked(taskRepository.findDuplicateOf).mockResolvedValue({
+        id: "task-first",
+        description: "reduce stock to 5",
+      } as any);
+    });
+
+    it("does not create a second task", async () => {
+      await handleIncomingTaskMessage({
+        source: "whatsapp_group",
+        chatId: "group-1@g.us",
+        text: "task: reduce stock to 5",
+        channels: fakeChannels(),
+      });
+
+      expect(taskRepository.create).not.toHaveBeenCalled();
+    });
+
+    it("does not acknowledge the client a second time", async () => {
+      const channels = fakeChannels();
+
+      await handleIncomingTaskMessage({
+        source: "whatsapp_group",
+        chatId: "group-1@g.us",
+        text: "task: reduce stock to 5",
+        channels,
+      });
+
+      expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("gives back the task that was already made", async () => {
+      const task = await handleIncomingTaskMessage({
+        source: "whatsapp_group",
+        chatId: "group-1@g.us",
+        text: "task: reduce stock to 5",
+        channels: fakeChannels(),
+      });
+
+      expect(task).toMatchObject({ id: "task-first" });
+    });
+
+    // Matched on the same chat and the same wording — the description the
+    // task would have been created with, after the due date and any tagged
+    // number have been taken out of it.
+    it("looks for the duplicate in the chat it arrived from", async () => {
+      await handleIncomingTaskMessage({
+        source: "whatsapp_group",
+        chatId: "group-1@g.us",
+        text: "task: reduce stock to 5",
+        channels: fakeChannels(),
+      });
+
+      expect(taskRepository.findDuplicateOf).toHaveBeenCalledWith(
+        { description: "reduce stock to 5", sourceRef: "group-1@g.us" },
+        expect.any(Date)
+      );
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { prisma } from "../db";
 import { TaskVisibility } from "../services/taskVisibility";
+import { DUPLICATE_WINDOW_MS, pickDuplicate } from "../services/duplicateTasks";
 
 const TENANT_ID = "default";
 
@@ -50,6 +51,28 @@ export const taskRepository = {
     return prisma.task.create({
       data: { ...input, tenantId: TENANT_ID },
     });
+  },
+
+  // The task this one would be a second copy of, or null. Narrowed in the
+  // query to the same chat inside the window, which is a handful of rows at
+  // most; the wording itself is compared in JS so the match doesn't depend on
+  // the database's collation — see services/duplicateTasks.
+  //
+  // Called before creating, never inside create(), so each of the three places
+  // a task is made can do the right thing with the answer. They differ: intake
+  // must not send the client a second acknowledgement, the scheduler must not
+  // alert the assignee again, and the board should show the person the task
+  // they already made rather than an error.
+  async findDuplicateOf(input: { description: string; sourceRef: string }, now: Date) {
+    const candidates = await prisma.task.findMany({
+      where: {
+        tenantId: TENANT_ID,
+        sourceRef: input.sourceRef,
+        createdAt: { gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS) },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return pickDuplicate(input, candidates);
   },
 
   // Filtered in the query rather than after it: a member's own board is
