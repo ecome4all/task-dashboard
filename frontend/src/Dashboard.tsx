@@ -65,6 +65,29 @@ function toDateInputValue(dueDate: string | null): string {
   return dueDate ? dueDate.slice(0, 10) : "";
 }
 
+// A date and time in a table cell, on two lines. toLocaleString() gave
+// "8/13/2026, 2:18:13 PM" as one long run, and three of those columns took
+// enough width to squeeze the task's own words into four wrapped lines. The
+// seconds go: nothing on this board is decided by them. "13 Aug 2026" rather
+// than "13/08/2026" because a board read by people in two countries should not
+// depend on knowing which way round the numbers go.
+function Stamp({ value, dateOnly = false }: { value: string | null; dateOnly?: boolean }) {
+  if (!value) return <span className="cell-empty">—</span>;
+
+  const when = new Date(value);
+  const day = when.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  if (dateOnly) return <span className="stamp">{day}</span>;
+
+  return (
+    <span className="stamp">
+      {day}
+      <span className="stamp-time">
+        {when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+      </span>
+    </span>
+  );
+}
+
 // The day a timestamp falls on where the person reading the screen is, as
 // yyyy-mm-dd. Not toISOString().slice(0, 10), which is UTC — a task created
 // at 8pm in India would report the day before, and then not show up when
@@ -622,12 +645,36 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
             )}
           </div>
 
-          <table className="data-table">
+          <table className="data-table tasks-table">
+            {/* Every column is sized here except Task, which is left to take
+                whatever is left over — it holds the only free text on the row,
+                and it was the column being squeezed into four wrapped lines
+                while three timestamps sat half empty beside it. */}
+            <colgroup>
+              <col />
+              <col className="col-client" />
+              <col className="col-group" />
+              <col className="col-pick" />
+              <col className="col-pick" />
+              <col className="col-pick" />
+              <col className="col-pick" />
+              <col className="col-when" />
+              <col className="col-due" />
+              <col className="col-when" />
+              <col className="col-when" />
+              <col className="col-btn" />
+              {canRepeat && <col className="col-btn" />}
+              <col className="col-btn" />
+              {canDelete && <col className="col-icon" />}
+            </colgroup>
             <thead>
               <tr>
                 <th>Task</th>
                 <th>Client</th>
-                <th>Source</th>
+                {/* "Source" was here. It said whatsapp_group on almost every
+                    row, in the database's words rather than anyone's, and the
+                    WhatsApp Group column beside it already says where a task
+                    came from in a way that means something. */}
                 <th>WhatsApp Group</th>
                 <th>Marketplace</th>
                 <th>Type</th>
@@ -647,10 +694,9 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               {paged.items.map((task) => (
                 <Fragment key={task.id}>
                 <tr>
-                  <td>{task.description}</td>
+                  <td className="cell-task">{task.description}</td>
                   <td>{task.clientName ?? "—"}</td>
-                  <td>{task.source}</td>
-                  <td>{task.chatName ?? "—"}</td>
+                  <td className="cell-muted">{task.chatName ?? "—"}</td>
                   <td>
                     <SearchableSelect
                       value={task.marketplace ?? ""}
@@ -688,7 +734,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                       onChange={(value) => handleStatusChange(task, value)}
                     />
                   </td>
-                  <td>{new Date(task.createdAt).toLocaleString()}</td>
+                  <td><Stamp value={task.createdAt} /></td>
                   <td>
                     {canSetDueDate ? (
                       <input
@@ -698,11 +744,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                         onChange={(e) => handleDueDateChange(task, e.target.value)}
                       />
                     ) : (
-                      task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "—"
+                      task.dueDate ? <Stamp value={task.dueDate} dateOnly /> : <span className="cell-empty">—</span>
                     )}
                   </td>
-                  <td>{new Date(task.updatedAt).toLocaleString()}</td>
-                  <td>{task.doneAt ? new Date(task.doneAt).toLocaleString() : "—"}</td>
+                  <td><Stamp value={task.updatedAt} /></td>
+                  <td><Stamp value={task.doneAt} /></td>
                   <td>
                     <button
                       className={`btn btn-sm ${openNotesTaskId === task.id ? "btn-primary" : "btn-ghost"}`}
@@ -763,7 +809,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 </tr>
                 {canRepeat && openRepeatTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={14 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
+                    <td colSpan={13 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <div className="repeat-form">
                         <div>
                           <label className="fact-label">How often</label>
@@ -806,7 +852,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 )}
                 {openNotesTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={14 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
+                    <td colSpan={13 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <TaskNotes
                         taskId={task.id}
                         user={user}

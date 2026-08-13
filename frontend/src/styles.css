@@ -49,38 +49,46 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .login-page-credit { position: fixed; bottom: 16px; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; color: var(--text); opacity: 0.55; }
 
 /* ---- app shell ---- */
-.shell { display: flex; min-height: 100svh; }
-/* Sticky and full-height so the whole panel — logo, credit and menu — stays
-   on screen while a long task table scrolls past it. */
-.sidebar {
-  width: 168px; flex-shrink: 0; background: var(--bg-alt); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; padding: 14px 12px;
-  position: sticky; top: 0; height: 100svh;
-}
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 4px 6px; }
-/* Directly under the logo rather than pinned to the bottom of the panel,
-   where a long menu or a short window pushed it out of sight. */
+/* A column: identity and account across the top, then the menu, then the
+   screen. The menu was a 168px column down the left — permanent width spent
+   on seven words, taken from the one screen that needs it most. */
+.shell { display: flex; flex-direction: column; min-height: 100svh; }
+/* Shared with the login card, which centres it — so the "push everything
+   else to the right" part belongs to the top bar, not to .brand itself. */
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.topbar .brand { margin-right: auto; }
 .brand-credit {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  padding: 0 4px 14px; font-size: 12px; color: var(--text); opacity: 0.7;
+  display: inline-flex; align-items: baseline; gap: 5px;
+  font-size: 12px; color: var(--text); opacity: 0.7; white-space: nowrap;
 }
 .brand-mark { border-radius: 7px; flex-shrink: 0; object-fit: contain; }
 .brand-logo { display: inline-flex; align-items: center; border-radius: 8px; }
 .brand-logo img { display: block; }
-/* Scrolls within itself if the menu ever outgrows the panel, so a new nav
-   item can never push the logo or the credit off screen. */
-.nav { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
-.nav-item { display: block; width: 100%; text-align: left; padding: 9px 11px; border-radius: 8px; border: none; background: transparent; color: var(--text); font-size: 13.5px; cursor: pointer; }
-.nav-item:hover { background: var(--border); }
-.nav-item.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* Underlined tabs rather than the filled pills the side menu used: read
+   left to right, a row of solid blocks competes with the page below it,
+   while an underline marks the current screen and gets out of the way.
+   Scrolls sideways rather than wrapping, so the bar stays one row high
+   however many screens get added. */
+.topnav {
+  display: flex; gap: 2px; padding: 0 28px; background: var(--bg);
+  border-bottom: 1px solid var(--border); overflow-x: auto;
+  position: sticky; top: 0; z-index: 100;
+}
+.nav-item {
+  padding: 11px 14px; border: none; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--text); font-size: 13.5px;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.nav-item:hover { background: var(--bg-alt); }
+.nav-item.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .credit-logo { font-size: 13px; letter-spacing: -0.01em; }
 .credit-logo .ai { color: var(--text-h); font-weight: 700; }
 .credit-logo .four { color: oklch(0.72 0.2 132); font-weight: 800; }
 .credit-logo .work { color: #9a9a9a; font-weight: 400; }
 
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.topbar { display: flex; align-items: center; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--border); }
-.topbar .who { font-size: 16px; margin-right: auto; }
+.topbar { display: flex; align-items: center; gap: 16px; padding: 12px 28px; }
+.topbar .who { font-size: 15px; }
 /* Your name opens your own account screen, so it's a real button — stripped
    back to reading as plain text, since it sits in a bar that already has a
    proper button next to it and shouldn't look like a second one. */
@@ -88,37 +96,22 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .topbar button.who:hover .name { text-decoration: underline; }
 .topbar .who .name { font-weight: 600; color: var(--text-h); }
 .topbar .who .role { color: var(--text); opacity: 0.6; margin-left: 8px; font-size: 14px; }
-.view { padding: 24px 28px 48px; max-width: 1600px; }
-
-/* Only shown below the mobile breakpoint (see media query) — opens the
-   sidebar as a slide-in overlay instead of it always taking up a column. */
-.nav-toggle {
-  display: none; border: 1px solid var(--border); background: var(--bg);
-  border-radius: 8px; width: 38px; height: 38px; font-size: 18px; cursor: pointer;
-  align-items: center; justify-content: center; flex-shrink: 0;
-}
-.sidebar-backdrop { display: none; }
+/* No max-width now the menu isn't taking a column: on a wide screen the task
+   table gets the whole window rather than stopping at 1600px with the nav's
+   old 168px still notionally reserved beside it. */
+.view { padding: 24px 28px 48px; }
 
 /* ---- mobile layout ---- */
-/* The sidebar is a fixed-position column on desktop; below this width it
-   becomes a slide-in overlay (off-screen by default, toggled via the
-   hamburger button in the topbar) so the page content gets the full
-   screen width instead of losing a chunk of it to an always-visible nav
-   column that doesn't fit alongside a phone-width table anyway. */
+/* The menu bar behaves the same way at every width — it just scrolls
+   sideways once seven tabs no longer fit. That replaced a slide-in drawer
+   and its hamburger button: a drawer only existed because a left-hand
+   column can't shrink, and a row can. */
 @media (max-width: 768px) {
-  .sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 200; width: 240px;
-    transform: translateX(-100%); transition: transform 0.18s ease; box-shadow: var(--shadow);
-  }
-  .sidebar.open { transform: translateX(0); }
-  .sidebar-backdrop {
-    display: block; position: fixed; inset: 0; z-index: 150;
-    background: rgba(0, 0, 0, 0.4);
-  }
-  .nav-toggle { display: inline-flex; }
-  .topbar { padding: 14px 16px; }
+  .topbar { padding: 10px 16px; gap: 10px; }
   .topbar .who { font-size: 14px; }
   .topbar .who .role { display: none; } /* name alone is enough at this width */
+  .topnav { padding: 0 8px; }
+  .brand-credit { display: none; } /* the logo alone identifies the app here */
   .view { padding: 16px 16px 32px; }
   .panel-head { flex-direction: column; align-items: flex-start; gap: 2px; }
 
@@ -184,7 +177,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
    layout was squeezing narrow-content columns (Status, Marketplace) down
    to the point where even short words wrapped one letter per line. The
    wrapping below still keeps long unbroken content (a WhatsApp group id,
-   a full timestamp) from forcing the whole table wider than the screen. */
+   a full timestamp) from forcing the whole table wider than the screen.
+
+   The tasks board overrides this — see .tasks-table. It has enough columns
+   that letting each one bid for width ended up starving the one that
+   mattered, so there the widths are stated instead of negotiated. */
 table.data-table { width: 100%; table-layout: auto; border-collapse: collapse; }
 table.data-table th, table.data-table td {
   text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 13px;
@@ -195,6 +192,59 @@ table.data-table th, table.data-table td {
 }
 table.data-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text); opacity: 0.55; font-weight: 700; }
 table.data-table tr:last-child td { border-bottom: none; }
+
+/* ---- the tasks board ---- */
+/* Fifteen columns, only one of which holds anything a person wrote. Under
+   table-layout: auto every column bid for width on its content, and the three
+   timestamps — the longest text on the row and the least read — won, leaving
+   the task itself wrapping four lines deep in a column narrower than the word
+   "Marketplace". Stating the widths puts that right: everything gets what it
+   needs, and Task (the one <col> with no width set) takes the rest.
+
+   min-width, with .panel-body's horizontal scroll, is what keeps this honest
+   on a laptop: columns stay readable and the table scrolls, rather than every
+   column shrinking until nothing is. */
+table.tasks-table { table-layout: fixed; min-width: 1500px; }
+.tasks-table .col-client { width: 118px; }
+.tasks-table .col-group  { width: 132px; }
+.tasks-table .col-pick   { width: 118px; } /* holds a dropdown */
+.tasks-table .col-when   { width: 96px; }
+.tasks-table .col-due    { width: 130px; } /* holds a date input */
+.tasks-table .col-btn    { width: 84px; }
+.tasks-table .col-icon   { width: 52px; }
+
+.tasks-table td { padding: 12px 8px; }
+/* The task's own words: the row's headline, so it reads as one. */
+.cell-task { font-weight: 550; color: var(--text-h); line-height: 1.45; }
+/* Context rather than content — present when looked for, quiet otherwise. */
+.cell-muted { opacity: 0.72; }
+.cell-empty { opacity: 0.35; }
+
+/* A row is 15 columns wide, and the eye has to carry a task from its name on
+   the left to its Send button on the right without slipping a line. Zebra
+   striping is the usual answer, but not here: opening a task's notes or its
+   repeat form inserts a second row, so any nth-child pattern would shift by
+   one from that point down the page and stripe the wrong rows. Highlighting
+   the row under the pointer does the same job and cannot fall out of step.
+
+   Task rows only. A note or repeat row already sits on --bg-alt (see
+   .note-row below), and highlighting it too would join it to the task above
+   into one very tall block. */
+.tasks-table tbody tr:not(.note-row):hover > td { background: var(--bg-alt); }
+
+/* The header stays put while the rows scroll under it — with ten tasks to a
+   page and columns this similar in shape, a header out of sight means
+   counting columns to work out which dropdown is which. */
+.tasks-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+
+/* Date over time, so a timestamp is two short lines instead of one long one
+   — see the Stamp component. tabular-nums keeps the digits in a column so
+   the dates line up down the page. */
+.stamp { display: block; white-space: nowrap; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.stamp-time { display: block; font-size: 12px; opacity: 0.6; }
 
 .field-input textarea, textarea.field-input { width: 100%; resize: vertical; font: inherit; line-height: 1.5; }
 

@@ -99,7 +99,7 @@ export default function ClientDetail({
       setStatusOptions(statusList);
       setTaskTypeOptions(taskTypeList);
       setMarketplaceOptions(marketplaceList);
-      // Landing here from the sidebar with nothing picked yet shows the
+      // Landing here from the menu with nothing picked yet shows the
       // first client rather than an empty screen with a dropdown to hunt
       // through — coming in from the Clients list already sets clientId.
       if (!clientId && clientList.length > 0) onSelectClient(clientList[0].id);

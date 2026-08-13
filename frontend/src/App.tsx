@@ -56,7 +56,6 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [view, setView] = useState<View>(viewFromHash);
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Which client the Client Details screen is showing. Held here rather than
   // inside that screen so clicking a name on the Clients list can open it
   // directly on that client, and so switching tabs and back doesn't lose it.
@@ -123,31 +122,39 @@ export default function App() {
     setUser(null);
   }
 
-  // Closes the slide-in nav after picking a view — on desktop the sidebar
-  // is always visible so this is a no-op there (mobileNavOpen never got
-  // set to true in the first place).
   function selectView(newView: View) {
     setView(newView);
     // Written rather than pushed, so each screen becomes a step Back can
     // return to.
     window.location.hash = `#/${newView}`;
-    setMobileNavOpen(false);
   }
 
   return (
     <div className="shell">
-      {mobileNavOpen && <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} />}
-      <aside className={`sidebar ${mobileNavOpen ? "open" : ""}`}>
+      {/* The menu runs along the top rather than down the left. It used to be
+          a 168px column, which is a lot of permanent width to spend on seven
+          words when the widest screen here is the task board — fifteen columns
+          that would rather have those pixels. Across the top it costs one row
+          of height, and the row is shared with the logo and the account. */}
+      <header className="topbar">
         <div className="brand">
-          <BrandLogo height={26} />
+          <BrandLogo height={24} />
+          <span className="brand-credit">
+            created by <BrandCredit />
+          </span>
         </div>
-        {/* Sits directly under the logo, above the menu, so it's on screen
-            whenever the sidebar is — the old placement pinned it to the very
-            bottom, where a long menu or a short window pushed it out of view. */}
-        <div className="brand-credit">
-          created by <BrandCredit />
-        </div>
-        <nav className="nav">
+
+        {/* Your own name is the way into your own account — there's no
+            separate menu item for it, since changing a password is a rare
+            errand and everyone (not just admins) needs to reach it. */}
+        <button className="who" onClick={() => selectView("account")} title="My account">
+          <span className="name">{user.name}</span>
+          <span className="role">{ROLE_LABEL[user.role]}</span>
+        </button>
+        <button className="btn btn-primary" onClick={handleLogout}>Log out</button>
+      </header>
+
+      <nav className="topnav">
           <button
             className={`nav-item ${shownView ==="tasks" ? "active" : ""}`}
             onClick={() => selectView("tasks")}
@@ -200,29 +207,9 @@ export default function App() {
               Settings
             </button>
           )}
-        </nav>
-      </aside>
+      </nav>
 
-      <div className="main">
-        <header className="topbar">
-          <button
-            className="nav-toggle"
-            onClick={() => setMobileNavOpen(true)}
-            aria-label="Open menu"
-          >
-            ☰
-          </button>
-          {/* Your own name is the way into your own account — there's no
-              separate menu item for it, since changing a password is a rare
-              errand and everyone (not just admins) needs to reach it. */}
-          <button className="who" onClick={() => selectView("account")} title="My account">
-            <span className="name">{user.name}</span>
-            <span className="role">{ROLE_LABEL[user.role]}</span>
-          </button>
-          <button className="btn btn-primary" onClick={handleLogout}>Log out</button>
-        </header>
-
-        <section className="view">
+      <section className="view">
           {shownView ==="tasks" && <Dashboard user={user} />}
           {shownView ==="repeating" && <RecurringTasks user={user} />}
           {shownView ==="employees" && <Employees user={user} />}
@@ -239,9 +226,8 @@ export default function App() {
           )}
           {shownView ==="weekly-reports" && <WeeklyReports />}
           {shownView ==="settings" && <Settings />}
-          {shownView ==="account" && <Account user={user} />}
-        </section>
-      </div>
+        {shownView ==="account" && <Account user={user} />}
+      </section>
     </div>
   );
 }
