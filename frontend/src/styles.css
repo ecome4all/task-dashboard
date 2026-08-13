@@ -194,54 +194,71 @@ table.data-table th { font-size: 10.5px; text-transform: uppercase; letter-spaci
 table.data-table tr:last-child td { border-bottom: none; }
 
 /* ---- the tasks board ---- */
-/* Fifteen columns, only one of which holds anything a person wrote. Under
-   table-layout: auto every column bid for width on its content, and the three
-   timestamps — the longest text on the row and the least read — won, leaving
-   the task itself wrapping four lines deep in a column narrower than the word
-   "Marketplace". Stating the widths puts that right: everything gets what it
-   needs, and Task (the one <col> with no width set) takes the rest.
+/* A task is two rows: what it is, then what to do about it.
+                                       ┌─ .task-head, spans the full width
+   ┌───────────────────────────────────┴──────────────────────────────────┐
+   │ Share Focus SKU list for reviews                                     │
+   │ Amrezia & Amar Enterprise · Wallpaper - Ecom4all Amazon              │
+   │ [Unset ▾] [Not Set ▾] [Kinjal ▾] [Started ▾]  13 Aug ...  [Send]     │
+   └──────────────────────────────────────────────────────────────────────┘
+                                         └─ .task-controls, the aligned columns
 
-   min-width, with .panel-body's horizontal scroll, is what keeps this honest
-   on a laptop: columns stay readable and the table scrolls, rather than every
-   column shrinking until nothing is.
+   Before this, all fifteen of those were columns. The three that are words
+   rather than settings — the task, the client, the group — were the ones that
+   suffered, because a column is the wrong shape for a sentence: the task
+   itself came out as a stack of one-word lines, at one point breaking
+   "reviews" into "review" and "s", beside fourteen controls that each fitted
+   comfortably. Giving the words the full width and leaving the settings in
+   columns lets each have the shape it wants — and drops the table from
+   fifteen columns to twelve, so it stops scrolling sideways as well.
 
-   THE NUMBER THAT MATTERS: min-width must be the sum of the widths below PLUS
-   the narrowest Task worth reading. Set it lower and Task silently collects
-   whatever is left instead — at 1500 against a 1240 sum it got 260px, and the
-   first version of this set 1500 against a 1444 sum, which left Task 56px and
-   broke "reviews" across two lines as "review" and "s". Change a width below
-   and change this line with it. */
-table.tasks-table { table-layout: fixed; min-width: 1520px; }
-.tasks-table .col-client { width: 110px; }
-.tasks-table .col-group  { width: 118px; }
-.tasks-table .col-pick   { width: 104px; } /* holds a dropdown */
-.tasks-table .col-when   { width: 68px; }  /* "13 Aug" over "2:18 pm" */
-.tasks-table .col-due    { width: 118px; } /* holds a date input */
-.tasks-table .col-btn    { width: 76px; }
-.tasks-table .col-icon   { width: 46px; }
+   The four dropdowns take no width here: they get what the dated and buttoned
+   columns leave, since their labels are the longest ("Waiting for
+   marketplace") and they are what actually gets used. */
+/* max-width because the dropdowns are what absorb any width the dated and
+   buttoned columns don't use — on a wide monitor that made each of them
+   nearly 300px, which is a lot of box around the word "Amazon". Capped, the
+   table stops growing and the space goes unused instead, which reads better
+   than four over-inflated controls. */
+table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
+.tasks-table .col-when { width: 84px; }  /* "13 Aug" over "2:18 pm" */
+.tasks-table .col-due  { width: 132px; } /* holds a date input */
+.tasks-table .col-btn  { width: 86px; }
+.tasks-table .col-icon { width: 74px; }
 
-.tasks-table td { padding: 12px 8px; }
-/* The task's own words: the row's headline, so it reads as one. */
-.cell-task { font-weight: 550; color: var(--text-h); line-height: 1.45; }
-/* Context rather than content — present when looked for, quiet otherwise. */
-.cell-muted { opacity: 0.72; }
+/* The two rows of a task are one block, so the border goes under the pair
+   rather than between them — otherwise a task reads as two half-height rows
+   that happen to be adjacent. */
+.tasks-table .task-head > td { border-bottom: none; padding: 14px 8px 2px; }
+.tasks-table .task-controls > td { padding: 2px 8px 14px; vertical-align: middle; }
+
+/* .data-table's "no border under the last row" rule matches the last <tr> of
+   every <tbody> — and every task is now its own tbody, so on its own that
+   rule quietly removes the line between every task on the page. The line
+   belongs under whichever row ends the task, which is the controls normally
+   and the notes panel when one is open. */
+.tasks-table .task-block > tr:last-child > td { border-bottom: 1px solid var(--border); }
+.tasks-table .task-block:last-child > tr:last-child > td { border-bottom: none; }
+
+.task-title { font-size: 14px; font-weight: 600; color: var(--text-h); line-height: 1.4; }
+/* Who it is for and where it came from — the sentence needs them to make
+   sense, but they are not the sentence. */
+.task-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; opacity: 0.65; margin-top: 3px; }
+/* A middle dot before the group, so "client · group" reads as one line
+   without a separator element in the markup for a group that may not exist. */
+.task-chat::before { content: "· "; }
 .cell-empty { opacity: 0.35; }
 
-/* A row is 15 columns wide, and the eye has to carry a task from its name on
-   the left to its Send button on the right without slipping a line. Zebra
-   striping is the usual answer, but not here: opening a task's notes or its
-   repeat form inserts a second row, so any nth-child pattern would shift by
-   one from that point down the page and stripe the wrong rows. Highlighting
-   the row under the pointer does the same job and cannot fall out of step.
+/* Both rows of a task light together — this is what the per-task <tbody> is
+   for. Zebra striping would have been the usual answer to carrying the eye
+   across a wide row, but not here: opening a task's notes or its repeat form
+   adds a row, so any nth-child pattern would shift by one from that point
+   down the page and stripe the wrong tasks. */
+.task-block:hover > tr > td { background: var(--bg-alt); }
 
-   Task rows only. A note or repeat row already sits on --bg-alt (see
-   .note-row below), and highlighting it too would join it to the task above
-   into one very tall block. */
-.tasks-table tbody tr:not(.note-row):hover > td { background: var(--bg-alt); }
-
-/* The header stays put while the rows scroll under it — with ten tasks to a
-   page and columns this similar in shape, a header out of sight means
-   counting columns to work out which dropdown is which. */
+/* The header stays put while the tasks scroll under it — the control row is
+   ten similar-looking cells, and a header out of sight means counting across
+   to work out which dropdown is which. */
 .tasks-table thead th {
   position: sticky; top: 0; z-index: 1;
   background: var(--bg); border-bottom: 1px solid var(--border);

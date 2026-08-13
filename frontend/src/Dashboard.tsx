@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Task,
   TaskStatus,
@@ -30,6 +30,13 @@ import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 import { defaultFirstRun, fromLocalInputValue } from "./dateTimeInput";
 
 const PAGE_SIZE = 10;
+
+// Columns on a task's control row that everyone sees: Marketplace, Type,
+// Employee, Status, Created, Due Date, Updated, Completed, Notes, Send. Repeat
+// and Delete are added to this by whoever is allowed them. Named because it is
+// also the colSpan of the row above — the one holding the task's own words —
+// and of the notes and repeat panels that open underneath.
+const CONTROL_COLUMNS = 10;
 
 // Sentinel shared by the Type/Marketplace/Employee filters' "Not Set" /
 // "Unassigned" option — distinct from `null` (which means "no filter
@@ -655,14 +662,10 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
           </div>
 
           <table className="data-table tasks-table">
-            {/* Every column is sized here except Task, which is left to take
-                whatever is left over — it holds the only free text on the row,
-                and it was the column being squeezed into four wrapped lines
-                while three timestamps sat half empty beside it. */}
+            {/* The four dropdowns have no width set, so they share whatever the
+                dated and buttoned columns leave — their labels are the longest
+                here ("Waiting for marketplace"), and they are what gets used. */}
             <colgroup>
-              <col />
-              <col className="col-client" />
-              <col className="col-group" />
               <col className="col-pick" />
               <col className="col-pick" />
               <col className="col-pick" />
@@ -678,13 +681,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
             </colgroup>
             <thead>
               <tr>
-                <th>Task</th>
-                <th>Client</th>
-                {/* "Source" was here. It said whatsapp_group on almost every
-                    row, in the database's words rather than anyone's, and the
-                    WhatsApp Group column beside it already says where a task
-                    came from in a way that means something. */}
-                <th>WhatsApp Group</th>
+                {/* Task, Client and WhatsApp Group were columns here. They are
+                    the three things on a row that are words rather than
+                    settings, and a column is the wrong shape for words: the
+                    task itself ended up a stack of one-word lines beside
+                    fourteen controls that each fitted comfortably. They now
+                    open each task, across the full width — see .task-head. */}
                 <th>Marketplace</th>
                 <th>Type</th>
                 <th>Employee</th>
@@ -699,13 +701,23 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 {canDelete && <th></th>}
               </tr>
             </thead>
-            <tbody>
-              {paged.items.map((task) => (
-                <Fragment key={task.id}>
-                <tr>
-                  <td className="cell-task">{task.description}</td>
-                  <td>{task.clientName ?? "—"}</td>
-                  <td className="cell-muted">{task.chatName ?? "—"}</td>
+            {/* One <tbody> per task rather than one for the whole list. A task
+                is two rows now — what it is, then what to do about it — and a
+                tbody is what holds them together: it groups them for anyone
+                reading the markup, and it lets both rows light up as one under
+                the pointer, which no amount of CSS on loose <tr>s would do. */}
+            {paged.items.map((task) => (
+              <tbody className="task-block" key={task.id}>
+                <tr className="task-head">
+                  <td colSpan={CONTROL_COLUMNS + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
+                    <div className="task-title">{task.description}</div>
+                    <div className="task-meta">
+                      <span>{task.clientName ?? "No client"}</span>
+                      {task.chatName && <span className="task-chat">{task.chatName}</span>}
+                    </div>
+                  </td>
+                </tr>
+                <tr className="task-controls">
                   <td>
                     <SearchableSelect
                       value={task.marketplace ?? ""}
@@ -818,7 +830,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 </tr>
                 {canRepeat && openRepeatTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={13 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
+                    <td colSpan={CONTROL_COLUMNS + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <div className="repeat-form">
                         <div>
                           <label className="fact-label">How often</label>
@@ -861,7 +873,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 )}
                 {openNotesTaskId === task.id && (
                   <tr className="note-row">
-                    <td colSpan={13 + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
+                    <td colSpan={CONTROL_COLUMNS + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
                       <TaskNotes
                         taskId={task.id}
                         user={user}
@@ -874,9 +886,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     </td>
                   </tr>
                 )}
-                </Fragment>
-              ))}
-            </tbody>
+              </tbody>
+            ))}
           </table>
               <Pagination paged={paged} />
         </div>

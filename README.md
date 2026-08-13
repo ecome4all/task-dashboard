@@ -363,13 +363,26 @@ messages them straight away, the same as assigning from the board.
   get added — which also retired the phone drawer and its hamburger button: a
   drawer only existed because a left-hand column can't shrink, and a row can.
   `.view` no longer stops at 1600px either, so a wide screen is actually used.
-- **The board's column widths are stated rather than negotiated.** Under
-  `table-layout: auto` every column bid for width on its content, and the three
-  timestamps — the longest text on a row, and the least read — won, leaving the
-  task's own words wrapping four lines deep in a column narrower than the word
-  "Marketplace". Now everything has a set width except Task, which takes what's
-  left. A `min-width` plus the panel's existing horizontal scroll keeps columns
-  readable on a laptop instead of crushing all of them.
+- **A task is two rows now: what it is, then what to do about it.** The
+  description spans the full width, with the client and WhatsApp group under it,
+  and the ten settings stay in aligned columns below. Those three were columns
+  before, and a column is the wrong shape for a sentence — the task itself came
+  out as a stack of one-word lines (at one point breaking "reviews" into
+  "review" and "s") beside fourteen controls that each fitted comfortably.
+  Giving the words the width and leaving the settings in columns lets each have
+  the shape it wants, and drops the table from fifteen columns to twelve, so it
+  no longer scrolls sideways on a laptop.
+- **Each task is its own `<tbody>`.** That's what holds its two rows together:
+  it groups them for anyone reading the markup, and it lets both light up as
+  one under the pointer, which no CSS on loose `<tr>`s would do. Two things to
+  know if you touch this: `.data-table`'s "no border under the last row" rule
+  matches the last `<tr>` of *every* tbody, so the line between tasks is put
+  back explicitly; and `CONTROL_COLUMNS` in `Dashboard.tsx` is the colSpan of
+  the description row and of the notes and repeat panels, so it moves whenever
+  a column is added or removed.
+- **The table is capped at 1500px.** The four dropdowns absorb whatever the
+  dated and buttoned columns don't use, and on a wide monitor that made each of
+  them nearly 300px — a lot of box around the word "Amazon".
 - **Timestamps are two short lines** — `13 Aug 2026` over `2:18 pm` — instead of
   one long `8/13/2026, 2:18:13 PM`. Seconds are gone: nothing here is decided by
   them. The month is written out because a board read in two countries shouldn't
