@@ -68,14 +68,23 @@ function toDateInputValue(dueDate: string | null): string {
 // A date and time in a table cell, on two lines. toLocaleString() gave
 // "8/13/2026, 2:18:13 PM" as one long run, and three of those columns took
 // enough width to squeeze the task's own words into four wrapped lines. The
-// seconds go: nothing on this board is decided by them. "13 Aug 2026" rather
-// than "13/08/2026" because a board read by people in two countries should not
-// depend on knowing which way round the numbers go.
+// seconds go: nothing on this board is decided by them. "13 Aug" rather than
+// "13/08" because a board read by people in two countries should not depend on
+// knowing which way round the numbers go.
+//
+// The year appears only when it isn't this one. Almost everything on this
+// board was made in the last few weeks, so printing 2026 on every row costs
+// three columns their width to say nothing — but an old task must not quietly
+// read as a recent one, so the year comes back the moment it differs.
 function Stamp({ value, dateOnly = false }: { value: string | null; dateOnly?: boolean }) {
   if (!value) return <span className="cell-empty">—</span>;
 
   const when = new Date(value);
-  const day = when.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  const day = when.toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    ...(when.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+  });
   if (dateOnly) return <span className="stamp">{day}</span>;
 
   return (

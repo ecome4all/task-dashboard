@@ -203,15 +203,22 @@ table.data-table tr:last-child td { border-bottom: none; }
 
    min-width, with .panel-body's horizontal scroll, is what keeps this honest
    on a laptop: columns stay readable and the table scrolls, rather than every
-   column shrinking until nothing is. */
-table.tasks-table { table-layout: fixed; min-width: 1500px; }
-.tasks-table .col-client { width: 118px; }
-.tasks-table .col-group  { width: 132px; }
-.tasks-table .col-pick   { width: 118px; } /* holds a dropdown */
-.tasks-table .col-when   { width: 96px; }
-.tasks-table .col-due    { width: 130px; } /* holds a date input */
-.tasks-table .col-btn    { width: 84px; }
-.tasks-table .col-icon   { width: 52px; }
+   column shrinking until nothing is.
+
+   THE NUMBER THAT MATTERS: min-width must be the sum of the widths below PLUS
+   the narrowest Task worth reading. Set it lower and Task silently collects
+   whatever is left instead — at 1500 against a 1240 sum it got 260px, and the
+   first version of this set 1500 against a 1444 sum, which left Task 56px and
+   broke "reviews" across two lines as "review" and "s". Change a width below
+   and change this line with it. */
+table.tasks-table { table-layout: fixed; min-width: 1520px; }
+.tasks-table .col-client { width: 110px; }
+.tasks-table .col-group  { width: 118px; }
+.tasks-table .col-pick   { width: 104px; } /* holds a dropdown */
+.tasks-table .col-when   { width: 68px; }  /* "13 Aug" over "2:18 pm" */
+.tasks-table .col-due    { width: 118px; } /* holds a date input */
+.tasks-table .col-btn    { width: 76px; }
+.tasks-table .col-icon   { width: 46px; }
 
 .tasks-table td { padding: 12px 8px; }
 /* The task's own words: the row's headline, so it reads as one. */
