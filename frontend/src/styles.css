@@ -222,7 +222,12 @@ table.data-table tr:last-child td { border-bottom: none; }
    than four over-inflated controls. */
 table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 .tasks-table .col-when { width: 84px; }  /* "13 Aug" over "2:18 pm" */
-.tasks-table .col-due  { width: 132px; } /* holds a date input */
+.tasks-table .col-due  { width: 156px; } /* holds a date input */
+/* A date input sizes itself around its own picker icon and ignores the column
+   it is in, so at 132px it overflowed and sat flush against the Updated
+   column with no gap at all. Held to the column, and the column widened to
+   what the input actually wants, so neither has to give. */
+.tasks-table .task-controls input[type="date"] { width: 100%; }
 .tasks-table .col-btn  { width: 86px; }
 .tasks-table .col-icon { width: 74px; }
 
