@@ -139,11 +139,44 @@ export function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): Repo
   return fields.filter((f) => allowed.has(normalizeHeader(f.label)));
 }
 
+// Agreed columns that this client's sheet HAS, but which didn't survive into
+// the report. A cell that is blank, or holds a spreadsheet error, is dropped
+// on the way in — see usableFields in reportPeriod.ts — and until now that
+// happened in silence: the report simply came out with fewer lines than usual
+// and nobody sending it had any way to notice.
+//
+// That is how a set of reports went out with Acos and T.Acos missing for a few
+// clients. Acos is spend ÷ sales, so a client with no sales in the period gets
+// #DIV/0!, and both columns vanish while everything else looks normal.
+//
+// Compared against the sheet's own headers, not just against the agreed list:
+// an older client sheet that never had a Rating or FBA Units column is not
+// leaving anything out, and saying so on every report would be noise that
+// buries the one line that matters.
+export function agreedColumnsLeftOut(
+  kind: ReportKind,
+  headers: string[],
+  fields: ReportField[]
+): string[] {
+  const inTheSheet = new Set(headers.map(normalizeHeader));
+  const madeIt = new Set(fields.map((f) => normalizeHeader(f.label)));
+
+  return REPORT_COLUMNS[kind].filter((name) => {
+    const key = normalizeHeader(name);
+    return inTheSheet.has(key) && !madeIt.has(key);
+  });
+}
+
 export interface ReportSection {
   // e.g. "Weekly — July, Week 2", "Daily — 2026-07-08" or "SKU TR04-B" —
   // lets the reviewing human tell which tab/period/SKU each block came from.
   source: string;
   fields: ReportField[];
+  // Agreed columns this client's sheet has but that are blank or errored for
+  // this period, so they are not in the report. Shown on the Reports screen
+  // before anything is sent — see agreedColumnsLeftOut. Absent on the older
+  // Client Details preview, which shows the sheet as-is rather than a report.
+  leftOut?: string[];
 }
 
 export interface WeeklyReportPreview {
@@ -199,29 +232,47 @@ export async function buildReport(
   const tab = await readTabForKind(spreadsheetId, kind);
   if (!tab) return { week, month, sections };
 
+  // Every section carries what it had to leave out, worked out against this
+  // sheet's own headers — see agreedColumnsLeftOut.
+  const leftOutOf = (fields: ReportField[]) => agreedColumnsLeftOut(kind, tab.headers, fields);
+
   if (kind === "daily") {
     const latest = findDailyRowForDate(tab, referenceDate);
     const fields = latest ? onlyAgreedColumns(kind, latest.fields) : [];
     if (latest && fields.length > 0) {
       dailyDate = latest.date;
-      sections.push({ source: `Daily — ${latest.date}`, fields: withPercentSuffix(fields) });
+      sections.push({
+        source: `Daily — ${latest.date}`,
+        fields: withPercentSuffix(fields),
+        leftOut: leftOutOf(fields),
+      });
     }
   } else if (kind === "monthly") {
     const found = findMonthlyRowFields(tab, month);
     const fields = found ? onlyAgreedColumns(kind, found) : [];
     if (fields.length > 0) {
-      sections.push({ source: `Monthly — ${month}`, fields: withPercentSuffix(fields) });
+      sections.push({
+        source: `Monthly — ${month}`,
+        fields: withPercentSuffix(fields),
+        leftOut: leftOutOf(fields),
+      });
     }
   } else if (kind === "weekly_sales") {
     const found = findWeeklyRowFields(tab, month, week);
     const fields = found ? onlyAgreedColumns(kind, found) : [];
     if (fields.length > 0) {
-      sections.push({ source: `Weekly — ${month}, Week ${week}`, fields: withPercentSuffix(fields) });
+      sections.push({
+        source: `Weekly — ${month}, Week ${week}`,
+        fields: withPercentSuffix(fields),
+        leftOut: leftOutOf(fields),
+      });
     }
   } else {
     for (const row of findSkuRows(tab, month, week)) {
       const fields = onlyAgreedColumns(kind, row.fields);
-      if (fields.length > 0) sections.push({ source: row.sku, fields: withPercentSuffix(fields) });
+      if (fields.length > 0) {
+        sections.push({ source: row.sku, fields: withPercentSuffix(fields), leftOut: leftOutOf(fields) });
+      }
     }
   }
 

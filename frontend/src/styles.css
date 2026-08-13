@@ -159,6 +159,17 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
    column unreadably thin. */
 .panel-body { padding: 12px 18px 18px; overflow-x: scroll; }
 
+/* "Not in this report: Acos, T.Acos" under a report section. Deliberately the
+   warning colour rather than the danger one: nothing has failed, and the send
+   is not blocked — it is a note that this report will be quieter than usual,
+   shown while there is still time to do something about it. */
+.left-out {
+  margin-top: 8px; padding: 8px 12px; border-radius: 8px;
+  background: var(--warn-soft); color: var(--warn);
+  font-size: 12.5px; line-height: 1.45;
+}
+.left-out code { font-family: ui-monospace, monospace; font-size: 12px; }
+
 /* Small inline UX hint, e.g. "paste a row from your spreadsheet" — sits
    between panel-head and panel-body, styled to read as a tip rather than
    body copy or an error/warning banner. */

@@ -664,6 +664,25 @@ export default function WeeklyReports() {
                                 ))}
                               </tbody>
                             </table>
+                            {/* A column that is blank or shows an error in the
+                                sheet is dropped on the way in, because
+                                "Acos: #DIV/0!" is worse than saying nothing.
+                                That dropping used to be invisible, and reports
+                                went out with Acos and T.Acos missing for a few
+                                clients before anyone noticed. It is not an
+                                error, so it doesn't read as one — it is a note
+                                about what this report will not say. */}
+                            {section.leftOut && section.leftOut.length > 0 && (
+                              <div className="left-out">
+                                <strong>Not in this report: {section.leftOut.join(", ")}</strong>
+                                <div>
+                                  {section.leftOut.length === 1 ? "That column is" : "Those columns are"}{" "}
+                                  empty or showing an error in this client's sheet for this period.
+                                  Acos is spend ÷ sales, so it reads <code>#DIV/0!</code> when there
+                                  were no sales. Send as is, or fix the sheet and load again.
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

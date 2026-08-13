@@ -532,6 +532,11 @@ export interface ReportSection {
   // this block of fields came from.
   source: string;
   fields: ReportField[];
+  // Agreed columns this client's sheet has, but which are blank or hold a
+  // spreadsheet error for this period, so they are not in the report. Shown
+  // before anything is sent — a dropped column used to be invisible, and a set
+  // of reports went out with Acos and T.Acos quietly missing.
+  leftOut?: string[];
 }
 
 export interface WeeklyReportPreview {

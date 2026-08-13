@@ -63,7 +63,7 @@ cd backend
 npm test
 ```
 
-338 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, the email/password rules used when giving someone a login, the scheduled report round's config reading, due-check and message wording, the service-account key reshaping, the rule that stops a second repeat being set up for work that already repeats, and the one that treats the same task arriving twice in a minute as one. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+347 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, the email/password rules used when giving someone a login, the scheduled report round's config reading, due-check and message wording, the service-account key reshaping, the rule that stops a second repeat being set up for work that already repeats, and the one that treats the same task arriving twice in a minute as one. All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
@@ -270,6 +270,32 @@ than guessing.
 far are Amazon trackers, confirmed before it ran. That step is in the same
 migration as the `DROP COLUMN`, so it is the only chance to keep those links;
 don't reorder it.
+
+## A dropped column now says so before you send
+
+A cell that is blank, or holds a spreadsheet error (`#DIV/0!`, `#N/A`, `#REF!`,
+`#VALUE!`), is dropped from a report on the way in — `usableFields` in
+`services/reportPeriod.ts`. That is right: sending a client `Acos: #DIV/0!` is
+worse than saying nothing, and the percent-suffix rule would make it
+`#DIV/0!%`. But the dropping was **silent**, and that is how a round of reports
+went out with **Acos and T.Acos missing for a few clients** and nobody noticed
+until the client mentioned it. Acos is spend ÷ sales, so a client with no sales
+in the period gets `#DIV/0!` and both columns vanish while every other line
+looks normal.
+
+`agreedColumnsLeftOut` (`services/weeklyReportPreview.ts`) now reports them,
+and each `ReportSection` carries a `leftOut` list that the Reports screen shows
+above the Send button — *"Not in this report: Acos, T.Acos"* — while there is
+still time to fix the sheet.
+
+Compared against **the sheet's own headers**, not just the agreed list. An
+older client sheet that never had a `Rating` or `FBA Units` column is not
+leaving anything out, and saying so on every send would be noise that buries
+the one line that matters. Nothing is blocked: it is a note, in the warning
+colour rather than the danger one, and the report still sends.
+
+The lasting fix is in the master, not here — wrap the Acos formula as
+`=IFERROR(Spend/Sales, 0)` so it reads `0.00%` and goes out normally.
 
 ## Notes go out with the update, not on their own
 
