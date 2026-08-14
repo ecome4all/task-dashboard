@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Task,
   TaskStatus,
@@ -24,10 +24,12 @@ import {
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
+import MultiSelect from "./MultiSelect";
 import TaskNotes from "./TaskNotes";
 import Pagination, { usePaged } from "./Paged";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 import { defaultFirstRun, fromLocalInputValue } from "./dateTimeInput";
+import { useAutoRefresh } from "./useAutoRefresh";
 
 const PAGE_SIZE = 10;
 
@@ -39,28 +41,39 @@ const PAGE_SIZE = 10;
 const CONTROL_COLUMNS = 10;
 
 // Sentinel shared by the Type/Marketplace/Employee filters' "Not Set" /
-// "Unassigned" option — distinct from `null` (which means "no filter
-// applied, show everything").
+// "Unassigned" option — distinct from an empty filter list (which means "no
+// filter applied, show everything").
 const UNSET_TYPE = "__unset__";
 const UNSET_MARKETPLACE = "__unset__";
 const UNASSIGNED = "__unset__";
 
-function matchesTypeFilter(task: Task, filter: string | null): boolean {
-  if (filter === null) return true;
-  if (filter === UNSET_TYPE) return !task.taskType;
-  return task.taskType === filter;
+// Every filter holds a list now rather than one value: "the listing work and
+// the ads work" is a normal thing to want to look at, and with one value each
+// it took two passes over the board. An empty list is no filter at all, and
+// several picked means any of them — narrowing as you tick more would make
+// the second tick always show less, which is the opposite of what picking a
+// second thing means.
+function matchesAny(value: string | null, filters: string[], unsetSentinel: string): boolean {
+  if (filters.length === 0) return true;
+  return filters.some((f) => (f === unsetSentinel ? !value : value === f));
 }
 
-function matchesMarketplaceFilter(task: Task, filter: string | null): boolean {
-  if (filter === null) return true;
-  if (filter === UNSET_MARKETPLACE) return !task.marketplace;
-  return task.marketplace === filter;
+function matchesTypeFilter(task: Task, filters: string[]): boolean {
+  return matchesAny(task.taskType, filters, UNSET_TYPE);
 }
 
-function matchesEmployeeFilter(task: Task, filter: string | null): boolean {
-  if (filter === null) return true;
-  if (filter === UNASSIGNED) return !task.assignee;
-  return task.assignee === filter;
+function matchesMarketplaceFilter(task: Task, filters: string[]): boolean {
+  return matchesAny(task.marketplace, filters, UNSET_MARKETPLACE);
+}
+
+function matchesEmployeeFilter(task: Task, filters: string[]): boolean {
+  return matchesAny(task.assignee, filters, UNASSIGNED);
+}
+
+// Status is never empty on a task (it defaults to "no_action_yet"), so it has
+// no "not set" option to account for.
+function matchesStatusFilter(task: Task, filters: string[]): boolean {
+  return filters.length === 0 || filters.includes(task.status);
 }
 
 function errorMessage(err: unknown): string {
@@ -133,6 +146,19 @@ function withinDateRange(timestamp: string | null, from: string, to: string): bo
   return true;
 }
 
+// Work whose due date has gone by and which nobody has finished. Compared by
+// day rather than by timestamp: a task due today is not late at nine in the
+// morning, and a due date on this board is a day, never a time.
+//
+// Finished is read from both doneAt and the status value, because the status
+// list is admin-editable — someone can rename "Done", and a renamed status
+// must not quietly turn every closed task red.
+function isOverdue(task: Task): boolean {
+  if (!task.dueDate) return false;
+  if (task.doneAt || task.status === "done") return false;
+  return localDay(task.dueDate) < localDay(new Date().toISOString());
+}
+
 // A task typed onto the board with no client picked has no group or number
 // behind it, so there is nobody to send to — the button says why rather than
 // looking broken.
@@ -146,6 +172,17 @@ function hasSomethingToSend(task: Task): boolean {
   return task.pendingSendFields.length > 0 || task.hasNoteForClient;
 }
 
+// A background refresh replaces the board with what the server currently has —
+// but a row whose change is still in flight must keep the value just picked.
+// Without this, a refresh landing in the half-second between clicking a status
+// and the save coming back would put the old status back on screen, and the
+// person who just set it would watch their own change undo itself.
+function keepPendingRows(local: Task[], fromServer: Task[], pending: Set<string>): Task[] {
+  if (pending.size === 0) return fromServer;
+  const localById = new Map(local.map((t) => [t.id, t]));
+  return fromServer.map((t) => (pending.has(t.id) ? localById.get(t.id) ?? t : t));
+}
+
 export default function Dashboard({ user }: { user: CurrentUser }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -156,10 +193,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [marketplaceFilter, setMarketplaceFilter] = useState<string | null>(null);
-  const [employeeFilter, setEmployeeFilter] = useState<string | null>(null);
+  // Empty list = show everything. See matchesAny above.
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([]);
+  const [employeeFilter, setEmployeeFilter] = useState<string[]>([]);
   // Date ranges, as yyyy-mm-dd from <input type="date">. Empty means that end
   // is open — see withinDateRange.
   const [createdFrom, setCreatedFrom] = useState("");
@@ -186,6 +224,10 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [newAssignee, setNewAssignee] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
   const [creating, setCreating] = useState(false);
+  // Tasks with a save still in flight — see keepPendingRows. A ref rather than
+  // state: nothing on screen depends on it, and it has to be readable by a
+  // background refresh that started before the latest render.
+  const pendingTaskIds = useRef<Set<string>>(new Set());
 
   // Same rule as due dates: setting up work that will keep reappearing on
   // everyone's board is a scheduling decision, not day-to-day triage.
@@ -231,6 +273,19 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     load();
   }, []);
 
+  // Tasks arrive over WhatsApp all day, and three people work the same board,
+  // so what's on screen goes out of date on its own — which is why this screen
+  // was being reloaded by hand constantly. Only the tasks are re-read: the
+  // employee, client and dropdown lists change rarely, and only from other
+  // screens, which reload this one on the way back anyway.
+  //
+  // Quiet on purpose: no spinner, and a failure is left for the next tick
+  // rather than replacing a working board with an error.
+  useAutoRefresh(async () => {
+    const taskList = await fetchTasks();
+    setTasks((prev) => keepPendingRows(prev, taskList, pendingTaskIds.current));
+  });
+
   const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
   const taskTypeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
 
@@ -238,23 +293,39 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
     return buildStatusLabel(status, marketplace, statusOptions, marketplaceLabels);
   }
 
-  function selectStatusFilter(status: string | null) {
-    setStatusFilter(status);
+  // Each of these resets to page 1: narrowing the list while on page 3 would
+  // otherwise leave you looking at a page the shorter list no longer has.
+  function selectStatusFilter(statuses: string[]) {
+    setStatusFilter(statuses);
     paged.reset();
   }
 
-  function selectTypeFilter(type: string) {
-    setTypeFilter(type || null);
+  function selectTypeFilter(types: string[]) {
+    setTypeFilter(types);
     paged.reset();
   }
 
-  function selectMarketplaceFilter(marketplace: string) {
-    setMarketplaceFilter(marketplace || null);
+  function selectMarketplaceFilter(marketplaces: string[]) {
+    setMarketplaceFilter(marketplaces);
     paged.reset();
   }
 
-  function selectEmployeeFilter(employee: string) {
-    setEmployeeFilter(employee || null);
+  function selectEmployeeFilter(employees: string[]) {
+    setEmployeeFilter(employees);
+    paged.reset();
+  }
+
+  const anyPickedFilter =
+    statusFilter.length > 0 ||
+    typeFilter.length > 0 ||
+    marketplaceFilter.length > 0 ||
+    employeeFilter.length > 0;
+
+  function clearPickedFilters() {
+    setStatusFilter([]);
+    setTypeFilter([]);
+    setMarketplaceFilter([]);
+    setEmployeeFilter([]);
     paged.reset();
   }
 
@@ -327,12 +398,15 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   ) {
     setActionError("");
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...optimistic } : t)));
+    pendingTaskIds.current.add(task.id);
     try {
       const updated = await updateTask(task.id, apiChanges);
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
       setActionError(errorMessage(err));
+    } finally {
+      pendingTaskIds.current.delete(task.id);
     }
   }
 
@@ -439,7 +513,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   const filteredTasks = tasks.filter(
     (t) =>
-      (!statusFilter || t.status === statusFilter) &&
+      matchesStatusFilter(t, statusFilter) &&
       matchesTypeFilter(t, typeFilter) &&
       matchesMarketplaceFilter(t, marketplaceFilter) &&
       matchesEmployeeFilter(t, employeeFilter) &&
@@ -465,12 +539,15 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
         <div className="panel">
           <div className="panel-head">
             <span className="panel-title">New task</span>
+            {/* Close hides the form and keeps what's in it; Cancel, inside,
+                is the one that throws it away. Closing used to wipe every box,
+                so a half-filled task was lost to one stray click. */}
             <button
               className={`btn btn-sm ${newTaskOpen ? "btn-ghost" : "btn-primary"}`}
-              onClick={() => (newTaskOpen ? closeNewTaskForm() : setNewTaskOpen(true))}
+              onClick={() => setNewTaskOpen(!newTaskOpen)}
               type="button"
             >
-              {newTaskOpen ? "Close" : "Add a task"}
+              {newTaskOpen ? "Close" : newDescription.trim() ? "Finish the task" : "Add a task"}
             </button>
           </div>
           {newTaskOpen && (
@@ -485,6 +562,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                     placeholder="e.g. Fix the listing images for the new SKU"
                     value={newDescription}
                     onChange={(e) => setNewDescription(e.target.value)}
+                    // Enter adds the task, the same as the button. Everything
+                    // else on this form is optional, so the description is
+                    // often the only thing typed.
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !creating && newDescription.trim()) handleCreateTask();
+                    }}
                   />
                 </div>
                 <div>
@@ -554,6 +637,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               <p className="panel-sub" style={{ marginTop: 10 }}>
                 Picking an employee sends them a WhatsApp message straight away, the same as
                 putting them on a task from the board.
+                <br />
+                Close keeps what you have typed here. Cancel clears it.
               </p>
             </div>
           )}
@@ -563,28 +648,35 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Tasks</span>
-          <span className="panel-sub">{filteredTasks.length} shown of {tasks.length} total</span>
+          {/* Saying so is half the fix: people were reloading the page because
+              nothing told them the board keeps itself up to date. */}
+          <span className="panel-sub">
+            {filteredTasks.length} shown of {tasks.length} total · new tasks appear on their own
+          </span>
         </div>
         <div className="panel-body">
           {/* Every filter is a type-to-search dropdown, the same one the rows
               use: these lists are admin-editable and keep growing, and a
               plain <select> gives no way to find an option by typing it. The
               "All …" row at the top of each is what clears that filter. */}
+          {/* Every one of these takes as many values as you want to tick —
+              two employees, three statuses — and shows anything matching any
+              of them. Nothing picked in a box means that box isn't filtering. */}
           <div className="filter-row">
             {/* Status sits with the other filters as a dropdown rather than a
                 row of chips — the counts that made the chips worth their width
                 are kept on each option. */}
-            <SearchableSelect
-              value={statusFilter ?? ""}
+            <MultiSelect
+              values={statusFilter}
               placeholder={`All Statuses (${tasks.length})`}
               options={statusOptions.map((option) => ({
                 value: option.value,
                 label: `${option.label} (${tasks.filter((t) => t.status === option.value).length})`,
               }))}
-              onChange={(value) => selectStatusFilter(value || null)}
+              onChange={selectStatusFilter}
             />
-            <SearchableSelect
-              value={marketplaceFilter ?? ""}
+            <MultiSelect
+              values={marketplaceFilter}
               placeholder="All Marketplaces"
               options={[
                 ...marketplaceOptions.map((option) => ({ value: option.value, label: option.label })),
@@ -592,8 +684,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               ]}
               onChange={selectMarketplaceFilter}
             />
-            <SearchableSelect
-              value={employeeFilter ?? ""}
+            <MultiSelect
+              values={employeeFilter}
               placeholder="All Employees"
               options={[
                 ...employees.map((employee) => ({ value: employee.name, label: employee.name })),
@@ -601,8 +693,8 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               ]}
               onChange={selectEmployeeFilter}
             />
-            <SearchableSelect
-              value={typeFilter ?? ""}
+            <MultiSelect
+              values={typeFilter}
               placeholder="All Types"
               options={[
                 ...taskTypeOptions.map((option) => ({ value: option.value, label: option.label })),
@@ -610,6 +702,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               ]}
               onChange={selectTypeFilter}
             />
+            {anyPickedFilter && (
+              <button className="btn btn-ghost btn-sm" onClick={clearPickedFilters} type="button">
+                Clear filters
+              </button>
+            )}
           </div>
 
           {/* Date ranges get their own line: four boxes in the row above would
@@ -707,10 +804,15 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 reading the markup, and it lets both rows light up as one under
                 the pointer, which no amount of CSS on loose <tr>s would do. */}
             {paged.items.map((task) => (
-              <tbody className="task-block" key={task.id}>
+              <tbody className={`task-block ${isOverdue(task) ? "task-late" : ""}`} key={task.id}>
                 <tr className="task-head">
                   <td colSpan={CONTROL_COLUMNS + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}>
-                    <div className="task-title">{task.description}</div>
+                    <div className="task-title">
+                      {task.description}
+                      {/* The date on its own is easy to read past on a board of
+                          ten rows — the word is what actually gets noticed. */}
+                      {isOverdue(task) && <span className="late-badge">Late</span>}
+                    </div>
                     <div className="task-meta">
                       <span>{task.clientName ?? "No client"}</span>
                       {task.chatName && <span className="task-chat">{task.chatName}</span>}
@@ -759,13 +861,17 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                   <td>
                     {canSetDueDate ? (
                       <input
-                        className="field-input"
+                        className={`field-input ${isOverdue(task) ? "input-late" : ""}`}
                         type="date"
                         value={toDateInputValue(task.dueDate)}
                         onChange={(e) => handleDueDateChange(task, e.target.value)}
                       />
+                    ) : task.dueDate ? (
+                      <span className={isOverdue(task) ? "text-danger" : undefined}>
+                        <Stamp value={task.dueDate} dateOnly />
+                      </span>
                     ) : (
-                      task.dueDate ? <Stamp value={task.dueDate} dateOnly /> : <span className="cell-empty">—</span>
+                      <span className="cell-empty">—</span>
                     )}
                   </td>
                   <td><Stamp value={task.updatedAt} /></td>

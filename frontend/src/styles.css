@@ -425,6 +425,46 @@ table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 .searchable-select-option:hover, .searchable-select-option.selected { background: var(--bg-alt); }
 .searchable-select-empty { padding: 7px 9px; font-size: 12px; opacity: 0.6; }
 
+/* ---- multi-select (the Task board's filters) ---- */
+/* A ticked option keeps its tick column even when unticked, so the labels
+   stay in one line down the list instead of shifting as things are picked. */
+.multi-tick {
+  display: inline-block; width: 16px; margin-right: 6px;
+  color: var(--accent); font-weight: 700;
+}
+/* A filter that is actually filtering should not look like one that isn't —
+   without this, "All Employees" and "Kinjal Patel" are the same grey box, and
+   a board that looked empty was usually a filter someone had forgotten. */
+.multi-select-active { border-color: var(--accent); color: var(--text-h); font-weight: 600; }
+.multi-select-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 6px 3px 1px; margin-top: 4px; border-top: 1px solid var(--border);
+}
+
+/* ---- late tasks ---- */
+/* Past its due date and not finished. The whole task is marked, not just the
+   date cell: the date is one narrow column out of twelve, and on a ten-row
+   board it was being read straight past. */
+.task-late .task-title { color: var(--danger); }
+.task-late .task-head td { border-left: 3px solid var(--danger); }
+.late-badge {
+  display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 20px;
+  background: var(--danger-soft); color: var(--danger);
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+/* The due-date box itself, for the admins and managers who can edit it. */
+.input-late { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+
+/* ---- saved confirmation ---- */
+/* Sits beside a box that saves itself. Fades in so it registers as something
+   that just happened, rather than a label that was always there. */
+.saved-tick {
+  display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600;
+  color: var(--good); white-space: nowrap; animation: saved-in 0.15s ease-out;
+}
+@keyframes saved-in { from { opacity: 0; } to { opacity: 1; } }
+
 /* ---- loading / error ---- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.7s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }

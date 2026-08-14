@@ -539,10 +539,21 @@ export interface ReportSection {
   leftOut?: string[];
 }
 
+// Why a report came back with nothing in it — see EmptyReason in the backend's
+// weeklyReportPreview.ts. Only "no_period_rows" actually means the sheet isn't
+// filled in yet; the other two are the wrong sheet being linked, and formulas
+// erroring inside a row that does exist.
+export type EmptyReason = "no_tab" | "no_period_rows" | "no_agreed_columns";
+
 export interface WeeklyReportPreview {
   week: number;
   month: string;
   sections: ReportSection[];
+  // Set only when `sections` is empty.
+  emptyReason?: EmptyReason;
+  // The sheet's real tab names, sent with "no_tab" so the screen can name what
+  // is actually in the file that was linked.
+  tabsInSheet?: string[];
   // Daily reports only: the day the figures are actually for, worded as the
   // sheet writes it ("9 August"). Sheets are filled in a day or two behind, so
   // this is often an earlier day than the one asked for — which is why the
@@ -550,9 +561,11 @@ export interface WeeklyReportPreview {
   dailyDate?: string;
 }
 
-// Live-reads one of this client's linked Google Sheets for the current week's
-// numbers (see Client.reportSheets) — no caching, always reflects whatever's
-// currently in the sheet.
+// Reads one of this client's linked Google Sheets for the current week's
+// numbers (see Client.reportSheets). Google allows the account only 60 sheet
+// reads a minute and this screen reads one per client, so the backend holds
+// what a tab contained for a minute — the figures are the sheet's own, and at
+// most a minute old.
 //
 // `marketplace` picks which sheet. It can be left off only when the client has
 // exactly one; with several linked the server refuses to guess rather than

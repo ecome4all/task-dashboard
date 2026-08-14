@@ -1,0 +1,137 @@
+import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+// The trigger button and floating panel shared by SearchableSelect (pick one)
+// and MultiSelect (pick several). Only the list inside differs between them —
+// everything here is the fiddly part neither should own a second copy of.
+//
+// The open panel renders through a portal at document.body with fixed
+// positioning computed from the trigger's on-screen position, instead of
+// being a normal absolutely-positioned child. The Task table scrolls
+// horizontally (see .table-scroll in styles.css), and a plain absolute
+// child would get clipped by that scroll container — a portal escapes it.
+export default function DropdownPanel({
+  label,
+  triggerClassName,
+  onClose,
+  children,
+}: {
+  /** What the closed trigger reads. */
+  label: string;
+  // Extra class(es) for the trigger button — e.g. to color-code it by the
+  // selected value (see the Task board's Status column, which colors the
+  // dropdown itself instead of showing a separate pill next to it).
+  triggerClassName?: string;
+  /** Fired every time the panel closes, so the caller can clear its search box. */
+  onClose?: () => void;
+  /** The panel's contents. Only called while open. */
+  children: (ctx: { close: () => void }) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRectRef = useRef<DOMRect | null>(null);
+  // Held in a ref so adding/removing the listeners below never depends on the
+  // caller passing a stable onClose.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  function close() {
+    setOpen(false);
+    onCloseRef.current?.();
+  }
+
+  function openPanel() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      triggerRectRef.current = rect;
+      const width = Math.max(rect.width, 200);
+      // Clamped to stay within the viewport horizontally — on a narrow
+      // phone screen, a trigger near the right edge would otherwise open
+      // the panel partly off-screen.
+      const left = Math.min(Math.max(rect.left, 8), window.innerWidth - width - 8);
+      setPanelPos({ top: rect.bottom + 4, left, width });
+    }
+    setOpen(true);
+  }
+
+  // A row near the bottom of the page would otherwise open the panel
+  // straight off the bottom of the viewport. Once the panel's actually
+  // rendered (so its real height is known), flip it to sit above the
+  // trigger instead — but only if there's room above; otherwise leave it
+  // below rather than clip it a different way.
+  useLayoutEffect(() => {
+    if (!open || !panelRef.current || !triggerRectRef.current) return;
+    const trigger = triggerRectRef.current;
+    const panelHeight = panelRef.current.getBoundingClientRect().height;
+    const spaceBelow = window.innerHeight - trigger.bottom;
+    const spaceAbove = trigger.top;
+    if (spaceBelow < panelHeight + 8 && spaceAbove > panelHeight + 8) {
+      setPanelPos((prev) => ({ ...prev, top: trigger.top - panelHeight - 4 }));
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        panelRef.current && !panelRef.current.contains(target)
+      ) {
+        close();
+      }
+    }
+    // The Task table scrolls independently of the page — if that scroll
+    // (or a window resize) happens while open, the panel's position would
+    // go stale, so just close it rather than trying to track it live.
+    //
+    // Except when what scrolled is the panel's own option list. This listener
+    // is on the capture phase (scroll events don't bubble), so it hears
+    // scrolls from every element on the page including that list — and the
+    // list is exactly what has to scroll when there are more options than fit
+    // its 220px — about seven. Without this check, reaching for an option
+    // below that fold closed the dropdown on the way down, which is why a
+    // newly added option looked as though it simply wasn't there.
+    function handleScroll(e: Event) {
+      if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
+      close();
+    }
+    function handleResize() {
+      close();
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`field-select searchable-select-trigger ${triggerClassName ?? ""}`}
+        onClick={() => (open ? close() : openPanel())}
+      >
+        {label}
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="searchable-select-panel"
+            style={{ top: panelPos.top, left: panelPos.left, width: panelPos.width }}
+          >
+            {children({ close })}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}

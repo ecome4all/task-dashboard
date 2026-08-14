@@ -9,6 +9,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
 
 const CATEGORIES: { key: ConfigOptionCategory; title: string; addPlaceholder: string }[] = [
   { key: "marketplace", title: "Marketplace", addPlaceholder: "New marketplace name" },
@@ -27,6 +28,7 @@ function CategoryPanel({ category, title, addPlaceholder }: { category: ConfigOp
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const { savedKey, flash } = useSavedFlash();
 
   async function load() {
     setLoading(true);
@@ -65,6 +67,7 @@ function CategoryPanel({ category, title, addPlaceholder }: { category: ConfigOp
     try {
       const updated = await updateConfigOption(category, option.id, { label });
       setOptions((prev) => prev.map((o) => (o.id === option.id ? updated : o)));
+      flash(option.id);
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -121,7 +124,9 @@ function CategoryPanel({ category, title, addPlaceholder }: { category: ConfigOp
                     value={labelDrafts[option.id] ?? option.label}
                     onChange={(e) => setLabelDrafts((prev) => ({ ...prev, [option.id]: e.target.value }))}
                     onBlur={() => handleLabelSave(option)}
+                    onKeyDown={saveOnEnter}
                   />
+                  <SavedTick show={savedKey === option.id} />
                 </td>
                 <td>
                   <button

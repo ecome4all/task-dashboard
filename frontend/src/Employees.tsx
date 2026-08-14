@@ -13,6 +13,7 @@ import {
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import Pagination, { usePaged } from "./Paged";
+import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
 
 const ROLE_LABEL: Record<Employee["role"], string> = {
   admin: "Admin",
@@ -43,6 +44,9 @@ export default function Employees({ user }: { user: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  // These boxes save themselves when you click away, and used to do it with no
+  // sign at all that anything had happened — see savedFlash.tsx.
+  const { savedKey, flash } = useSavedFlash();
 
   async function load() {
     setLoading(true);
@@ -101,6 +105,7 @@ export default function Employees({ user }: { user: CurrentUser }) {
       setEmployees((prev) =>
         prev.map((e) => (e.id === employee.id ? updated : e)).sort((a, b) => a.name.localeCompare(b.name))
       );
+      flash(`${employee.id}:name`);
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -121,6 +126,7 @@ export default function Employees({ user }: { user: CurrentUser }) {
     try {
       const updated = await updateEmployee(employee.id, { phone });
       setEmployees((prev) => prev.map((e) => (e.id === employee.id ? updated : e)));
+      flash(`${employee.id}:phone`);
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -300,9 +306,11 @@ export default function Employees({ user }: { user: CurrentUser }) {
                           setNameDrafts((prev) => ({ ...prev, [employee.id]: e.target.value }))
                         }
                         onBlur={() => handleNameSave(employee)}
+                        onKeyDown={saveOnEnter}
                         style={{ width: 150 }}
                       />
                       {isSelf && <span className="panel-sub"> (you)</span>}
+                      <SavedTick show={savedKey === `${employee.id}:name`} />
                     </td>
                     <td>
                       <select
@@ -326,8 +334,10 @@ export default function Employees({ user }: { user: CurrentUser }) {
                           setPhoneDrafts((prev) => ({ ...prev, [employee.id]: e.target.value }))
                         }
                         onBlur={() => handlePhoneSave(employee)}
+                        onKeyDown={saveOnEnter}
                         style={{ width: 130 }}
                       />
+                      <SavedTick show={savedKey === `${employee.id}:phone`} />
                     </td>
                     <td>
                       {employee.hasLogin ? (

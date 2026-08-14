@@ -13,6 +13,8 @@ import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import Pagination, { usePaged } from "./Paged";
 import { toLocalInputValue, fromLocalInputValue } from "./dateTimeInput";
+import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
+import { useAutoRefresh } from "./useAutoRefresh";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -23,6 +25,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const { savedKey, flash } = useSavedFlash();
 
   // Members can see why a task keeps coming back, but only admins and
   // managers can change or stop it — same rule the server enforces.
@@ -43,6 +46,12 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   useEffect(() => {
     load();
   }, []);
+
+  // The scheduler moves these on its own: every time a repeat fires, its
+  // "Next one" and "Last one" change without anybody touching this screen.
+  useAutoRefresh(async () => {
+    setRepeats(await fetchRecurringTasks());
+  }, 60_000);
 
   async function handleToggle(repeat: RecurringTask) {
     setActionError("");
@@ -73,6 +82,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     try {
       const updated = await updateRecurringTask(repeat.id, { nextRunAt: iso });
       setRepeats((prev) => prev.map((r) => (r.id === repeat.id ? updated : r)));
+      flash(repeat.id);
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -154,13 +164,17 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                     </td>
                     <td>
                       {canManage ? (
-                        <input
-                          className="field-input"
-                          type="datetime-local"
-                          defaultValue={toLocalInputValue(repeat.nextRunAt)}
-                          onBlur={(e) => handleNextRunSave(repeat, e.target.value)}
-                          style={{ width: 190 }}
-                        />
+                        <>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            defaultValue={toLocalInputValue(repeat.nextRunAt)}
+                            onBlur={(e) => handleNextRunSave(repeat, e.target.value)}
+                            onKeyDown={saveOnEnter}
+                            style={{ width: 190 }}
+                          />
+                          <SavedTick show={savedKey === repeat.id} />
+                        </>
                       ) : (
                         new Date(repeat.nextRunAt).toLocaleString()
                       )}

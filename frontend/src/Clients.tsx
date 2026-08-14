@@ -22,6 +22,8 @@ import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
 import Pagination, { usePaged } from "./Paged";
+import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
+import { useAutoRefresh } from "./useAutoRefresh";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
@@ -58,6 +60,8 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   // Per client, so a failed "+ Add" is answered beside the button that failed
   // rather than only in the banner at the top of a long list.
   const [groupError, setGroupError] = useState<Record<string, string>>({});
+  // The phone box saves itself on the way out — this is what says so.
+  const { savedKey, flash } = useSavedFlash();
 
   // A sheet stores the marketplace's stable value ("amazon"); the screen shows
   // whatever an admin has named it. An option since renamed or deactivated
@@ -92,6 +96,25 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   useEffect(() => {
     load();
   }, []);
+
+  // Unrecognized senders turn up on their own, whenever an unknown group
+  // messages — this list was only ever right at the moment the screen opened.
+  // A minute rather than the default half: nothing here changes as often as
+  // the task board, and this reads three lists at once.
+  //
+  // The drafts being typed into this screen (a phone, a group id, a sheet
+  // link) are held in their own state keyed by client id, so replacing the
+  // client list underneath them leaves what is half-typed alone.
+  useAutoRefresh(async () => {
+    const [clientList, senders, taskList] = await Promise.all([
+      fetchAllClients(),
+      fetchUnrecognizedSenders(),
+      fetchTasks(),
+    ]);
+    setClients(clientList);
+    setUnrecognizedSenders(senders);
+    setTasks(taskList);
+  }, 60_000);
 
   async function handleAddClient(e: React.FormEvent) {
     e.preventDefault();
@@ -133,6 +156,7 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     try {
       const updated = await updateClient(client.id, { phone });
       setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+      flash(`${client.id}:phone`);
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -461,7 +485,9 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
                       placeholder="No phone saved"
                       onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
                       onBlur={() => handlePhoneSave(client)}
+                      onKeyDown={saveOnEnter}
                     />
+                    <SavedTick show={savedKey === `${client.id}:phone`} />
                   </td>
                   <td>
                     {client.whatsappGroups.length === 0 && (

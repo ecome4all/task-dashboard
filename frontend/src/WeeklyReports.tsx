@@ -15,6 +15,7 @@ import {
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import MultiSelect from "./MultiSelect";
 
 // Pause between one client's message and the next.
 const SEND_GAP_MS = 2000;
@@ -215,6 +216,30 @@ function periodLabel(kind: ReportKind, date: string): string {
 // Worded per report, because "no data for July, Week 2" made no sense on a
 // daily report and had staff hunting for a week that wasn't the problem.
 function emptyMessage(kind: ReportKind, preview: WeeklyReportPreview, date: string): string {
+  // The sheet has no table for this report at all. Almost always the wrong
+  // file is linked — a master sheet has one tab per client ("Cherisher",
+  // "PARVOTSAV"), where a client's own sheet has "Daily Report", "Weekly
+  // Sales" and so on. Naming the tabs that ARE in it is what makes that
+  // obvious from here instead of only after opening the file.
+  if (preview.emptyReason === "no_tab") {
+    const tabs = preview.tabsInSheet ?? [];
+    const found = tabs.length > 0 ? ` This sheet has: ${tabs.join(", ")}.` : "";
+    return (
+      `This sheet has no ${REPORT_KIND_LABEL[kind]} tab, so there is nothing to read.${found}` +
+      ` Check the client's own sheet is linked, not the master.`
+    );
+  }
+
+  // Found the day (or the week), but every agreed column in it was blank or
+  // held a spreadsheet error. Same cause as the missing Acos columns: Acos is
+  // spend ÷ sales, so a period with no sales comes back #DIV/0!.
+  if (preview.emptyReason === "no_agreed_columns") {
+    return (
+      "The row for this period is in the sheet, but every column this report sends is blank" +
+      " or shows a sheet error like #DIV/0!. Fix the formulas in the sheet and try again."
+    );
+  }
+
   if (kind === "daily") {
     return `No numbers for ${humanDate(date)} or the week before it — this client's sheet isn't filled in yet.`;
   }
@@ -252,6 +277,11 @@ export default function WeeklyReports() {
   // Which clients this send covers. Empty means "everyone that's ready" —
   // the common case, so nothing has to be ticked to send to all of them.
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  // Narrows the screen to certain clients. Nineteen cards, each holding a
+  // table and a message preview, is a long scroll when the errand is "check
+  // what Cherisher is getting". Empty means every client, as it does on the
+  // task board's filters.
+  const [clientFilter, setClientFilter] = useState<string[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function load() {
@@ -359,13 +389,20 @@ export default function WeeklyReports() {
     });
   }
 
+  // Everything below works off the filtered list, sending included: a client
+  // hidden behind a filter must not be sent a message from a screen that isn't
+  // showing them. Anyone ticked and then filtered out is counted in
+  // hiddenSelected and named under the button, rather than silently dropped.
+  const visibleStates =
+    clientFilter.length === 0 ? states : states.filter((s) => clientFilter.includes(s.client.id));
+
   // "Ready" means there is at least one line ticked. Untick every line of a
   // client's report and they would otherwise be sent a heading, a greeting and
   // a sign-off with nothing between them.
-  const ready = states.filter(
+  const ready = visibleStates.filter(
     (s) => s.preview && s.preview.sections.length > 0 && hasSomethingToSend(s) && sendTargetFor(s)
   );
-  const anySelected = Object.values(selected).some(Boolean);
+  const anySelected = visibleStates.some((s) => selected[rowKey(s)]);
   // Nothing is sent to a client who wasn't ticked. This used to treat an empty
   // selection as "everyone", which put one keystroke between a quiet screen
   // and a message to every client on the list — too close together for
@@ -373,7 +410,16 @@ export default function WeeklyReports() {
   const sendable = ready.filter((s) => selected[rowKey(s)] && rowStatus[rowKey(s)] !== "sent");
   // Ticked, but nothing can go to them. Named under the button, so the gap
   // between "I ticked five" and "Send all (1)" is accounted for.
-  const blocked = anySelected ? states.filter((s) => selected[rowKey(s)] && notSendableReason(s)) : [];
+  const blocked = anySelected ? visibleStates.filter((s) => selected[rowKey(s)] && notSendableReason(s)) : [];
+  const hiddenSelected = states.filter(
+    (s) => selected[rowKey(s)] && !visibleStates.includes(s)
+  );
+
+  // One entry per client, not per sheet — a client with an Amazon and a
+  // Flipkart sheet is one name in the list and picking it shows both cards.
+  const clientOptions = Array.from(
+    new Map(states.map((s) => [s.client.id, s.client.name])).entries()
+  ).map(([value, label]) => ({ value, label }));
 
   async function handleSendAll() {
     const targets = sendable;
@@ -435,7 +481,7 @@ export default function WeeklyReports() {
         <div className="panel-head">
           <span className="panel-title">{REPORT_KIND_LABEL[kind]}</span>
           <span className="panel-sub">
-            {periodLabel(kind, date)} — read live from each client's linked Google Sheet
+            {periodLabel(kind, date)} — read from each client's linked Google Sheet, at most a minute old
           </span>
         </div>
         <p className="tip">
@@ -522,6 +568,20 @@ export default function WeeklyReports() {
               </div>
             )}
 
+            {/* Tick as many clients as you want to look at. Nothing ticked
+                shows every one of them, the same rule the task board uses. */}
+            <div style={{ minWidth: 200 }}>
+              <label className="panel-sub" style={{ display: "block", marginBottom: 4 }}>
+                Clients
+              </label>
+              <MultiSelect
+                values={clientFilter}
+                placeholder={`All clients (${clientOptions.length})`}
+                options={clientOptions}
+                onChange={setClientFilter}
+              />
+            </div>
+
             {date !== todayValue() && (
               <button
                 className="btn btn-ghost"
@@ -536,6 +596,14 @@ export default function WeeklyReports() {
 
           {states.length === 0 && (
             <p className="panel-sub">No clients have a report sheet linked yet — add one on the Clients screen.</p>
+          )}
+          {states.length > 0 && visibleStates.length === 0 && (
+            <p className="panel-sub">
+              No client here matches the filter.{" "}
+              <button className="link-button" onClick={() => setClientFilter([])} type="button">
+                Show all clients
+              </button>
+            </p>
           )}
 
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
@@ -571,7 +639,16 @@ export default function WeeklyReports() {
             </p>
           )}
 
-          {states.map((state) => {
+          {/* Ticked earlier, then filtered off the screen. Nothing is sent to
+              a client this screen isn't showing, so it says which. */}
+          {hiddenSelected.length > 0 && (
+            <p className="panel-sub" style={{ marginBottom: 16 }}>
+              {hiddenSelected.length} ticked client(s) are hidden by the filter and will not be sent
+              to: {hiddenSelected.map((s) => rowTitle(s)).join(", ")}.
+            </p>
+          )}
+
+          {visibleStates.map((state) => {
             const groups = state.client.whatsappGroups;
             const target = sendTargetFor(state);
             const message = composeMessage(state, kind);

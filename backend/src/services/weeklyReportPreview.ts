@@ -179,10 +179,36 @@ export interface ReportSection {
   leftOut?: string[];
 }
 
+// Why a report came back with nothing in it.
+//
+// The Reports screen used to say the same thing whichever of these it was —
+// "this client's sheet isn't filled in yet" — which is a guess presented as a
+// fact, and it is wrong in the two cases that actually need doing something
+// about. A sheet linked to the wrong file (a master, whose tabs are named
+// after clients rather than reports) has no Daily tab at all, and reported
+// itself as an empty sheet: whoever was looking went off to fill in numbers
+// that were already there, in a different file.
+//
+//   no_tab             — nothing in this sheet is named like this report's
+//                        table. Usually the wrong sheet is linked.
+//   no_period_rows     — the table is there, but has no row for the period
+//                        asked about. This is the one that really does mean
+//                        "not filled in yet".
+//   no_agreed_columns  — the row is there, but every agreed column in it was
+//                        blank or held a spreadsheet error (#DIV/0! and the
+//                        like). Same cause as the missing Acos columns.
+export type EmptyReason = "no_tab" | "no_period_rows" | "no_agreed_columns";
+
 export interface WeeklyReportPreview {
   week: number;
   month: string;
   sections: ReportSection[];
+  // Only set when `sections` is empty — what to tell the person looking.
+  emptyReason?: EmptyReason;
+  // The sheet's real tab names, sent only with `no_tab`. Naming what IS in the
+  // file is what makes "the wrong sheet is linked" obvious from the screen,
+  // rather than something to be worked out by opening it.
+  tabsInSheet?: string[];
   // The day the daily figures are actually for, worded as the sheet writes it
   // ("9 August"). Only set on a daily report, and only when a day with figures
   // was found — which is not always the day asked for, since the sheets are
@@ -197,13 +223,16 @@ function withPercentSuffix(fields: ReportField[]): ReportField[] {
 }
 
 // Resolves which tab this report should read from the spreadsheet's real tab
-// list, then reads it. Returns null when the sheet has no tab for this
-// report at all, which is a normal state — not every client's sheet carries
-// every table.
-async function readTabForKind(spreadsheetId: string, kind: ReportKind): Promise<SheetTab | null> {
+// list, then reads it. `tab` is null when the sheet has no tab for this report
+// at all — a normal state (not every client's sheet carries every table), but
+// one worth telling apart from an empty one, so the tab names come back too.
+async function readTabForKind(
+  spreadsheetId: string,
+  kind: ReportKind
+): Promise<{ tab: SheetTab | null; tabNames: string[] }> {
   const tabNames = await listTabNames(spreadsheetId);
   const name = pickTab(kind, tabNames);
-  return name ? readTab(spreadsheetId, name) : null;
+  return { tab: name ? await readTab(spreadsheetId, name) : null, tabNames };
 }
 
 function spreadsheetIdOrThrow(sheetUrl: string): string {
@@ -229,8 +258,13 @@ export async function buildReport(
   const sections: ReportSection[] = [];
   let dailyDate: string | undefined;
 
-  const tab = await readTabForKind(spreadsheetId, kind);
-  if (!tab) return { week, month, sections };
+  const { tab, tabNames } = await readTabForKind(spreadsheetId, kind);
+  if (!tab) return { week, month, sections, emptyReason: "no_tab", tabsInSheet: tabNames };
+
+  // Set only where a section wasn't produced — see EmptyReason. "The row was
+  // found but everything in it was blank" and "there is no such row" look
+  // identical on screen otherwise, and they need opposite things done.
+  let emptyReason: EmptyReason | undefined;
 
   // Every section carries what it had to leave out, worked out against this
   // sheet's own headers — see agreedColumnsLeftOut.
@@ -246,6 +280,8 @@ export async function buildReport(
         fields: withPercentSuffix(fields),
         leftOut: leftOutOf(fields),
       });
+    } else {
+      emptyReason = latest ? "no_agreed_columns" : "no_period_rows";
     }
   } else if (kind === "monthly") {
     const found = findMonthlyRowFields(tab, month);
@@ -256,6 +292,8 @@ export async function buildReport(
         fields: withPercentSuffix(fields),
         leftOut: leftOutOf(fields),
       });
+    } else {
+      emptyReason = found ? "no_agreed_columns" : "no_period_rows";
     }
   } else if (kind === "weekly_sales") {
     const found = findWeeklyRowFields(tab, month, week);
@@ -266,17 +304,25 @@ export async function buildReport(
         fields: withPercentSuffix(fields),
         leftOut: leftOutOf(fields),
       });
+    } else {
+      emptyReason = found ? "no_agreed_columns" : "no_period_rows";
     }
   } else {
-    for (const row of findSkuRows(tab, month, week)) {
+    const skuRows = findSkuRows(tab, month, week);
+    for (const row of skuRows) {
       const fields = onlyAgreedColumns(kind, row.fields);
       if (fields.length > 0) {
         sections.push({ source: row.sku, fields: withPercentSuffix(fields), leftOut: leftOutOf(fields) });
       }
     }
+    // SKU rows found but none survived the agreed-column whitelist is a
+    // different problem from finding no SKU rows at all.
+    if (sections.length === 0) {
+      emptyReason = skuRows.length > 0 ? "no_agreed_columns" : "no_period_rows";
+    }
   }
 
-  return { week, month, sections, dailyDate };
+  return { week, month, sections, dailyDate, emptyReason };
 }
 
 // The combined read: the weekly and daily tables at once, for the Weekly
