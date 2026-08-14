@@ -282,6 +282,10 @@ export default function WeeklyReports() {
   // what Cherisher is getting". Empty means every client, as it does on the
   // task board's filters.
   const [clientFilter, setClientFilter] = useState<string[]>([]);
+  // Narrows to the sheets of one marketplace — "send the Amazon lot" is a
+  // round of its own, and a client selling on two marketplaces has a card for
+  // each. Empty means every marketplace.
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function load() {
@@ -393,8 +397,13 @@ export default function WeeklyReports() {
   // hidden behind a filter must not be sent a message from a screen that isn't
   // showing them. Anyone ticked and then filtered out is counted in
   // hiddenSelected and named under the button, rather than silently dropped.
-  const visibleStates =
-    clientFilter.length === 0 ? states : states.filter((s) => clientFilter.includes(s.client.id));
+  // The two filters narrow together: pick Amazon and two clients, and you get
+  // those clients' Amazon sheets only.
+  const visibleStates = states.filter(
+    (s) =>
+      (clientFilter.length === 0 || clientFilter.includes(s.client.id)) &&
+      (marketplaceFilter.length === 0 || marketplaceFilter.includes(s.sheet.marketplace))
+  );
 
   // "Ready" means there is at least one line ticked. Untick every line of a
   // client's report and they would otherwise be sent a heading, a greeting and
@@ -419,6 +428,13 @@ export default function WeeklyReports() {
   // Flipkart sheet is one name in the list and picking it shows both cards.
   const clientOptions = Array.from(
     new Map(states.map((s) => [s.client.id, s.client.name])).entries()
+  ).map(([value, label]) => ({ value, label }));
+
+  // Only the marketplaces some client actually has a sheet for. Listing every
+  // marketplace an admin has ever added would offer filters that can only ever
+  // empty the screen.
+  const marketplaceFilterOptions = Array.from(
+    new Map(states.map((s) => [s.sheet.marketplace, s.marketplaceLabel])).entries()
   ).map(([value, label]) => ({ value, label }));
 
   async function handleSendAll() {
@@ -582,6 +598,23 @@ export default function WeeklyReports() {
               />
             </div>
 
+            {/* Only worth showing at all once more than one marketplace has a
+                sheet linked — a single-marketplace list is a filter whose only
+                setting is the one already in force. */}
+            {marketplaceFilterOptions.length > 1 && (
+              <div style={{ minWidth: 180 }}>
+                <label className="panel-sub" style={{ display: "block", marginBottom: 4 }}>
+                  Marketplace
+                </label>
+                <MultiSelect
+                  values={marketplaceFilter}
+                  placeholder={`All marketplaces (${marketplaceFilterOptions.length})`}
+                  options={marketplaceFilterOptions}
+                  onChange={setMarketplaceFilter}
+                />
+              </div>
+            )}
+
             {date !== todayValue() && (
               <button
                 className="btn btn-ghost"
@@ -599,9 +632,16 @@ export default function WeeklyReports() {
           )}
           {states.length > 0 && visibleStates.length === 0 && (
             <p className="panel-sub">
-              No client here matches the filter.{" "}
-              <button className="link-button" onClick={() => setClientFilter([])} type="button">
-                Show all clients
+              Nothing here matches the filters.{" "}
+              <button
+                className="link-button"
+                onClick={() => {
+                  setClientFilter([]);
+                  setMarketplaceFilter([]);
+                }}
+                type="button"
+              >
+                Show everything
               </button>
             </p>
           )}
@@ -643,7 +683,7 @@ export default function WeeklyReports() {
               a client this screen isn't showing, so it says which. */}
           {hiddenSelected.length > 0 && (
             <p className="panel-sub" style={{ marginBottom: 16 }}>
-              {hiddenSelected.length} ticked client(s) are hidden by the filter and will not be sent
+              {hiddenSelected.length} ticked client(s) are hidden by the filters and will not be sent
               to: {hiddenSelected.map((s) => rowTitle(s)).join(", ")}.
             </p>
           )}
