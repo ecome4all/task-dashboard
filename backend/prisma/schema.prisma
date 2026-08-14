@@ -12,30 +12,36 @@ datasource db {
 // row carries it from day one so multi-tenant resale later is a query filter,
 // not a schema migration.
 model Task {
-  id          String    @id @default(cuid())
-  tenantId    String    @default("default")
-  source      String // "whatsapp_group" | "whatsapp_official"
-  sourceRef   String // WhatsApp group id or phone number the task came from
+  id           String     @id @default(cuid())
+  tenantId     String     @default("default")
+  source       String // "whatsapp_group" | "whatsapp_official"
+  sourceRef    String // WhatsApp group id or phone number the task came from
   // Human-readable group name from whapi's webhook (chat_name), captured at
   // intake time so staff can recognize a group without reading its raw JID.
   // Null for official-channel (1:1) tasks, which have no group name.
-  chatName    String?
-  description String
-  clientName  String?
-  assignee    String?
+  chatName     String?
+  description  String
+  clientName   String?
+  assignee     String?
   // listing | inventory_manage | fba | claims | inactive_blocked_product | no_pickup | ads | other
   // Nothing is auto-filled — same as assignee, this is picked manually during triage.
-  taskType    String?
+  taskType     String?
   // amazon | flipkart | meesho | other — also manually picked, not auto-detected from the message.
-  marketplace String?
-  // started | submitted | waiting_for_amazon | waiting_for_client | again_submitted | done
-  status      String    @default("started")
+  marketplace  String?
+  // no_action_yet | started | submitted | waiting_for_marketplace | waiting_for_client | again_submitted | done
+  //
+  // A task arrives having had nothing done to it, so that is what it says.
+  // The default used to be "started", which claimed work had begun on every
+  // message the moment it landed — and left no way to mark the tasks somebody
+  // actually had started. "started" is still a status, now meaning what it
+  // says; tasks created before this keep it.
+  status       String     @default("no_action_yet")
   // Set by an admin or manager only (see requireRole check in tasks.ts) —
   // members can't set their own due dates.
-  dueDate     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  doneAt      DateTime?
+  dueDate      DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  doneAt       DateTime?
   // Snapshot of status/marketplace/taskType/assignee/dueDate/createdAt as of
   // the last successful WhatsApp send (manual "Send" click, or an automatic
   // status-change notification) — lets the Send button compare current
@@ -52,17 +58,17 @@ model Task {
 // over days, and one shared box means whoever types next silently destroys
 // the previous person's context.
 model TaskNote {
-  id       String @id @default(cuid())
-  tenantId String @default("default")
-  taskId   String
-  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  tenantId     String    @default("default")
+  taskId       String
+  task         Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
   // Both the id and a snapshot of the name at write time: an employee can
   // be renamed or deactivated later, and an old note should still show who
   // actually wrote it, without a join that might come back empty.
-  authorId   String
-  authorName String
-  body       String
-  createdAt  DateTime @default(now())
+  authorId     String
+  authorName   String
+  body         String
+  createdAt    DateTime  @default(now())
   // Whether this note is meant for the client at all. Internal by default,
   // because plenty of them ("client hasn't paid yet") must never reach the
   // client — ticking the box on the note form is what sets this.
@@ -71,11 +77,11 @@ model TaskNote {
   // as part of the next update the task sends, rather than arriving as a
   // WhatsApp message of its own: a client watching a request move should get
   // one message about it, not a status change followed by a loose paragraph.
-  sendToClient Boolean @default(false)
+  sendToClient Boolean   @default(false)
   // When this note actually reached the client's group, if it has yet. Null
   // with sendToClient true means it is still waiting for the next update;
   // null with sendToClient false means it was never meant to go.
-  sentAt     DateTime?
+  sentAt       DateTime?
 
   @@index([taskId])
 }
@@ -91,8 +97,8 @@ model TaskNote {
 // from lastRunAt) means a backend that was asleep or redeploying catches up
 // on exactly one run rather than replaying every missed one.
 model RecurringTask {
-  id       String @id @default(cuid())
-  tenantId String @default("default")
+  id          String    @id @default(cuid())
+  tenantId    String    @default("default")
   // Copied onto each Task this creates — same shape task intake produces,
   // so a repeated task is indistinguishable from one sent over WhatsApp.
   source      String
@@ -104,12 +110,12 @@ model RecurringTask {
   taskType    String?
   marketplace String?
   // "daily" | "weekly" | "monthly"
-  frequency String
-  nextRunAt DateTime
-  lastRunAt DateTime?
-  active    Boolean   @default(true)
-  createdBy String
-  createdAt DateTime  @default(now())
+  frequency   String
+  nextRunAt   DateTime
+  lastRunAt   DateTime?
+  active      Boolean   @default(true)
+  createdBy   String
+  createdAt   DateTime  @default(now())
 
   @@index([tenantId, active, nextRunAt])
 }
@@ -126,7 +132,7 @@ model Employee {
   // employee without one simply doesn't get reminders, rather than the
   // reminder job failing. Stored in the same normalized form as Client.phone
   // (country code, digits only) so it can be handed straight to an adapter.
-  phone String?
+  phone        String?
 }
 
 // A managed directory of clients, separate from Task.clientName (which is
@@ -158,10 +164,10 @@ model Client {
 // A client with no row here simply gets no report, the same as an empty
 // reportSheetUrl did.
 model ClientReportSheet {
-  id       String @id @default(cuid())
-  tenantId String @default("default")
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id])
+  id          String   @id @default(cuid())
+  tenantId    String   @default("default")
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
   // A ConfigOption "marketplace" value — "amazon", "flipkart" — the same
   // values a task carries, so a report and a task agree on what to call it.
   marketplace String
@@ -233,4 +239,3 @@ model ConfigOption {
 
   @@unique([tenantId, category, value])
 }
-

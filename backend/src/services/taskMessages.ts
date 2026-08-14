@@ -56,11 +56,15 @@ export interface TaskSnapshotSource {
 // send compares against to work out what's actually new.
 export type TaskSnapshot = Partial<Record<SendableField, string | null>>;
 
-// "started" is every task's default status, not something anyone actively
-// chose — worth showing on the board, but not worth telling a client about
-// (there's nothing to report yet). Marketplace/assignee/dueDate have no such
-// default; they're simply null until someone picks a value.
-const DEFAULT_VALUES: Partial<Record<SendableField, string>> = { status: "started" };
+// "no_action_yet" is every task's default status, not something anyone
+// actively chose — worth showing on the board, but not worth telling a client
+// about (there's nothing to report yet). Marketplace/assignee/dueDate have no
+// such default; they're simply null until someone picks a value.
+//
+// This was "started" until that stopped being the default. "Started" now means
+// somebody has genuinely picked the task up, which is exactly the kind of
+// thing a client should hear about — so it is no longer listed here.
+const DEFAULT_VALUES: Partial<Record<SendableField, string>> = { status: "no_action_yet" };
 
 function fieldValue(task: TaskSnapshotSource, field: SendableField): string | null {
   if (field === "status") return task.status;

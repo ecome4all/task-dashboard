@@ -10,6 +10,9 @@ const TENANT_ID = "default";
 // once so existing installs (and the shared dev/prod database) start with
 // the same options staff already know, instead of an empty dropdown.
 const INITIAL_OPTIONS: { category: string; value: string; label: string }[] = [
+  // First in the list because it is where every new task starts — see the
+  // status default in schema.prisma.
+  { category: "status", value: "no_action_yet", label: "No Action Yet" },
   { category: "status", value: "started", label: "Started" },
   { category: "status", value: "submitted", label: "Submitted" },
   { category: "status", value: "waiting_for_marketplace", label: "Waiting for Marketplace" },
@@ -37,7 +40,15 @@ async function seedConfigOptions() {
     sortOrderByCategory[category] = sortOrder + 1;
     await prisma.configOption.upsert({
       where: { tenantId_category_value: { tenantId: TENANT_ID, category, value } },
-      update: {},
+      // sortOrder is refreshed so the order written above is what the dropdown
+      // shows. Inserting one into the middle of the list (No Action Yet, which
+      // belongs first) otherwise leaves every option after it holding the
+      // position it was given the first time this ran, and the new one tied
+      // with whatever already sat at that number.
+      //
+      // `label` is deliberately not updated: an admin may have renamed an
+      // option on the Settings screen, and re-seeding must not undo that.
+      update: { sortOrder },
       create: { tenantId: TENANT_ID, category, value, label, sortOrder },
     });
   }

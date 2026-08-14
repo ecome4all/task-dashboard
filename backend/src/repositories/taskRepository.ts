@@ -31,6 +31,7 @@ function visibilityWhere(visibility: TaskVisibility | null) {
 }
 
 export type TaskStatus =
+  | "no_action_yet"
   | "started"
   | "submitted"
   | "waiting_for_marketplace"

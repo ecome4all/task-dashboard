@@ -166,9 +166,18 @@ describe("changedFieldsSince / buildSnapshot", () => {
     expect(changedFieldsSince(updated, snapshot)).toEqual(["dueDate"]);
   });
 
-  it("never reports status while it's still sitting at the default 'started' -- nothing's actually happened yet", () => {
-    const freshTask = { status: "started", marketplace: "amazon", assignee: "Jayvant", dueDate: null as Date | null };
+  it("never reports status while it's still sitting at the default 'no_action_yet' -- nothing's actually happened yet", () => {
+    const freshTask = { status: "no_action_yet", marketplace: "amazon", assignee: "Jayvant", dueDate: null as Date | null };
     expect(changedFieldsSince(freshTask, null)).toEqual(["marketplace", "assignee"]);
+  });
+
+  // "Started" used to BE the default, so it was never reported. It now means
+  // somebody has actually picked the task up, which is exactly the kind of
+  // thing the client should hear — this is the test that would catch it
+  // silently going back to being treated as "nothing has happened".
+  it("reports 'started', now that it means someone has picked the task up rather than being the default", () => {
+    const freshTask = { status: "started", marketplace: "amazon", assignee: "Jayvant", dueDate: null as Date | null };
+    expect(changedFieldsSince(freshTask, null)).toEqual(["status", "marketplace", "assignee"]);
   });
 
   it("does start reporting status once it moves off the default, even on the first-ever send", () => {

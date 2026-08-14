@@ -6,7 +6,11 @@ import { ConfigOption, Marketplace, TaskStatus } from "./api";
 // board and the Client Details screen so a status can't end up a different
 // color depending on which screen you're looking at.
 const STATUS_COLOR: Record<string, string> = {
-  started: "neutral",
+  // Where every task starts: nothing has happened to it, so it is the quiet
+  // one. "Started" now means somebody has actually picked it up, which is a
+  // step forward and reads as one.
+  no_action_yet: "neutral",
+  started: "info",
   submitted: "info",
   waiting_for_marketplace: "warn",
   waiting_for_client: "warn",
