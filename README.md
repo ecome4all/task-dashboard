@@ -98,12 +98,13 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
 - **Automatic group linking:** when a `task:` message arrives from a WhatsApp group that isn't linked to anyone yet, but the *sender's own phone* matches a client, that group is saved to that client there and then (`clientRepository.ensureGroupLinked`). From that point on every other member of the group — the client's staff, colleagues — is recognized too, so nobody ever has to find and copy a raw group JID by hand. Deliberately **never reassigns**: a group already linked (by hand or by an earlier message) stays where it is, so a group can't silently move to another client because someone else posted in it. The one thing it will update on an existing link is filling in a missing group name. Best-effort — if the link fails, the task is still created
 - Dashboard: paginated task list (10/page), clickable status filter chips (with live counts) to narrow the list to one status, a per-client summary panel (total/pending/done), assign from a real employee list, change status/marketplace/type via a searchable dropdown, set a due date (admin/manager only — members can edit everything else on a task but not this, enforced server-side too)
 - **Settings:** Marketplace, Status, and Task Type are admin-editable lists (`ConfigOption` model, `/api/config-options`) instead of hardcoded — add/rename/deactivate options from the Settings tab without a code change. `waiting_for_marketplace` still gets its dynamic "Waiting for <marketplace>" label from whatever that marketplace option's current label is.
+- **A new task starts at "No Action Yet"** (`no_action_yet`), not "Started". The old default claimed work had begun on every WhatsApp message the moment it landed, and left no status meaning somebody had actually picked the task up. `started` is still a status, now meaning what it says — so it is no longer treated as the value nobody chose, and a task moving to Started *is* worth telling the client about (see `DEFAULT_VALUES` in `taskMessages.ts`). Tasks created before this keep `started`: there is no way to tell after the fact which were genuinely being worked on and which were only sitting at the old default. **The migration inserts the `ConfigOption` row itself** rather than leaving it to `seed.ts`, because the deploy runs `prisma migrate deploy` and does *not* run the seed — the column default and the dropdown entry naming it have to arrive together, or the board shows a raw `no_action_yet` with no option to change it back to.
 - Employee management: admins add employees from the dashboard (`/api/employees`); dropdown is backed by the database, not a hardcoded list
 - Client management: admins/managers add clients, link a client to the WhatsApp group its tasks come from, edit phone/name, deactivate/reactivate
 - **Client Details:** one screen with everything about a single client — headline counts (all work / still open / done / past due date / no employee / average days to finish), a work-by-status breakdown bar, contact + linked WhatsApp groups + report sheet, free-text team notes (the only place `Client.notes` is editable), a per-employee breakdown, this week's live sheet numbers, and their full task history with status filters. Reached from the sidebar or by clicking a name on the Clients list. Note the join: a `Task` has no `clientId`, only the client's *name* as it was at intake, so `taskRepository.listForClient` also matches on the client's linked group ids and their phone (last 10 digits of `sourceRef`) — otherwise renaming a client would silently hide all their older work
 - Login/auth: email+password sessions (httpOnly cookie, JWT-backed); every `/api/*` route below `/api/auth` requires login
 - **Roles:** `admin` / `manager` / `member` on every employee. Only admins can add employees or use Settings; only admins and managers can see Clients or Reports, and only they can set a task's due date; task access otherwise (view/assign/status/type/marketplace) is open to any logged-in employee. Role is checked fresh from the DB on every request, not trusted from the session token, so a demotion takes effect immediately
-- **Send Report — removed (2026-08-10).** It composed a metrics update by hand, one pasted row per product, and could attach a saved report link into the message. Every client now has a sheet linked, so Reports reads the figures instead of anyone pasting them, and two screens that both sent to clients was one too many to reason about. Saved report links went with it — the team confirmed none were in use — so `/api/report-links`, `reportLinkRepository`, the `api.ts` helpers and the `ReportLink` table are all gone. **The drop migration (`20260810131500_drop_report_links`) is not applied by deploying:** the Railway build runs `prisma generate`, never `prisma migrate deploy`, so it has to be run by hand against the live database, as every migration here has been.
+- **Send Report — removed (2026-08-10).** It composed a metrics update by hand, one pasted row per product, and could attach a saved report link into the message. Every client now has a sheet linked, so Reports reads the figures instead of anyone pasting them, and two screens that both sent to clients was one too many to reason about. Saved report links went with it — the team confirmed none were in use — so `/api/report-links`, `reportLinkRepository`, the `api.ts` helpers and the `ReportLink` table are all gone. **The drop migration (`20260810131500_drop_report_links`) had to be run by hand** against the live database, because at the time the Railway build ran `prisma generate` and never `prisma migrate deploy`. That is no longer true — since `c3a9c16` (11 Aug 2026) the deploy's `startCommand` is `npx prisma migrate deploy && npm start`, so migrations from that point on apply themselves on deploy.
 - Crash safety: every outbound WhatsApp send (status-update notification, task-intake ack, report send) is wrapped so a failed send can't crash the whole backend process, plus a process-level `unhandledRejection` handler as a backstop — this was a real production incident (see git history for `tasks.ts`/`taskIntake.ts`/`clients.ts`/`reportLinks.ts`), not a hypothetical
 - Deployment config for Railway and Vercel
 
@@ -297,6 +298,67 @@ colour rather than the danger one, and the report still sends.
 The lasting fix is in the master, not here — wrap the Acos formula as
 `=IFERROR(Spend/Sales, 0)` so it reads `0.00%` and goes out normally.
 
+## An empty report now says which kind of empty
+
+A report with no sections used to produce one message whatever the cause —
+"this client's sheet isn't filled in yet" — which is a guess presented as a
+fact, and wrong in the two cases that actually need something done. `buildReport`
+now returns an `emptyReason`:
+
+- **`no_tab`** — nothing in the sheet is named like this report's table. Almost
+  always **the wrong file is linked**: a *master* has one tab per client
+  ("Cherisher", "PARVOTSAV"), where a client's own generated sheet has "Daily
+  Report", "Weekly Sales", "Weekly SKU Sales", "Monthly Summary". The screen
+  lists the tab names it *did* find (`tabsInSheet`), which is what makes a
+  linked master obvious from the Reports screen instead of only after opening
+  the file.
+- **`no_period_rows`** — the table is there but has no row for the period. This
+  is the one that really does mean "not filled in yet".
+- **`no_agreed_columns`** — the row exists, but every agreed column in it was
+  blank or held a spreadsheet error. Same cause as the dropped Acos columns
+  above.
+
+## Sheet reads are cached for a minute
+
+Google allows the service account **60 reads a minute**, and the Reports screen
+costs roughly one per client. Tab *names* were already cached for ten minutes;
+what was *inside* a tab was read fresh every single time. So one pass over
+nineteen clients is nineteen reads, and a second pass inside the same minute —
+switching report kind, pressing Retry after one client fails, a colleague
+opening the same screen — is nineteen more. The third pass is where every
+remaining card turns into "Quota exceeded", which reads as every sheet being
+broken at once.
+
+A tab's contents are now held for **60 seconds** (`TAB_CONTENT_CACHE_MS`). Short
+enough that nobody types a figure into a sheet and re-reads it inside the same
+minute; long enough to absorb every repeat read of one person working the
+screen. **Failures are never cached** — a read that fails throws before the
+cache is written, so a sheet that 429s is tried again on the next press rather
+than being remembered as broken. `forgetSheet()` clears both caches for a
+genuinely cold read.
+
+This is also why the Reports screen is the one screen **not** on
+`useAutoRefresh`: polling it would spend the same allowance on nobody's behalf.
+
+## Filtering the Reports screen
+
+Nineteen cards, each holding a table and a message preview, is a long scroll
+when the errand is "check what one client is getting".
+
+- **Clients** and **Marketplace** filters, both multi-pick, both narrowing
+  together — pick Amazon and two clients and you get those clients' Amazon
+  sheets only. The marketplace filter lists only marketplaces some client
+  actually has a sheet for, and hides itself entirely when that is one.
+- **The filter governs sending, not just the view.** Everything downstream —
+  what counts as ready, what the Send button covers, what "Select all with
+  numbers" ticks — is computed from the *visible* rows. Nothing is sent to a
+  card the screen is not showing.
+- **A client ticked and then filtered out is named**, not silently dropped:
+  "N ticked client(s) are hidden by the filters and will not be sent to: …".
+  The alternative is a Send button whose number quietly disagrees with what was
+  ticked, which is exactly the sort of silence the `blocked` line already
+  exists to prevent.
+
 ## Notes go out with the update, not on their own
 
 A note ticked for the client no longer sends a WhatsApp message the moment
@@ -422,6 +484,57 @@ messages them straight away, the same as assigning from the board.
   inserts a second row, so any `nth-child` pattern would shift by one from that
   point down the page and stripe the wrong rows. The row under the pointer
   highlights instead, which does the same job and can't fall out of step.
+- **A task past its due date and not finished reads red** — red title, a red
+  left edge, a `Late` badge, and a red due-date box. Compared by **day**, not
+  by timestamp: a task due today is not late at nine in the morning, and a due
+  date on this board is a day, never a time. Finished is read from both
+  `doneAt` and the `done` status value, because the status list is
+  admin-editable and a renamed "Done" must not turn every closed task red.
+
+## Screens keep themselves up to date
+
+Every screen used to load once, when it was opened, and never again. Tasks
+arrive over WhatsApp all day and several people share the board, so the only
+way to see anything new — or anything a colleague had just changed — was to
+reload the page.
+
+- **`useAutoRefresh`** re-runs a screen's read on a timer and again the moment
+  the tab comes back to the front. Both `visibilitychange` and `focus` are
+  listened for: switching browser tabs fires one, switching windows the other.
+  Nothing runs while the tab is hidden — the person isn't looking, and it keeps
+  a forgotten open tab from calling the backend all night.
+- **The background read is deliberately quiet**: no spinner, and a failure is
+  left for the next tick rather than replacing a working board with an error.
+  Overlapping runs are skipped, so a slow response can't land after a newer one
+  and put the older list back on screen.
+- **Tasks (30s), Clients (60s), Repeating Tasks (60s).** The task board re-reads
+  *only* the tasks — the employee, client and dropdown lists change rarely and
+  only from other screens, which reload this one on the way back anyway.
+  Repeating Tasks is polled because the scheduler moves `nextRunAt` and
+  `lastRunAt` without anyone touching the screen. **The Reports screen is
+  deliberately not polled** — every read there costs a Google Sheets call
+  against a 60-a-minute ceiling.
+- **A refresh can't undo an edit in flight.** `keepPendingRows` holds the ids of
+  tasks whose save hasn't come back yet and keeps the local row for those.
+  Without it, a refresh landing in the half-second between clicking a status and
+  the save returning would put the old value back and the person who set it
+  would watch their own change reverse.
+
+## Boxes that save themselves now say so
+
+The inline fields on these tables (a client's phone, an employee's name and
+number, a config option's label, a repeat's next run) already saved on blur.
+They did it in complete silence, so the only way to find out whether it had
+stuck was to reload and look — a large part of why the app felt like it needed
+constant refreshing.
+
+- **`SavedTick`** shows "Saved" beside the box for about a second and a half.
+- **Enter saves too** (`saveOnEnter`), by blurring the field so the existing
+  save path runs — one save path, not two. Saving per keystroke would be a
+  request per digit, which is why blur is still the trigger.
+- **On the New task form, Close keeps what you typed** and only Cancel clears
+  it. Closing used to wipe every box, so a half-filled task was lost to one
+  stray click. Enter in the description adds the task.
 
 ## Filters and dropdowns on the board
 
@@ -434,6 +547,17 @@ messages them straight away, the same as assigning from the board.
 - **Every filter is now type-to-search** (`SearchableSelect`), like the row
   dropdowns already were, since these lists are admin-editable and only grow.
   The Client Details client picker too.
+- **Each filter takes several values at once** (`MultiSelect`). "The listing
+  work and the ads work" used to mean two passes over the board. Ticking more
+  values *widens* the result — matching any of them — because narrowing on the
+  second tick is the opposite of what picking a second thing means. Nothing
+  ticked is no filter at all. The panel stays open while ticking, and a
+  filter that is actually filtering is outlined so a board that looks empty
+  can be told from one that has been filtered down to nothing.
+- **`DropdownPanel` holds the trigger and the floating panel**; single-pick
+  (`SearchableSelect`) and multi-pick (`MultiSelect`) both sit on it. The
+  portal, the viewport clamping, the flip-above-when-there-is-no-room and the
+  close-on-outside-scroll rules are fiddly and were not worth a second copy.
 - **Fixed: options below the fold were unreachable.** The panel closes on
   scroll, because it's positioned from the trigger's on-screen position and a
   scroll makes that stale — but the listener is on the capture phase, so it
