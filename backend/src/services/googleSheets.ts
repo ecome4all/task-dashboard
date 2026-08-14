@@ -254,6 +254,41 @@ export function forgetTabNames(spreadsheetId?: string): void {
   else tabNameCache.clear();
 }
 
+// The same problem one step further in, and the one that actually ran the
+// account out of its allowance.
+//
+// Caching the tab *names* halved the reads; what's inside a tab was still read
+// fresh every single time. One pass of the Reports screen over nineteen
+// clients is nineteen reads, and a second pass inside the same minute — switch
+// from Weekly to Daily, press Retry after one client fails, a colleague
+// opening the same screen — is nineteen more. Sixty is the ceiling, so the
+// third pass is where every remaining card turns into "Quota exceeded", which
+// reads as every sheet being broken at once.
+//
+// A minute is the whole trade: short enough that nobody types a figure into a
+// sheet and re-reads it inside the same minute, long enough to absorb every
+// repeat read of one person working the screen. Failures are never cached —
+// readTab throws before it gets here — so a sheet that 429s is retried on the
+// next press rather than being remembered as broken.
+const TAB_CONTENT_CACHE_MS = 60 * 1000;
+const tabContentCache = new Map<string, { tab: SheetTab | null; readAt: number }>();
+
+function tabCacheKey(spreadsheetId: string, tabName: string): string {
+  return `${spreadsheetId} ${tabName}`;
+}
+
+// Both caches at once, for a caller that wants a genuinely cold read.
+export function forgetSheet(spreadsheetId?: string): void {
+  forgetTabNames(spreadsheetId);
+  if (!spreadsheetId) {
+    tabContentCache.clear();
+    return;
+  }
+  for (const key of tabContentCache.keys()) {
+    if (key.startsWith(`${spreadsheetId} `)) tabContentCache.delete(key);
+  }
+}
+
 export async function listTabNames(spreadsheetId: string): Promise<string[]> {
   const cached = tabNameCache.get(spreadsheetId);
   if (cached && Date.now() - cached.readAt < TAB_NAME_CACHE_MS) return cached.names;
@@ -276,7 +311,11 @@ export async function listTabNames(spreadsheetId: string): Promise<string[]> {
 // throwing if the tab doesn't exist (a client's sheet may not have every
 // known tab), so the caller can skip it instead of failing the whole read.
 export async function readTab(spreadsheetId: string, tabName: string): Promise<SheetTab | null> {
-  return withRetry(async () => {
+  const cacheKey = tabCacheKey(spreadsheetId, tabName);
+  const cached = tabContentCache.get(cacheKey);
+  if (cached && Date.now() - cached.readAt < TAB_CONTENT_CACHE_MS) return cached.tab;
+
+  const tab = await withRetry(async () => {
   try {
     const sheets = sheetsClient();
     const res = await sheets.spreadsheets.values.get({
@@ -298,4 +337,9 @@ export async function readTab(spreadsheetId: string, tabName: string): Promise<S
     throw err;
   }
   });
+
+  // Only a real answer is remembered. A read that failed threw above, so a
+  // quota error or an unshared sheet is never cached as a result.
+  tabContentCache.set(cacheKey, { tab, readAt: Date.now() });
+  return tab;
 }
