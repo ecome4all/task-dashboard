@@ -1,14 +1,17 @@
-export type Frequency = "daily" | "weekly" | "monthly";
+export type Frequency = "daily" | "weekly" | "fortnightly" | "monthly";
 
-export const FREQUENCIES: Frequency[] = ["daily", "weekly", "monthly"];
+export const FREQUENCIES: Frequency[] = ["daily", "weekly", "fortnightly", "monthly"];
 
 export function isFrequency(value: unknown): value is Frequency {
   return typeof value === "string" && (FREQUENCIES as string[]).includes(value);
 }
 
+// Order here is the order of the dropdown on both screens, which read the
+// keys of this object — shortest gap first.
 export const FREQUENCY_LABEL: Record<Frequency, string> = {
   daily: "Every day",
   weekly: "Every week",
+  fortnightly: "Every 2 weeks",
   monthly: "Every month",
 };
 
@@ -30,6 +33,15 @@ export function addInterval(from: Date, frequency: Frequency): Date {
 
   if (frequency === "weekly") {
     next.setDate(next.getDate() + 7);
+    return next;
+  }
+
+  // 14 days, not "half a month": this keeps a fortnightly repeat on the same
+  // weekday forever, which is what someone setting one up is picturing. It
+  // does mean it drifts against the calendar month — twice in most months,
+  // three times in a month that fits it.
+  if (frequency === "fortnightly") {
+    next.setDate(next.getDate() + 14);
     return next;
   }
 

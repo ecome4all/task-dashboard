@@ -174,11 +174,15 @@ export function deleteTask(id: string): Promise<void> {
   return request(`/api/tasks/${id}`, { method: "DELETE" });
 }
 
-export type Frequency = "daily" | "weekly" | "monthly";
+export type Frequency = "daily" | "weekly" | "fortnightly" | "monthly";
 
+// Kept in step with FREQUENCY_LABEL in the backend's services/recurrence.ts —
+// the key order is the order of the dropdown on the board and on Repeating
+// Tasks, both of which read the keys of this object.
 export const FREQUENCY_LABEL: Record<Frequency, string> = {
   daily: "Every day",
   weekly: "Every week",
+  fortnightly: "Every 2 weeks",
   monthly: "Every month",
 };
 

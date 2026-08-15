@@ -109,7 +109,7 @@ model RecurringTask {
   assignee    String?
   taskType    String?
   marketplace String?
-  // "daily" | "weekly" | "monthly"
+  // "daily" | "weekly" | "fortnightly" | "monthly"
   frequency   String
   nextRunAt   DateTime
   lastRunAt   DateTime?

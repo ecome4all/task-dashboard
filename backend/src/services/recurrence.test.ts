@@ -1,18 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { addInterval, advanceNextRunAt, firstRunAt, isFrequency } from "./recurrence";
+import {
+  addInterval,
+  advanceNextRunAt,
+  firstRunAt,
+  isFrequency,
+  FREQUENCIES,
+  FREQUENCY_LABEL,
+} from "./recurrence";
 
 function d(iso: string): Date {
   return new Date(iso);
 }
 
 describe("isFrequency", () => {
-  it("accepts the three known frequencies and rejects anything else", () => {
+  it("accepts the known frequencies and rejects anything else", () => {
     expect(isFrequency("daily")).toBe(true);
     expect(isFrequency("weekly")).toBe(true);
+    expect(isFrequency("fortnightly")).toBe(true);
     expect(isFrequency("monthly")).toBe(true);
     expect(isFrequency("yearly")).toBe(false);
+    expect(isFrequency("biweekly")).toBe(false);
     expect(isFrequency("")).toBe(false);
     expect(isFrequency(undefined)).toBe(false);
+  });
+
+  // Both dropdowns read the keys of FREQUENCY_LABEL, and the scheduler
+  // switches on the value — a frequency in one and not the other is either an
+  // option that can't be saved or a saved value that never advances.
+  it("labels every frequency it accepts", () => {
+    for (const freq of FREQUENCIES) {
+      expect(FREQUENCY_LABEL[freq]).toBeTruthy();
+    }
+    expect(Object.keys(FREQUENCY_LABEL).sort()).toEqual([...FREQUENCIES].sort());
   });
 });
 
@@ -23,6 +42,19 @@ describe("addInterval", () => {
 
   it("adds a week", () => {
     expect(addInterval(d("2026-07-30T09:00:00Z"), "weekly").toISOString()).toContain("2026-08-06");
+  });
+
+  it("adds two weeks", () => {
+    expect(addInterval(d("2026-07-30T09:00:00Z"), "fortnightly").toISOString()).toContain("2026-08-13");
+  });
+
+  // Same weekday every time is the point of counting days rather than
+  // stepping half a month.
+  it("keeps a fortnightly repeat on the same weekday across a month end", () => {
+    const start = d("2026-08-27T09:00:00Z"); // Thursday
+    const next = addInterval(start, "fortnightly");
+    expect(next.toISOString()).toContain("2026-09-10");
+    expect(next.getUTCDay()).toBe(start.getUTCDay());
   });
 
   it("adds a month", () => {
@@ -62,7 +94,7 @@ describe("advanceNextRunAt", () => {
 
   it("always returns a time in the future", () => {
     const now = d("2026-07-30T09:00:00Z");
-    for (const freq of ["daily", "weekly", "monthly"] as const) {
+    for (const freq of FREQUENCIES) {
       expect(advanceNextRunAt(d("2026-01-01T09:00:00Z"), freq, now).getTime()).toBeGreaterThan(now.getTime());
     }
   });

@@ -3,13 +3,17 @@ import { recurringTaskRepository } from "../repositories/recurringTaskRepository
 import { taskRepository } from "../repositories/taskRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { requireRole } from "../auth/requireRole";
-import { isFrequency, firstRunAt } from "../services/recurrence";
+import { isFrequency, firstRunAt, FREQUENCIES } from "../services/recurrence";
 import { taskVisibilityFor } from "../services/taskVisibility";
 import { whyRepeatWouldDuplicate } from "../services/repeatDuplicates";
 
 // Same audience as due dates: setting up work that will keep appearing on
 // everyone's board is a scheduling decision, not day-to-day triage.
 const MANAGE_ROLES = ["admin", "manager"];
+
+// Built from the list rather than typed out, so adding a frequency doesn't
+// leave the rejection message naming the old set.
+const FREQUENCY_ERROR = `frequency must be one of: ${FREQUENCIES.join(", ")}`;
 
 export function createRecurringTasksRouter() {
   const router = Router();
@@ -30,7 +34,7 @@ export function createRecurringTasksRouter() {
     const { taskId, frequency, nextRunAt } = req.body;
 
     if (!isFrequency(frequency)) {
-      res.status(400).json({ error: "frequency must be daily, weekly or monthly" });
+      res.status(400).json({ error: FREQUENCY_ERROR });
       return;
     }
 
@@ -98,7 +102,7 @@ export function createRecurringTasksRouter() {
       return;
     }
     if (frequency !== undefined && !isFrequency(frequency)) {
-      res.status(400).json({ error: "frequency must be daily, weekly or monthly" });
+      res.status(400).json({ error: FREQUENCY_ERROR });
       return;
     }
 
