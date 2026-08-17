@@ -4,6 +4,7 @@ import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+import { sendFailure } from "../whatsapp/sendFailure";
 import {
   composeSendUpdateMessage,
   changedFieldsSince,
@@ -529,7 +530,8 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       await whatsapp.sendMessage(task.sourceRef, message);
     } catch (err) {
       console.error("Failed to send manual task update:", err);
-      res.status(502).json({ error: "Couldn't send the message. Try again." });
+      const failure = sendFailure(err);
+      res.status(failure.status).json({ error: failure.error, detail: failure.detail });
       return;
     }
 

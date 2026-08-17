@@ -7,6 +7,7 @@ import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessa
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { requireRole } from "../auth/requireRole";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
+import { sendFailure } from "../whatsapp/sendFailure";
 import { buildWeeklyReportPreview, buildReport, isReportKind } from "../services/weeklyReportPreview";
 import { sheetProblemOf, sheetErrorDetail } from "../services/googleSheets";
 import { changedFieldsSince, TaskSnapshot } from "../services/taskMessages";
@@ -445,7 +446,8 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
       // crash the server — an uncaught rejection here would take down the
       // whole process, not just this one request.
       console.error("Failed to send client update:", err);
-      res.status(502).json({ error: "Couldn't send the message. Try again." });
+      const failure = sendFailure(err);
+      res.status(failure.status).json({ error: failure.error, detail: failure.detail });
       return;
     }
     res.json({ sent: true });
