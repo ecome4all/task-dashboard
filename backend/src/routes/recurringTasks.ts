@@ -2,6 +2,7 @@ import { Router } from "express";
 import { recurringTaskRepository } from "../repositories/recurringTaskRepository";
 import { taskRepository } from "../repositories/taskRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
+import { configOptionRepository } from "../repositories/configOptionRepository";
 import { requireRole } from "../auth/requireRole";
 import { isFrequency, firstRunAt, FREQUENCIES } from "../services/recurrence";
 import { taskVisibilityFor } from "../services/taskVisibility";
@@ -70,10 +71,15 @@ export function createRecurringTasksRouter() {
       {
         description: task.description,
         clientName: task.clientName,
+        marketplace: task.marketplace,
+        taskType: task.taskType,
         assignee: task.assignee,
         frequency,
       },
-      await recurringTaskRepository.list()
+      await recurringTaskRepository.list(),
+      Object.fromEntries(
+        (await configOptionRepository.list("marketplace")).map((o) => [o.value, o.label])
+      )
     );
     if (duplicate) {
       res.status(409).json({ error: duplicate });

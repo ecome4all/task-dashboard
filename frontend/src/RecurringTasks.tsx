@@ -53,6 +53,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   const [dayFilter, setDayFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [taskTypeOptions, setTaskTypeOptions] = useState<ConfigOption[]>([]);
+  const [marketplaceOptions, setMarketplaceOptions] = useState<ConfigOption[]>([]);
   const { savedKey, flash } = useSavedFlash();
 
   // Members can see why a task keeps coming back, but only admins and
@@ -81,6 +82,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   // so this doesn't go through the error banner.
   useEffect(() => {
     fetchConfigOptions("task_type").then(setTaskTypeOptions).catch(() => {});
+    fetchConfigOptions("marketplace").then(setMarketplaceOptions).catch(() => {});
   }, []);
 
   // The scheduler moves these on its own: every time a repeat fires, its
@@ -175,6 +177,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     .map((name) => ({ value: name, label: name }));
 
   const typeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
+  const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
 
   if (loading) return <Spinner label="Loading repeating tasks…" />;
 
@@ -256,6 +259,9 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                 <tr>
                   <th>Task</th>
                   <th>Client</th>
+                  {/* Two repeats can differ by nothing but this, so without
+                      the column those rows read as the same row twice. */}
+                  <th>Marketplace</th>
                   <th>Type</th>
                   <th>Employee</th>
                   <th>How often</th>
@@ -271,6 +277,11 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                   <tr key={repeat.id} style={repeat.active ? undefined : { opacity: 0.55 }}>
                     <td>{repeat.description}</td>
                     <td>{repeat.clientName ?? "—"}</td>
+                    <td>
+                      {repeat.marketplace
+                        ? marketplaceLabels[repeat.marketplace] ?? repeat.marketplace
+                        : "—"}
+                    </td>
                     {/* The stored value only shows if an admin has since
                         renamed or removed that type — better than a blank. */}
                     <td>{repeat.taskType ? typeLabels[repeat.taskType] ?? repeat.taskType : "—"}</td>

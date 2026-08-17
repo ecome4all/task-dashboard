@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import { whyRepeatWouldDuplicate, ExistingRepeat, ProposedRepeat } from "./repeatDuplicates";
 
 const weekly = (over: Partial<ExistingRepeat> = {}): ExistingRepeat => ({
-  description: "Bleeders",
-  clientName: "Kapiva",
+  description: "Ads Optimise",
+  clientName: "Dhwani Grug Udhyog",
+  marketplace: "amazon",
+  taskType: "ads",
   assignee: "Jayvant",
   frequency: "weekly",
   active: true,
@@ -13,8 +15,10 @@ const weekly = (over: Partial<ExistingRepeat> = {}): ExistingRepeat => ({
 // The same repeat, as it arrives from the "Repeat" button — so each test below
 // varies only the one thing it is about.
 const proposed = (over: Partial<ProposedRepeat> = {}): ProposedRepeat => ({
-  description: "Bleeders",
-  clientName: "Kapiva",
+  description: "Ads Optimise",
+  clientName: "Dhwani Grug Udhyog",
+  marketplace: "amazon",
+  taskType: "ads",
   assignee: "Jayvant",
   frequency: "weekly",
   ...over,
@@ -36,35 +40,53 @@ describe("whyRepeatWouldDuplicate", () => {
   it("ignores case and stray spaces, because the wording is usually copied", () => {
     expect(
       whyRepeatWouldDuplicate(
-        proposed({ description: "  bleeders ", clientName: " kapiva", assignee: "jayvant" }),
+        proposed({ description: "  ads optimise ", clientName: " dhwani grug udhyog", assignee: "jayvant" }),
         [weekly()]
       )
     ).not.toBeNull();
   });
 
-  // Same words, different person, is genuinely different work.
-  it("allows the same work set up for somebody else", () => {
-    expect(whyRepeatWouldDuplicate(proposed({ assignee: "Kinjal Patel" }), [weekly()])).toBeNull();
+  // One field different and it is different work. Each of these is a real day
+  // on this board: the same wording set up again, changing only one thing.
+  it.each([
+    ["a different client", { clientName: "Mamaearth" }],
+    ["a different marketplace", { marketplace: "flipkart" }],
+    ["a different type", { taskType: "listing" }],
+    ["a different employee", { assignee: "Kinjal Patel" }],
+    ["a different how-often", { frequency: "daily" }],
+  ])("allows the same task name with %s", (_what, change) => {
+    expect(whyRepeatWouldDuplicate(proposed(change), [weekly()])).toBeNull();
   });
 
-  // The whole business runs the same few task names across every client, so
-  // this is the normal way of working rather than a double press.
-  it("allows the same task name set up for a different client", () => {
-    expect(whyRepeatWouldDuplicate(proposed({ clientName: "Mamaearth" }), [weekly()])).toBeNull();
+  // The one from the board: "Ads Optimise" for the same customer, Amazon
+  // already set up, Flipkart being set up now. Two different jobs.
+  it("allows the same task for the same client on another marketplace", () => {
+    expect(
+      whyRepeatWouldDuplicate(proposed({ marketplace: "flipkart" }), [weekly({ marketplace: "amazon" })])
+    ).toBeNull();
   });
 
-  it("allows the same task for the same client on a different how-often", () => {
-    expect(whyRepeatWouldDuplicate(proposed({ frequency: "daily" }), [weekly()])).toBeNull();
+  it("names the client and marketplace it clashed with", () => {
+    const why = whyRepeatWouldDuplicate(proposed(), [weekly()], { amazon: "Amazon" });
+    expect(why).toContain("for Dhwani Grug Udhyog");
+    expect(why).toContain("on Amazon");
   });
 
-  it("names the client it clashed with, so it is clear which one is covered", () => {
-    expect(whyRepeatWouldDuplicate(proposed(), [weekly()])).toContain("for Kapiva");
+  // A marketplace an admin added since has no label to look up; the stored
+  // value is still better than saying nothing.
+  it("falls back to the stored marketplace when it has no label", () => {
+    const why = whyRepeatWouldDuplicate(proposed({ marketplace: "jiomart" }), [
+      weekly({ marketplace: "jiomart" }),
+    ]);
+    expect(why).toContain("on jiomart");
   });
 
-  it("leaves the client out of the message when there isn't one", () => {
-    const why = whyRepeatWouldDuplicate(proposed({ clientName: null }), [weekly({ clientName: null })]);
+  it("leaves the client and marketplace out of the message when there are none", () => {
+    const why = whyRepeatWouldDuplicate(proposed({ clientName: null, marketplace: null }), [
+      weekly({ clientName: null, marketplace: null }),
+    ]);
     expect(why).toContain("already repeats —");
-    expect(why).not.toContain("for null");
+    expect(why).not.toContain("null");
   });
 
   it("treats two unassigned repeats of the same wording as duplicates", () => {
