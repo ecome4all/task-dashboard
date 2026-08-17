@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   ApiError,
+  ConfigOption,
   CurrentUser,
   Frequency,
   FREQUENCY_LABEL,
   RecurringTask,
   deleteRecurringTask,
+  fetchConfigOptions,
   fetchRecurringTasks,
   updateRecurringTask,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
+import MultiSelect from "./MultiSelect";
 import Pagination, { usePaged } from "./Paged";
 import { toLocalInputValue, fromLocalInputValue } from "./dateTimeInput";
 import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
@@ -20,11 +23,36 @@ function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
 
+// The "No client" / "Not Set" option, told apart from an empty filter list —
+// which means no filter at all, show everything. Same sentinel the board's
+// filters use.
+const UNSET = "__unset__";
+
+// The day a repeat next lands on. Indexed to match getDay(), which counts from
+// Sunday — so this list is in its order, not reading order.
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// The dropdown reads Monday first, the way the working week does. Sunday is
+// last but still offered, because a repeat can be set for one.
+const DAY_FILTER_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+// Empty filter list means no filter. Several picked means any of them —
+// narrowing as you tick more would make the second tick always show less,
+// which is the opposite of what picking a second thing means.
+function matchesAny(value: string | null, filters: string[]): boolean {
+  if (filters.length === 0) return true;
+  return filters.some((f) => (f === UNSET ? !value : value === f));
+}
+
 export default function RecurringTasks({ user }: { user: CurrentUser }) {
   const [repeats, setRepeats] = useState<RecurringTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [clientFilter, setClientFilter] = useState<string[]>([]);
+  const [dayFilter, setDayFilter] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [taskTypeOptions, setTaskTypeOptions] = useState<ConfigOption[]>([]);
   const { savedKey, flash } = useSavedFlash();
 
   // Members can see why a task keeps coming back, but only admins and
@@ -45,6 +73,14 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
 
   useEffect(() => {
     load();
+  }, []);
+
+  // Types are admin-editable, so the filter reads the same list the board's
+  // does rather than a copy. A repeat stores the value; the label is what
+  // belongs on screen. Failing to load them costs the labels, not the screen,
+  // so this doesn't go through the error banner.
+  useEffect(() => {
+    fetchConfigOptions("task_type").then(setTaskTypeOptions).catch(() => {});
   }, []);
 
   // The scheduler moves these on its own: every time a repeat fires, its
@@ -101,7 +137,44 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     }
   }
 
-  const pagedRepeats = usePaged(repeats, 10);
+  // The day is the one the *next* one lands on, read off each repeat rather
+  // than stored: a weekly repeat set for a Thursday stays on Thursdays, so the
+  // day it next runs is the day it runs.
+  const filteredRepeats = repeats.filter(
+    (repeat) =>
+      matchesAny(repeat.clientName, clientFilter) &&
+      matchesAny(repeat.taskType, typeFilter) &&
+      (dayFilter.length === 0 ||
+        dayFilter.includes(String(new Date(repeat.nextRunAt).getDay())))
+  );
+
+  const pagedRepeats = usePaged(filteredRepeats, 10);
+
+  // Every filter goes through here so page 3 of the old result doesn't survive
+  // a narrower filter — the same reason the board's dropdowns reset it.
+  function pickFilter(set: (values: string[]) => void, values: string[]) {
+    set(values);
+    pagedRepeats.reset();
+  }
+
+  const anyFilter = clientFilter.length > 0 || dayFilter.length > 0 || typeFilter.length > 0;
+
+  function clearFilters() {
+    setClientFilter([]);
+    setDayFilter([]);
+    setTypeFilter([]);
+    pagedRepeats.reset();
+  }
+
+  // Only the clients that actually have something repeating: offering the full
+  // client list would be a dropdown of sixty where eight can match.
+  const clientOptions = Array.from(
+    new Set(repeats.map((r) => r.clientName).filter((name): name is string => Boolean(name)))
+  )
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({ value: name, label: name }));
+
+  const typeLabels = Object.fromEntries(taskTypeOptions.map((o) => [o.value, o.label]));
 
   if (loading) return <Spinner label="Loading repeating tasks…" />;
 
@@ -114,7 +187,13 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Repeating Tasks</span>
-          <span className="panel-sub">{repeats.length} set up</span>
+          {/* Says both numbers while a filter is on, so a short table reads as
+              "filtered" rather than as "most of them have gone". */}
+          <span className="panel-sub">
+            {anyFilter
+              ? `${filteredRepeats.length} of ${repeats.length} set up`
+              : `${repeats.length} set up`}
+          </span>
         </div>
         <p className="tip">
           💡 These make a new task on their own, at the date and time set below. To add one, go to Tasks
@@ -127,15 +206,60 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
             <p className="panel-sub">Nothing repeating yet.</p>
           )}
 
+          {/* Type-to-search dropdowns, the same ones the board's filters use.
+              Each takes as many values as you want to tick — two clients, or
+              Monday and Thursday — and shows anything matching any of them. */}
           {repeats.length > 0 && (
+            <div className="filter-row">
+              <MultiSelect
+                values={clientFilter}
+                placeholder="All Clients"
+                options={[...clientOptions, { value: UNSET, label: "No client" }]}
+                onChange={(values) => pickFilter(setClientFilter, values)}
+              />
+              <MultiSelect
+                values={dayFilter}
+                placeholder="All Days"
+                options={DAY_FILTER_ORDER.map((day) => ({
+                  value: String(day),
+                  label: DAY_NAMES[day],
+                }))}
+                onChange={(values) => pickFilter(setDayFilter, values)}
+              />
+              <MultiSelect
+                values={typeFilter}
+                placeholder="All Types"
+                options={[
+                  ...taskTypeOptions.map((o) => ({ value: o.value, label: o.label })),
+                  { value: UNSET, label: "Not Set" },
+                ]}
+                onChange={(values) => pickFilter(setTypeFilter, values)}
+              />
+              {anyFilter && (
+                <button className="btn btn-ghost btn-sm" onClick={clearFilters} type="button">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* A filter that matches nothing needs saying so — an empty table
+              under three dropdowns otherwise reads as everything being gone. */}
+          {repeats.length > 0 && filteredRepeats.length === 0 && (
+            <p className="panel-sub">Nothing matches those filters.</p>
+          )}
+
+          {filteredRepeats.length > 0 && (
             <>
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Task</th>
                   <th>Client</th>
+                  <th>Type</th>
                   <th>Employee</th>
                   <th>How often</th>
+                  <th>Day</th>
                   <th>Next one</th>
                   <th>Last one</th>
                   <th>On or off</th>
@@ -147,6 +271,9 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                   <tr key={repeat.id} style={repeat.active ? undefined : { opacity: 0.55 }}>
                     <td>{repeat.description}</td>
                     <td>{repeat.clientName ?? "—"}</td>
+                    {/* The stored value only shows if an admin has since
+                        renamed or removed that type — better than a blank. */}
+                    <td>{repeat.taskType ? typeLabels[repeat.taskType] ?? repeat.taskType : "—"}</td>
                     <td>{repeat.assignee ?? "No employee"}</td>
                     <td>
                       {canManage ? (
@@ -163,6 +290,10 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                         FREQUENCY_LABEL[repeat.frequency]
                       )}
                     </td>
+                    {/* Read off the next run rather than set on its own: move
+                        the date and the day follows it, so the two can't
+                        disagree. */}
+                    <td>{DAY_NAMES[new Date(repeat.nextRunAt).getDay()]}</td>
                     <td>
                       {canManage ? (
                         <>
