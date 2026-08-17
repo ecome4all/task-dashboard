@@ -10,10 +10,23 @@ import { Frequency, FREQUENCY_LABEL, isFrequency } from "./recurrence";
 // task creation.
 //
 // So the check has to be on what a repeat is made of: same wording, same
-// person. Case and stray spaces are ignored, because the second one is usually
-// set up from a task the wording was copied into.
+// client, same person, same how-often. Case and stray spaces are ignored,
+// because the second one is usually set up from a task the wording was copied
+// into.
+//
+// The client and the how-often are part of that identity because the same few
+// task names are used for every client this business runs — "Bleeders" for one
+// customer on Monday and "Bleeders" for another on Thursday is the normal way
+// of working, not somebody pressing the button twice. Only the four together
+// mean "you have already set this up".
+//
+// The date of the next run is deliberately *not* part of it. The mistake this
+// guards against is pressing "Repeat" again on a task days later, and the date
+// is the one thing certain to differ when that happens — counting it would let
+// through exactly the case the check exists for.
 export interface ExistingRepeat {
   description: string;
+  clientName: string | null;
   assignee: string | null;
   frequency: string;
   active: boolean;
@@ -21,14 +34,16 @@ export interface ExistingRepeat {
 
 export interface ProposedRepeat {
   description: string;
+  clientName: string | null;
   assignee: string | null;
+  frequency: string;
 }
 
 function sameWording(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-function samePerson(a: string | null, b: string | null): boolean {
+function sameName(a: string | null, b: string | null): boolean {
   return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
 }
 
@@ -43,7 +58,9 @@ export function whyRepeatWouldDuplicate(
     (repeat) =>
       repeat.active &&
       sameWording(repeat.description, proposed.description) &&
-      samePerson(repeat.assignee, proposed.assignee)
+      sameName(repeat.clientName, proposed.clientName) &&
+      sameName(repeat.assignee, proposed.assignee) &&
+      sameName(repeat.frequency, proposed.frequency)
   );
   if (!clash) return null;
 
@@ -51,9 +68,13 @@ export function whyRepeatWouldDuplicate(
     ? FREQUENCY_LABEL[clash.frequency as Frequency].toLowerCase()
     : "on a repeat";
 
+  // Names the client, so that on a board where ten clients share this task
+  // wording it is clear which one is already covered.
+  const forWhom = clash.clientName ? ` for ${clash.clientName}` : "";
+
   return (
-    `This task already repeats — ${howOften}. Setting it up again would make ` +
-    `two of it every time. Open the Repeating Tasks screen to change when it ` +
-    `runs, or to stop it.`
+    `This task already repeats${forWhom} — ${howOften}. Setting it up again ` +
+    `would make two of it every time. Open the Repeating Tasks screen to ` +
+    `change when it runs, or to stop it.`
   );
 }

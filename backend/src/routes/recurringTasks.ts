@@ -67,7 +67,12 @@ export function createRecurringTasksRouter() {
     // of a wrong allow is a second copy of a task every week from then on,
     // messaged to whoever it lands on each time.
     const duplicate = whyRepeatWouldDuplicate(
-      { description: task.description, assignee: task.assignee },
+      {
+        description: task.description,
+        clientName: task.clientName,
+        assignee: task.assignee,
+        frequency,
+      },
       await recurringTaskRepository.list()
     );
     if (duplicate) {
