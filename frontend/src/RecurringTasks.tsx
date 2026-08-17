@@ -128,6 +128,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
           )}
 
           {repeats.length > 0 && (
+            <>
             <table className="data-table">
               <thead>
                 <tr>
@@ -203,6 +204,8 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                 ))}
               </tbody>
             </table>
+            <Pagination paged={pagedRepeats} />
+            </>
           )}
         </div>
       </div>

@@ -444,6 +444,7 @@ export default function Employees({ user }: { user: CurrentUser }) {
               })}
             </tbody>
           </table>
+          <Pagination paged={pagedEmployees} />
         </div>
       </div>
     </>
