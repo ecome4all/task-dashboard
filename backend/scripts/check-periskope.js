@@ -84,6 +84,39 @@ console.log("  4. Webhook signature check is working");
   const groups = chats.filter((c) => String(c.chat_id || "").endsWith("@g.us"));
   console.log(`  5. Periskope answered OK - ${chats.length} chats, ${groups.length} groups`);
 
+  // --- 6. is the WhatsApp number actually connected? ---
+  // This one matters more than all the others. Step 5 above passes even when
+  // nothing can be sent: the chat list comes back from Periskope's own stored
+  // copy, so a switched-off phone still reports hundreds of chats and looks
+  // perfectly healthy. On 17 Aug 2026 this script said everything was fine
+  // while every single message was failing.
+  let phone_res;
+  try {
+    phone_res = await fetch("https://api.periskope.app/v1/phones", {
+      headers: { Authorization: "Bearer " + apiKey, "x-phone": phone },
+    });
+  } catch (err) {
+    fail(`Could not ask Periskope about the phone - ${err.message}`, "Check your internet connection and try again.");
+  }
+  if (!phone_res.ok) {
+    fail(`Periskope would not say whether the phone is connected (${phone_res.status}).`, "Wait a minute and try again.");
+  }
+
+  const phoneBody = await phone_res.json();
+  const info = Array.isArray(phoneBody) ? phoneBody[0] : phoneBody;
+  const state = info && info.wa_state;
+
+  if (state !== "CONNECTED") {
+    const waiting = info && info.qr_code;
+    fail(
+      `WhatsApp is not connected - the number is "${state || "unknown"}". No messages can be sent to anyone.`,
+      waiting
+        ? "Open Periskope, find this number, and scan the QR code it shows. On the phone: WhatsApp > Linked devices > Link a device."
+        : "Open Periskope and restart this number. If it then shows a QR code, scan it from WhatsApp on that phone (Linked devices > Link a device).",
+    );
+  }
+  console.log(`  6. WhatsApp is connected (${state})`);
+
   console.log("\n  Everything on this computer is set up correctly.");
   console.log("\n  Two things this cannot check for you:");
   console.log("    - that Railway has these same three values");
