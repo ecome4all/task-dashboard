@@ -113,6 +113,17 @@ model RecurringTask {
   frequency   String
   nextRunAt   DateTime
   lastRunAt   DateTime?
+  // The Task this repeat made last time it ran. When its turn comes round
+  // again, this is what decides whether there is anything to make: if that
+  // task is still open, the work is already on the board and a second copy
+  // of it helps nobody, so the assignee is reminded about it instead. Only
+  // once it is marked done does the next turn create a fresh one.
+  //
+  // Not a relation, and deliberately not cascading: deleting a task must not
+  // delete the repeat that made it, and a repeat pointing at a task that has
+  // since been deleted simply creates a new one next turn — which is the
+  // right answer, because deleting a task says it should not have been there.
+  lastTaskId  String?
   active      Boolean   @default(true)
   createdBy   String
   createdAt   DateTime  @default(now())

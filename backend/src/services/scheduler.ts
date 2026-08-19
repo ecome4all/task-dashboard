@@ -5,6 +5,7 @@ import { configOptionRepository } from "../repositories/configOptionRepository";
 import { advanceNextRunAt, Frequency } from "./recurrence";
 import { composeEmployeeReminder, ReminderTask } from "./reminderMessages";
 import { notifyAssignee } from "./assignmentNotice";
+import { remindAboutOpenTask } from "./repeatReminder";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { clientRepository } from "../repositories/clientRepository";
 import { buildReport, ReportKind } from "./weeklyReportPreview";
@@ -40,17 +41,27 @@ function reminderHour(): number {
 // keeps a scheduling detail out of the client's database.
 let lastReminderDate: string | null = null;
 
-function dateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+// The local day, not the UTC one — localDateKey, the same key the report
+// round already uses. It has to match the clock reminderHour() is read
+// against: in the hour that straddles UTC midnight (05:00–05:59 in India) a
+// UTC key changes halfway through, which would let the same morning's
+// reminder go out twice.
+const dateKey = localDateKey;
 
-// Moves a due repeat's clock forward, then creates the Task it was due for.
-// Claiming first is what stops the same run producing two identical tasks —
-// see recurringTaskRepository.claim. A claim that fails means another pass
-// already has this run, so this one leaves it alone.
+// Moves a due repeat's clock forward, then creates the Task it was due for —
+// unless the last one it made is still open, in which case it reminds whoever
+// is holding that one instead. Claiming first is what stops the same run
+// producing two identical tasks — see recurringTaskRepository.claim. A claim
+// that fails means another pass already has this run, so this one leaves it
+// alone.
 export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels): Promise<number> {
   const due = await recurringTaskRepository.due(now);
   let created = 0;
+
+  // Loaded once for the whole pass, and only if there is anything due: the
+  // reminder needs status labels ("No Action Yet", not "no_action_yet"), and
+  // a pass typically has several repeats coming round together.
+  let statusLabels: Record<string, string> | null = null;
 
   for (const repeat of due) {
     try {
@@ -62,6 +73,37 @@ export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels
       );
       if (!claimed) {
         console.log(`[scheduler] repeat "${repeat.description}" already run by another pass — left alone`);
+        continue;
+      }
+
+      // The work is already on the board and unfinished, so this turn has
+      // nothing to create. A second copy would say nothing the first one
+      // doesn't, and two identical rows a week apart is exactly what the
+      // client reported as the system inventing tasks by itself.
+      //
+      // The clock still moved on above, deliberately: the turn happened, and
+      // the next one comes round on schedule and asks the same question
+      // again. A task nobody finishes gets a nudge every week, not silence.
+      const stillOpen = await taskRepository.openTaskFor({
+        lastTaskId: repeat.lastTaskId,
+        description: repeat.description,
+        sourceRef: repeat.sourceRef,
+      });
+      if (stillOpen) {
+        if (!statusLabels) {
+          statusLabels = Object.fromEntries(
+            (await configOptionRepository.list("status")).map((o) => [o.value, o.label])
+          );
+        }
+        // Points at the task actually found, which matters on the fallback
+        // path: a repeat set up before this existed has nothing recorded, and
+        // recording it now means every later turn takes the precise route.
+        await recurringTaskRepository.recordTask(repeat.id, stillOpen.id);
+        await remindAboutOpenTask(repeat.assignee, stillOpen, statusLabels, now, channels);
+        console.log(
+          `[scheduler] "${repeat.description}" is still open from last time — reminded ` +
+            `${repeat.assignee ?? "nobody (no one is on it)"} instead of creating another`
+        );
         continue;
       }
 
@@ -105,6 +147,16 @@ export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels
       }
 
       created += 1;
+
+      // Remembered so next week's turn can see whether this was ever
+      // finished. Best-effort: the task is already made and the person
+      // already being told, and a repeat that failed to record it falls back
+      // to matching on wording rather than losing the chase entirely.
+      try {
+        await recurringTaskRepository.recordTask(repeat.id, task.id);
+      } catch (err) {
+        console.error(`[scheduler] couldn't record the task made by repeat ${repeat.id}:`, err);
+      }
 
       // A repeat that carries an assignee is a fresh piece of work landing on
       // that person, so they get the same "this is yours" message as any

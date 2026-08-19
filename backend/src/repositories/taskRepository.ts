@@ -1,6 +1,6 @@
 import { prisma } from "../db";
 import { TaskVisibility } from "../services/taskVisibility";
-import { DUPLICATE_WINDOW_MS, pickDuplicate } from "../services/duplicateTasks";
+import { DUPLICATE_WINDOW_MS, isSameWork, pickDuplicate } from "../services/duplicateTasks";
 
 const TENANT_ID = "default";
 
@@ -74,6 +74,41 @@ export const taskRepository = {
       orderBy: { createdAt: "desc" },
     });
     return pickDuplicate(input, candidates);
+  },
+
+  // The still-open task a repeat already put on the board, or null if there
+  // is nothing outstanding and it should create a fresh one. This is what
+  // turns "make another copy every week" into "remind whoever has it".
+  //
+  // Two ways of finding it, and the order matters:
+  //
+  //   1. `lastTaskId` — exactly the task this repeat made last time. Precise,
+  //      and survives the description being edited on the board afterwards.
+  //      A row that is gone was deleted deliberately, which says it should
+  //      not have been there, so a new one is right: null, not "chase it".
+  //   2. Only when nothing is recorded yet: the newest open task with the
+  //      same wording from the same chat. This exists for the repeats set up
+  //      before `lastTaskId` did, so they start chasing on their next turn
+  //      instead of duplicating once more first. It also quietly does the
+  //      right thing when someone raised this week's copy by hand — that is
+  //      the same work, and reminding beats duplicating there too.
+  //
+  // "Open" is anything not done. A task parked on the marketplace or waiting
+  // on the client is still outstanding work somebody is holding.
+  async openTaskFor(input: { lastTaskId: string | null; description: string; sourceRef: string }) {
+    if (input.lastTaskId) {
+      // Named rather than `this`, so a destructured import can't break it.
+      const previous = await taskRepository.findById(input.lastTaskId);
+      return previous && previous.status !== "done" ? previous : null;
+    }
+
+    const candidates = await prisma.task.findMany({
+      where: { tenantId: TENANT_ID, sourceRef: input.sourceRef, status: { not: "done" } },
+      orderBy: { createdAt: "desc" },
+    });
+    // Compared in JS for the same reason findDuplicateOf does it: the match
+    // must not depend on the database's collation.
+    return candidates.find((candidate) => isSameWork(candidate, input)) ?? null;
   },
 
   // Filtered in the query rather than after it: a member's own board is

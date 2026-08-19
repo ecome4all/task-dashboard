@@ -1,0 +1,17 @@
+-- A repeat used to create a brand new task every time its turn came round,
+-- whether or not the last one had been finished. With thirty repeats running,
+-- that is roughly twenty-nine new tasks a week, four to six of them landing
+-- every weekday morning — and last week's copy still sitting open next to
+-- this week's, indistinguishable from it.
+--
+-- What was actually wanted is a reminder about the task that is already
+-- there. This column is what makes that possible: the task the repeat made
+-- last time, so the next turn can look at it and decide whether there is
+-- anything to create at all.
+--
+-- Null on every existing row, which is correct and needs no backfill. A
+-- repeat with nothing recorded here falls back to looking for an open task
+-- with the same wording from the same chat (see taskRepository.openTaskFor),
+-- so the thirty repeats already set up start chasing rather than duplicating
+-- on their very next turn, not a week later.
+ALTER TABLE "RecurringTask" ADD COLUMN "lastTaskId" TEXT;

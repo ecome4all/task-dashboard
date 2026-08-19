@@ -971,8 +971,14 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                           Cancel
                         </button>
                       </div>
+                      {/* Second sentence matters as much as the first: without
+                          it, "a new task every week" is all anyone knows, and
+                          that is exactly what people expected and did not
+                          want — last week's copy sitting beside this week's. */}
                       <p className="panel-sub" style={{ marginTop: 8 }}>
                         A new task is made on that date and time, then every {FREQUENCY_LABEL[repeatFrequency].replace("Every ", "")} after it.
+                        If the last one is still not done, no second copy is made — the person on it gets a
+                        WhatsApp reminder instead.
                       </p>
                     </td>
                   </tr>

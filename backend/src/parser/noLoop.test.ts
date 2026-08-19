@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseTaskMessage } from "./taskParser";
 import { composeSendUpdateMessage, composeNoteMessage } from "../services/taskMessages";
+import { composeRepeatReminder } from "../services/repeatReminder";
 
 // extractPeriskopeMessage no longer filters `from_me`, so every message this
 // app sends into a group comes straight back through the webhook. If any of
@@ -33,6 +34,26 @@ describe("our own outbound messages must never read as a task", () => {
   // emoji and quoted description in front of it stop a loop.
   it("a note whose text itself starts with 'task:' does not", () => {
     expect(parseTaskMessage(composeNoteMessage("Optimise Ads", "task: please also check Flipkart"))).toBeNull();
+  });
+
+  // The reminder a repeat sends instead of creating a second copy of work
+  // that is still open. Same danger as the note above: the task's own wording
+  // is pasted straight in, so a task whose text begins with "task:" is the
+  // case that would loop.
+  it("a repeat's 'still open' reminder does not, even quoting a task that starts with 'task:'", () => {
+    const message = composeRepeatReminder(
+      "Jayvant",
+      {
+        description: "task: this looks like a prefix",
+        clientName: "Homzo India",
+        status: "started",
+        dueDate: null,
+        createdAt: new Date("2026-08-12T09:00:00Z"),
+      },
+      { started: "Started" },
+      new Date("2026-08-19T09:00:00Z")
+    );
+    expect(parseTaskMessage(message)).toBeNull();
   });
 
   // The dangerous case: a task whose own text begins with "task:" gets quoted

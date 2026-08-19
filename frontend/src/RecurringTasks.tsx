@@ -199,10 +199,11 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
           </span>
         </div>
         <p className="tip">
-          💡 These make a new task on their own, at the date and time set below. To add one, go to Tasks
-          and press “Repeat” on any task — you pick how often and when the first one should be. Changing
-          or deleting the original task later does not change what gets made here. Changing “How often”
-          does not move the next date — set that yourself.
+          💡 These make a new task on their own, at the date and time set below — but only if the last one
+          is done. If it is still open, no second copy is made and the person on it gets a WhatsApp
+          reminder instead. To add one, go to Tasks and press “Repeat” on any task — you pick how often
+          and when the first one should be. Changing or deleting the original task later does not change
+          what gets made here. Changing “How often” does not move the next date — set that yourself.
         </p>
         <div className="panel-body">
           {repeats.length === 0 && (

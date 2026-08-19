@@ -78,7 +78,20 @@ export const recurringTaskRepository = {
 
   // Puts the clock back when the task a claim was taken for could not be
   // created, so the next tick tries that run again rather than skipping it.
+  //
+  // lastTaskId is deliberately left alone: it points at the task from the run
+  // *before* this one, which is still the right answer while this run is being
+  // retried — the failed run created nothing to point at.
   releaseClaim(id: string, nextRunAt: Date, lastRunAt: Date | null) {
     return prisma.recurringTask.update({ where: { id }, data: { nextRunAt, lastRunAt } });
+  },
+
+  // Remembers the task this repeat just made, so the next turn can see
+  // whether it was ever finished before making another — see
+  // taskRepository.openTaskFor. Written after the task exists rather than in
+  // the same breath as the claim, because a claim that goes on to fail must
+  // not leave this pointing at a task that was never created.
+  recordTask(id: string, taskId: string) {
+    return prisma.recurringTask.update({ where: { id }, data: { lastTaskId: taskId } });
   },
 };

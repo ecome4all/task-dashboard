@@ -40,16 +40,35 @@ export async function notifyAssignee(
   task: AssignedTask,
   channels: WhatsAppChannels
 ): Promise<boolean> {
+  return messageEmployee(assigneeName, (name) => composeAssignmentMessage(name, task), channels, "assignment");
+}
+
+// Sends one employee a WhatsApp message about their work, by name. Shared by
+// the assignment alert above and the repeat reminder (see repeatReminder.ts),
+// which need the same three things: the employee's saved number, silence when
+// there isn't one, and a guarantee of never throwing — every caller has
+// already saved whatever it is telling them about, and a WhatsApp failure
+// must not undo it or fail the request.
+//
+// The message is built from a callback rather than passed in, so it can use
+// the employee's stored name rather than the assignee string on the task —
+// those differ in case and spacing often enough to be worth getting right.
+export async function messageEmployee(
+  assigneeName: string | null | undefined,
+  compose: (employeeName: string) => string,
+  channels: WhatsAppChannels,
+  logTag: string
+): Promise<boolean> {
   if (!assigneeName) return false;
 
   try {
     const employee = await employeeRepository.findByName(assigneeName);
     if (!employee || !employee.active) {
-      console.log(`[assignment] no active employee named "${assigneeName}" — nothing sent`);
+      console.log(`[${logTag}] no active employee named "${assigneeName}" — nothing sent`);
       return false;
     }
     if (!employee.phone) {
-      console.log(`[assignment] ${employee.name} has no WhatsApp number saved — nothing sent`);
+      console.log(`[${logTag}] ${employee.name} has no WhatsApp number saved — nothing sent`);
       return false;
     }
 
@@ -58,10 +77,10 @@ export async function notifyAssignee(
     // arbitrary person. The official Cloud API can only reply inside a
     // 24-hour window the recipient opened, which staff never do. Same
     // reasoning as the daily reminder in scheduler.ts.
-    await channels.whapi.sendMessage(employee.phone, composeAssignmentMessage(employee.name, task));
+    await channels.whapi.sendMessage(employee.phone, compose(employee.name));
     return true;
   } catch (err) {
-    console.error(`[assignment] failed to tell ${assigneeName} about a new task:`, err);
+    console.error(`[${logTag}] failed to message ${assigneeName}:`, err);
     return false;
   }
 }
