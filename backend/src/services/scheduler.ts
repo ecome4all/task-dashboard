@@ -19,17 +19,21 @@ import {
   localDateKey,
   readScheduleConfig,
 } from "./reportSchedule";
+import { MIN_SLEEP_MS, msUntilNextWake } from "./schedulerSleep";
 
-// How often the scheduler wakes up. Everything it does is driven by stored
-// timestamps rather than by the tick itself, so this interval only decides
-// how promptly work is picked up, never whether it happens at all — a
-// backend that was down over a tick catches up on its next one.
-const TICK_MS = 5 * 60 * 1000;
+// When the scheduler wakes is worked out after each pass from when the next
+// job is actually due — see msUntilNextWake, which also explains why. It used
+// to be a flat five minutes, which kept the database awake around the clock.
+//
+// Everything it does is driven by stored timestamps rather than by the pass
+// itself, so this only decides how promptly work is picked up, never whether
+// it happens at all — a backend that was down over a due moment catches up on
+// its next pass.
 
-// Local hour the daily employee reminder goes out. Deliberately a whole
-// hour: the tick is every 5 minutes, so the job fires on the first tick
-// inside that hour and the "already sent today" guard below stops the
-// remaining eleven from sending it again.
+// Local hour the daily employee reminder goes out. Deliberately a whole hour:
+// the scheduler aims its wake at the top of this hour and the "already sent
+// today" guard below stops any further pass inside the same hour — one landing
+// on a repeat, say — from sending it a second time.
 function reminderHour(): number {
   const configured = Number(process.env.REMINDER_HOUR);
   return Number.isInteger(configured) && configured >= 0 && configured <= 23 ? configured : 9;
@@ -403,22 +407,92 @@ async function tick(channels: WhatsAppChannels) {
   }
 }
 
-// Started from server.ts. Everything inside a tick is wrapped so a failure
-// can't reject into the timer callback — an unhandled rejection there would
+// The armed timer, and the channels to run the next pass with. Held at module
+// level so rescheduleScheduler below can move the wake without the caller —
+// an HTTP route — needing to know anything about how the scheduler runs.
+let wakeTimer: NodeJS.Timeout | null = null;
+let activeChannels: WhatsAppChannels | null = null;
+
+function armWake(waitMs: number): void {
+  if (wakeTimer) clearTimeout(wakeTimer);
+  console.log(`[scheduler] next check in ${Math.round(waitMs / 60000)} min`);
+  wakeTimer = setTimeout(() => {
+    void runPass();
+  }, waitMs);
+  // Don't hold the process open on shutdown purely because a timer is armed.
+  wakeTimer.unref();
+}
+
+// Works out when to wake next and arms the timer for it. Reading the next due
+// repeat is itself a query, so it's done here — immediately after a pass, while
+// the database is awake anyway — rather than on a timer of its own.
+async function scheduleNextWake(channels: WhatsAppChannels): Promise<void> {
+  let waitMs = MIN_SLEEP_MS;
+  try {
+    waitMs = msUntilNextWake({
+      now: new Date(),
+      nextRepeatDueAt: await recurringTaskRepository.nextDueAt(),
+      reminderHour: reminderHour(),
+      reportConfig: readScheduleConfig(),
+    });
+  } catch (err) {
+    // Sleep the floor and ask again shortly, rather than the full gap: the
+    // number that decides the gap is the one that just failed to read. This is
+    // the path taken while the database is unreachable, and a long sleep there
+    // would leave the scheduler idle well past the database coming back.
+    console.error("[scheduler] couldn't read when the next repeat is due — retrying shortly:", err);
+  }
+  armWake(waitMs);
+}
+
+// One wake: do the work, then decide when to wake again. Both halves are
+// wrapped because this is a timer callback — an unhandled rejection here would
 // take the whole process down, which is exactly the production incident the
-// outbound sends were already hardened against.
+// outbound sends were already hardened against. In particular the scheduler
+// must always re-arm: a throw that escaped would stop it dead until the next
+// redeploy, with nothing in the logs to say so.
+async function runPass(): Promise<void> {
+  const channels = activeChannels;
+  if (!channels) return;
+
+  try {
+    await tick(channels);
+  } catch (err) {
+    console.error("[scheduler] pass failed:", err);
+  }
+
+  try {
+    await scheduleNextWake(channels);
+  } catch (err) {
+    console.error("[scheduler] couldn't arm the next check — falling back to the floor:", err);
+    armWake(MIN_SLEEP_MS);
+  }
+}
+
+// Called when a repeat is created, changed or deleted on the Repeating Tasks
+// screen. Without it, a repeat set to run sooner than the sleep already armed
+// would wait for that sleep to end — up to MAX_SLEEP_MS — which is the one way
+// sleeping longer could be noticed as work running late.
+//
+// Safe to call when the scheduler isn't running: tests and any process started
+// with DISABLE_SCHEDULER have no channels, and this does nothing.
+export function rescheduleScheduler(): void {
+  if (!activeChannels) return;
+  void scheduleNextWake(activeChannels);
+}
+
+// Started from server.ts.
 export function startScheduler(channels: WhatsAppChannels) {
   if (process.env.DISABLE_SCHEDULER === "true") {
     console.log("[scheduler] disabled via DISABLE_SCHEDULER");
     return;
   }
 
-  console.log(`[scheduler] started — checking every ${TICK_MS / 60000} minutes, reminders at ${reminderHour()}:00`);
-  // Not run immediately on boot: a redeploy loop would otherwise fire a
-  // catch-up pass on every restart.
-  const timer = setInterval(() => {
-    void tick(channels);
-  }, TICK_MS);
-  // Don't hold the process open on shutdown purely because a timer is armed.
-  timer.unref();
+  activeChannels = channels;
+  console.log(`[scheduler] started — sleeping until work is due, reminders at ${reminderHour()}:00`);
+  // The first wake is the floor rather than a computed gap, which keeps boot
+  // behaviour exactly as it was: not run immediately, because a redeploy loop
+  // would otherwise fire a catch-up pass on every restart, but soon enough
+  // that a backend started inside the reminder hour still sends it.
+  armWake(MIN_SLEEP_MS);
 }

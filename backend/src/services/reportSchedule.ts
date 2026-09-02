@@ -52,9 +52,9 @@ export function localDateKey(now: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-// Whether the round should start on this tick. The scheduler wakes every five
-// minutes, so this is true on several ticks inside the chosen hour — lastRunOn
-// is what makes the round happen once.
+// Whether the round should start on this pass. The scheduler aims a wake at
+// the top of the chosen hour, but other work can wake it again inside that
+// same hour — lastRunOn is what makes the round happen once.
 export function isDue(config: ScheduleConfig, now: Date, lastRunOn: string | null): boolean {
   if (!config.enabled) return false;
   if (config.dayOfWeek !== null && now.getDay() !== config.dayOfWeek) return false;

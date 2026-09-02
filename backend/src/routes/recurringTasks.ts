@@ -7,6 +7,7 @@ import { requireRole } from "../auth/requireRole";
 import { isFrequency, firstRunAt, FREQUENCIES } from "../services/recurrence";
 import { taskVisibilityFor } from "../services/taskVisibility";
 import { whyRepeatWouldDuplicate } from "../services/repeatDuplicates";
+import { rescheduleScheduler } from "../services/scheduler";
 
 // Same audience as due dates: setting up work that will keep appearing on
 // everyone's board is a scheduling decision, not day-to-day triage.
@@ -88,21 +89,26 @@ export function createRecurringTasksRouter() {
 
     const employee = await employeeRepository.findById(req.employeeId!);
 
-    res.status(201).json(
-      await recurringTaskRepository.create({
-        source: task.source,
-        sourceRef: task.sourceRef,
-        chatName: task.chatName,
-        description: task.description,
-        clientName: task.clientName,
-        assignee: task.assignee,
-        taskType: task.taskType,
-        marketplace: task.marketplace,
-        frequency,
-        nextRunAt: firstRun,
-        createdBy: employee?.name ?? "Unknown",
-      })
-    );
+    // The scheduler may be asleep until a moment later than this new repeat's
+    // first run, so tell it to work its wake out again. See
+    // rescheduleScheduler — without this a repeat set for "in ten minutes"
+    // could wait hours.
+    const created = await recurringTaskRepository.create({
+      source: task.source,
+      sourceRef: task.sourceRef,
+      chatName: task.chatName,
+      description: task.description,
+      clientName: task.clientName,
+      assignee: task.assignee,
+      taskType: task.taskType,
+      marketplace: task.marketplace,
+      frequency,
+      nextRunAt: firstRun,
+      createdBy: employee?.name ?? "Unknown",
+    });
+    rescheduleScheduler();
+
+    res.status(201).json(created);
   });
 
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
@@ -133,17 +139,20 @@ export function createRecurringTasksRouter() {
       return;
     }
 
-    res.json(
-      await recurringTaskRepository.update(req.params.id, {
-        ...(active !== undefined && { active }),
-        // Changing how often it repeats deliberately leaves the next date
-        // alone: "every week instead of every day" shouldn't silently move
-        // the run to some other day. Change the date explicitly if you want
-        // it moved.
-        ...(frequency !== undefined && { frequency }),
-        ...(parsedNextRun !== undefined && { nextRunAt: parsedNextRun }),
-      })
-    );
+    const updated = await recurringTaskRepository.update(req.params.id, {
+      ...(active !== undefined && { active }),
+      // Changing how often it repeats deliberately leaves the next date
+      // alone: "every week instead of every day" shouldn't silently move
+      // the run to some other day. Change the date explicitly if you want
+      // it moved.
+      ...(frequency !== undefined && { frequency }),
+      ...(parsedNextRun !== undefined && { nextRunAt: parsedNextRun }),
+    });
+    // Switching one back on, or moving its date earlier, can both make work
+    // due sooner than the sleep already armed.
+    rescheduleScheduler();
+
+    res.json(updated);
   });
 
   router.delete("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
@@ -153,6 +162,11 @@ export function createRecurringTasksRouter() {
       return;
     }
     await recurringTaskRepository.delete(req.params.id);
+    // Deleting the one the sleep was aimed at means the next wake should be
+    // later, not sooner — worth recomputing so the database isn't woken for
+    // work that no longer exists.
+    rescheduleScheduler();
+
     res.status(204).send();
   });
 

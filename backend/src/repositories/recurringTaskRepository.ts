@@ -57,6 +57,20 @@ export const recurringTaskRepository = {
     });
   },
 
+  // The soonest moment any active repeat comes round, or null when there are
+  // none. This is what lets the scheduler sleep until there is something to do
+  // instead of waking every five minutes — see msUntilNextWake. Read straight
+  // after a pass, while the database is awake anyway, so it costs nothing on
+  // top of the pass that just ran.
+  async nextDueAt(): Promise<Date | null> {
+    const soonest = await prisma.recurringTask.findFirst({
+      where: { tenantId: TENANT_ID, active: true },
+      orderBy: { nextRunAt: "asc" },
+      select: { nextRunAt: true },
+    });
+    return soonest?.nextRunAt ?? null;
+  },
+
   // Takes a due repeat *before* its task is made, and says whether it got it.
   // Guarded on the nextRunAt that was read a moment ago, so if two passes are
   // ever in flight over the same repeat — a tick that ran long and overlapped
