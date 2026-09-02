@@ -30,8 +30,12 @@ function errorDetail(err: unknown): string | undefined {
   return err instanceof ApiError ? err.detail : undefined;
 }
 
-function fieldKey(source: string, field: ReportField): string {
-  return `${source}::${field.label}`;
+// The column's place in the section, not just its name. Two columns of one
+// table can carry the same heading — the Monthly Summary has "Ad Sales" twice,
+// the money and the share of total sales — and keyed on the name alone they
+// became one tick that governed both lines, and one React key used twice.
+function fieldKey(source: string, index: number, field: ReportField): string {
+  return `${source}::${index}::${field.label}`;
 }
 
 type RowStatus = "sending" | "sent" | "failed";
@@ -96,14 +100,14 @@ function sendTargetFor(state: ClientReportState): { value: string; label: string
 // a zero is a real figure about their account — it says nothing was spent and
 // nothing sold that day — and a line quietly missing from an otherwise
 // complete report raises a question a zero doesn't. Untick one to leave it out.
-function isIncluded(state: ClientReportState, source: string, field: ReportField): boolean {
-  return state.included[fieldKey(source, field)] ?? true;
+function isIncluded(state: ClientReportState, source: string, index: number, field: ReportField): boolean {
+  return state.included[fieldKey(source, index, field)] ?? true;
 }
 
 // Whether this client has anything ticked to send.
 function hasSomethingToSend(state: ClientReportState): boolean {
   return (state.preview?.sections ?? []).some((section) =>
-    section.fields.some((field) => isIncluded(state, section.source, field))
+    section.fields.some((field, i) => isIncluded(state, section.source, i, field))
   );
 }
 
@@ -146,7 +150,7 @@ function composeMessage(state: ClientReportState, kind: ReportKind): string {
   lines.push(`Hi ${client.name}, here's your update:`);
 
   for (const section of preview.sections) {
-    const includedFields = section.fields.filter((f) => isIncluded(state, section.source, f));
+    const includedFields = section.fields.filter((f, i) => isIncluded(state, section.source, i, f));
     if (includedFields.length === 0) continue;
 
     lines.push("");
@@ -369,12 +373,12 @@ export default function WeeklyReports() {
     setRowStatus({});
   }, [kind, date]);
 
-  function toggleField(rowId: string, source: string, field: ReportField) {
+  function toggleField(rowId: string, source: string, index: number, field: ReportField) {
     setStates((prev) =>
       prev.map((s) => {
         if (rowKey(s) !== rowId) return s;
-        const key = fieldKey(source, field);
-        return { ...s, included: { ...s.included, [key]: !isIncluded(s, source, field) } };
+        const key = fieldKey(source, index, field);
+        return { ...s, included: { ...s.included, [key]: !isIncluded(s, source, index, field) } };
       })
     );
     clearStatus(rowId);
@@ -759,8 +763,8 @@ export default function WeeklyReports() {
                             <div className="panel-sub" style={{ marginBottom: 4, fontWeight: 600 }}>{section.source}</div>
                             <table className="data-table">
                               <tbody>
-                                {section.fields.map((field) => (
-                                  <tr key={field.label}>
+                                {section.fields.map((field, i) => (
+                                  <tr key={fieldKey(section.source, i, field)}>
                                     {/* Dead until the client is ticked, so the
                                         two ticks can't be mistaken for each
                                         other: this one only decides what goes
@@ -769,10 +773,10 @@ export default function WeeklyReports() {
                                       <input
                                         type="checkbox"
                                         checked={
-                                          !!selected[rowKey(state)] && isIncluded(state, section.source, field)
+                                          !!selected[rowKey(state)] && isIncluded(state, section.source, i, field)
                                         }
                                         disabled={!selected[rowKey(state)] || sendingAll}
-                                        onChange={() => toggleField(rowKey(state), section.source, field)}
+                                        onChange={() => toggleField(rowKey(state), section.source, i, field)}
                                       />
                                     </td>
                                     <td>{field.label}</td>

@@ -39,10 +39,15 @@ describe("onlyAgreedColumns — monthly", () => {
     expect(kept).toContain("Organic Sales %");
   });
 
-  // These sit in the same table on the master and are internal. A client must
-  // never see them, which is the whole reason the list is a whitelist.
+  // Asked for on the monthly report on 2 Sep, having been internal until then.
+  // The sheets spell it without the second "e".
+  it("sends Target Achieved, however the sheet spells it", () => {
+    expect(kept).toContain("Target Achived");
+  });
+
+  // Keyword sits in the same table on the master and is internal. A client
+  // must never see it, which is the whole reason the list is a whitelist.
   it("never lets an internal column through", () => {
-    expect(kept).not.toContain("Target Achived");
     expect(kept).not.toContain("Keyword");
   });
 

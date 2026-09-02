@@ -86,11 +86,18 @@ const REPORT_COLUMNS: Record<ReportKind, string[]> = {
     "Name", "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
     "Ads Sales %", "Organic Sales %", "Rating", "Reviews", "FBA Units",
   ],
-  // "Target Achieved" and "Keyword" sit in this table on the master and are
-  // internal — deliberately not listed, so they never reach a client.
+  // "Keyword" sits in this table on the master and is internal — deliberately
+  // not listed, so it never reaches a client.
+  //
+  // "Target Achieved" was internal too until Ecom4all asked for it on the
+  // monthly report (2 Sep). It is the only non-numeric column any report
+  // sends, and it is blank in the sheets as this is written, so it will not
+  // appear until somebody fills that column in — a blank cell is dropped on
+  // the way in, like any other. The Reports screen names it under "Not in
+  // this report" while it stays empty.
   monthly: [
     "Spend", "Order", "Sales", "Acos", "T.Order", "T.Sales", "T.Acos",
-    "Ads Sales %", "Organic Sales %",
+    "Ads Sales %", "Organic Sales %", "Target Achieved",
   ],
 };
 
@@ -123,6 +130,10 @@ const HEADER_ALIASES: Record<string, string> = {
   "ad sales%": "ads sales %",
   "ads sales%": "ads sales %",
   "organic sales%": "organic sales %",
+  // Spelled this way in the Monthly Summary of the masters and of every
+  // client sheet generated from them. Correcting the sheets would mean
+  // correcting all of them at once, and a sheet missed would go quiet again.
+  "target achived": "target achieved",
 };
 
 // Tolerant of spacing and capitalisation, since the same column is spelled
@@ -132,6 +143,42 @@ const HEADER_ALIASES: Record<string, string> = {
 function normalizeHeader(header: string): string {
   const cleaned = header.trim().toLowerCase().replace(/\s+/g, " ");
   return HEADER_ALIASES[cleaned] ?? cleaned;
+}
+
+// The Monthly Summary heads its two share columns "Ad Sales" and "Organic
+// Sales" — no percent sign on either, and "Ad Sales" repeating the money
+// column four places to its left:
+//
+//   Month | Spend | Ad Orders | Ad Sales | ACOS | T.Orders | T.Sales |
+//   T.ACOS | Ad Sales | Organic Sales | Target Achived
+//
+// Read literally, that is what put "Ad Sales" in a client's report twice —
+// once as 24615.27 and once as 0.105819879, the share of total sales — and
+// dropped the organic share entirely, since "Organic Sales" is not one of the
+// agreed column names and an unrecognised column is not sent.
+//
+// Renaming the columns in the sheets would fix it at the source, but it would
+// have to be done in all three masters and in every client sheet already
+// generated from them, and any sheet missed would go quiet again with nothing
+// on screen to say so. So the pair is recognised here instead.
+//
+// The organic column is what identifies the pair: the two are always adjacent
+// and always in that order, in every template and in every real sheet seen, so
+// whatever sits immediately before the organic share is the ads share. A sheet
+// that already writes them with a percent sign is left alone.
+export function resolveShareColumns(headers: string[]): string[] {
+  const resolved = [...headers];
+
+  for (let i = 0; i < resolved.length; i++) {
+    if (normalizeHeader(resolved[i]) !== "organic sales") continue;
+    resolved[i] = "Organic Sales %";
+    // "sales" is what "Ad Sales" normalizes to — see HEADER_ALIASES. Guarded
+    // rather than assumed: on a tab where the column before the organic share
+    // is something else, only the organic one is renamed.
+    if (i > 0 && normalizeHeader(resolved[i - 1]) === "sales") resolved[i - 1] = "Ads Sales %";
+  }
+
+  return resolved;
 }
 
 export function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): ReportField[] {
@@ -232,7 +279,15 @@ async function readTabForKind(
 ): Promise<{ tab: SheetTab | null; tabNames: string[] }> {
   const tabNames = await listTabNames(spreadsheetId);
   const name = pickTab(kind, tabNames);
-  return { tab: name ? await readTab(spreadsheetId, name) : null, tabNames };
+  return { tab: name ? withResolvedHeaders(await readTab(spreadsheetId, name)) : null, tabNames };
+}
+
+// Every tab is read through this, so the header row a report is built from is
+// the resolved one — which matters twice over: the fields carry the corrected
+// labels, and agreedColumnsLeftOut compares against the same names rather than
+// against the sheet's raw ones. See resolveShareColumns.
+function withResolvedHeaders(tab: SheetTab | null): SheetTab | null {
+  return tab ? { ...tab, headers: resolveShareColumns(tab.headers) } : null;
 }
 
 function spreadsheetIdOrThrow(sheetUrl: string): string {
@@ -342,7 +397,7 @@ export async function buildWeeklyReportPreview(sheetUrl: string, referenceDate: 
 
   const weeklyName = pickTab("weekly_sales", tabNames);
   if (weeklyName) {
-    const tab = await readTab(spreadsheetId, weeklyName);
+    const tab = withResolvedHeaders(await readTab(spreadsheetId, weeklyName));
     const fields = tab && findWeeklyRowFields(tab, month, week);
     if (fields && fields.length > 0) {
       sections.push({ source: `${weeklyName} — ${month}, Week ${week}`, fields: withPercentSuffix(fields) });
@@ -351,7 +406,7 @@ export async function buildWeeklyReportPreview(sheetUrl: string, referenceDate: 
 
   const dailyName = pickTab("daily", tabNames);
   if (dailyName) {
-    const tab = await readTab(spreadsheetId, dailyName);
+    const tab = withResolvedHeaders(await readTab(spreadsheetId, dailyName));
     for (const day of tab ? findDailyRowsInWeek(tab, referenceDate) : []) {
       if (day.fields.length === 0) continue;
       sections.push({ source: `${dailyName} — ${day.date}`, fields: withPercentSuffix(day.fields) });

@@ -72,10 +72,12 @@ describe("agreedColumnsLeftOut", () => {
   });
 
   // An internal column is not "left out" — it was never going to a client.
+  // Target Achieved stopped being internal on 2 Sep, so an empty one is now
+  // worth naming: it is a column the client is meant to be sent.
   it("says nothing about internal columns the whitelist excludes", () => {
     const headers = ["Month", "Spend", "Sales", "Acos", "Target Achieved", "Keyword"];
     const fields = [field("Spend"), field("Sales"), field("Acos")];
-    expect(agreedColumnsLeftOut("monthly", headers, fields)).toEqual([]);
+    expect(agreedColumnsLeftOut("monthly", headers, fields)).toEqual(["Target Achieved"]);
   });
 
   // The two halves have to agree: anything onlyAgreedColumns keeps must never
