@@ -146,10 +146,10 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   // day it next runs is the day it runs.
   const filteredRepeats = repeats.filter(
     (repeat) =>
-      // Same fields as the board's search, so the same words find the repeat
-      // and the tasks it makes. Type is left to its own dropdown beside the
-      // box rather than being searched twice over.
-      matchesSearch(search, repeat.description, repeat.clientName, repeat.chatName, repeat.assignee) &&
+      // The repeat's own words, and only those — the same rule as the board,
+      // so a word finds the repeat and the tasks it makes. Client and type are
+      // left to the dropdowns beside the box.
+      matchesSearch(search, repeat.description) &&
       matchesAny(repeat.clientName, clientFilter) &&
       matchesAny(repeat.taskType, typeFilter) &&
       (dayFilter.length === 0 ||
@@ -239,7 +239,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
                 className="field-input"
                 type="search"
                 aria-label="Search repeating tasks"
-                placeholder="Search repeating tasks, clients, groups or people"
+                placeholder="Search by a word in the task"
                 value={search}
                 onChange={(e) => typeSearch(e.target.value)}
               />

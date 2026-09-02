@@ -525,11 +525,12 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   const filteredTasks = tasks.filter(
     (t) =>
-      // What a task is, who it is for, which group it came from and who is on
-      // it. Status, marketplace and type are deliberately not searched — they
-      // have their own dropdowns directly above the box, and matching them
-      // here would make "ads" quietly also mean "every task of type Ads".
-      matchesSearch(search, t.description, t.clientName, t.chatName, t.assignee) &&
+      // The task's own words, and only those. Client, employee, status,
+      // marketplace and type all have their own filters above the box, and
+      // searching them here too would make a word that happens to be a client
+      // name quietly return that client's whole list — which reads as the
+      // search being broken, not as it being clever.
+      matchesSearch(search, t.description) &&
       matchesStatusFilter(t, statusFilter) &&
       matchesTypeFilter(t, typeFilter) &&
       matchesMarketplaceFilter(t, marketplaceFilter) &&
@@ -689,7 +690,7 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
               className="field-input"
               type="search"
               aria-label="Search tasks"
-              placeholder="Search tasks, clients, groups or people"
+              placeholder="Search by a word in the task"
               value={search}
               onChange={(e) => typeSearch(e.target.value)}
             />

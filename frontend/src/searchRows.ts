@@ -1,12 +1,19 @@
 // Free-text search over a row's own words, shared by the Tasks board and the
 // Repeating Tasks screen so the box behaves the same on both.
 //
-// **Every word typed has to appear somewhere in the row, in any order and in
-// any field.** Typing "amezia ads" finds the Amezia ads task whether "Amezia"
-// is in the wording or only in the client column. Matching the whole query as
-// one substring instead would mean typing the words in the order they happen
-// to sit in that row — which is not how anyone searches a board they are
-// scanning, and would miss the row above on a technicality.
+// **Every word typed has to appear, in any order.** Typing "images cross"
+// finds "Images cross check & Update if pending", and so does "cross images".
+// Matching the whole query as one substring instead would mean typing the
+// words in the order they happen to sit in that task — which is not how
+// anyone searches a board they are scanning, and would miss that row on a
+// technicality.
+//
+// Both callers pass the task's own wording and nothing else. Client,
+// employee, status and the rest have their own filters beside the box, and
+// searching them here too would make a word that happens to be a client name
+// return that client's whole list — which reads as the search being broken.
+// The signature stays variadic because the rule is about the row's words, not
+// about one particular field.
 //
 // Case is ignored, and so is extra spacing: people paste from WhatsApp.
 //
