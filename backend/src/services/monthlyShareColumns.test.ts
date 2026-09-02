@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { SheetTab } from "./googleSheets";
-import { resolveShareColumns, onlyAgreedColumns, agreedColumnsLeftOut } from "./weeklyReportPreview";
+import {
+  resolveShareColumns,
+  correctHeaderSpelling,
+  onlyAgreedColumns,
+  agreedColumnsLeftOut,
+} from "./weeklyReportPreview";
 import { findMonthlyRowFields } from "./reportPeriod";
 import { ensurePercentSuffix } from "./reportFormatting";
 
@@ -47,8 +52,26 @@ describe("resolveShareColumns", () => {
   });
 });
 
+// The sheets spell it "Target Achived". That was nobody's problem while the
+// column was internal; it became one when it started going to clients.
+describe("correctHeaderSpelling", () => {
+  it("corrects the one heading the sheets misspell", () => {
+    expect(correctHeaderSpelling(["Month", "Spend", "Target Achived"])).toEqual([
+      "Month", "Spend", "Target Achieved",
+    ]);
+  });
+
+  it("leaves a sheet that spells it right alone, and everything else", () => {
+    const right = ["Month", "Spend", "Ad Sales", "Target Achieved"];
+    expect(correctHeaderSpelling(right)).toEqual(right);
+  });
+});
+
 describe("the monthly report Amezia would be sent", () => {
-  const tab: SheetTab = { headers: resolveShareColumns(HEADERS), rows: [AUGUST] };
+  const tab: SheetTab = {
+    headers: correctHeaderSpelling(resolveShareColumns(HEADERS)),
+    rows: [AUGUST],
+  };
   const found = findMonthlyRowFields(tab, "August")!;
   const fields = onlyAgreedColumns("monthly", found).map((f) => ({
     label: f.label,
@@ -74,13 +97,14 @@ describe("the monthly report Amezia would be sent", () => {
   // on the way in like any other, so the answer is to fill it in — and the
   // Reports screen says so before anything is sent.
   it("says Target Achieved is missing rather than sending a blank line", () => {
-    expect(fields.map((f) => f.label)).not.toContain("Target Achived");
+    expect(fields.map((f) => f.label)).not.toContain("Target Achieved");
     expect(agreedColumnsLeftOut("monthly", tab.headers, found)).toContain("Target Achieved");
   });
 
+  // Spelled correctly on the way out, whatever the sheet says.
   it("sends it once the sheet has it", () => {
     const filled: SheetTab = { headers: tab.headers, rows: [[...AUGUST.slice(0, 10), "YES"]] };
     const withTarget = onlyAgreedColumns("monthly", findMonthlyRowFields(filled, "August")!);
-    expect(withTarget).toContainEqual({ label: "Target Achived", value: "YES" });
+    expect(withTarget).toContainEqual({ label: "Target Achieved", value: "YES" });
   });
 });

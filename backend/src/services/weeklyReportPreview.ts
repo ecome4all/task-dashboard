@@ -181,6 +181,19 @@ export function resolveShareColumns(headers: string[]): string[] {
   return resolved;
 }
 
+// A client is shown their own sheet's wording rather than ours — deliberately,
+// so a column reads the same in the report as it does in the sheet they open.
+// The exception is a sheet with a typo in the heading.
+//
+// "Target Achived" is misspelled in all three masters and in every client
+// sheet generated from them. That did not matter while the column was
+// internal; it started mattering on 2 Sep, when Ecom4all asked for it to go to
+// clients. Correcting the sheets would mean correcting all of them, so the one
+// known misspelling is corrected here, exactly like the share columns above.
+export function correctHeaderSpelling(headers: string[]): string[] {
+  return headers.map((h) => (normalizeHeader(h) === "target achieved" ? "Target Achieved" : h));
+}
+
 export function onlyAgreedColumns(kind: ReportKind, fields: ReportField[]): ReportField[] {
   const allowed = new Set(REPORT_COLUMNS[kind].map(normalizeHeader));
   return fields.filter((f) => allowed.has(normalizeHeader(f.label)));
@@ -287,7 +300,7 @@ async function readTabForKind(
 // labels, and agreedColumnsLeftOut compares against the same names rather than
 // against the sheet's raw ones. See resolveShareColumns.
 function withResolvedHeaders(tab: SheetTab | null): SheetTab | null {
-  return tab ? { ...tab, headers: resolveShareColumns(tab.headers) } : null;
+  return tab ? { ...tab, headers: correctHeaderSpelling(resolveShareColumns(tab.headers)) } : null;
 }
 
 function spreadsheetIdOrThrow(sheetUrl: string): string {
