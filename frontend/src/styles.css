@@ -365,6 +365,15 @@ table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 
 /* One row of filter dropdowns above a table. Wraps onto more rows on a
    narrow screen rather than pushing the table sideways. */
+/* The search box, on its own line above the dropdowns on both the Tasks board
+   and Repeating Tasks. It grows to fill the line rather than sitting at the
+   default input width: what gets typed here is a task's own words, not a
+   dropdown value, and a 150px box hides the search the moment it is longer
+   than three words. Capped so it doesn't run the full width of a wide
+   monitor, where a box that long reads as a form field rather than a search. */
+.filter-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.filter-search .field-input { flex: 1 1 260px; max-width: 460px; }
+
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .filter-row select.field-select { flex: 0 1 auto; min-width: 0; }
 /* The Task board's filters are the same type-to-search dropdowns the rows

@@ -27,6 +27,7 @@ import SearchableSelect from "./SearchableSelect";
 import MultiSelect from "./MultiSelect";
 import TaskNotes from "./TaskNotes";
 import Pagination, { usePaged } from "./Paged";
+import { matchesSearch } from "./searchRows";
 import { statusColor, statusLabel as buildStatusLabel } from "./taskDisplay";
 import { defaultFirstRun, fromLocalInputValue } from "./dateTimeInput";
 import { useAutoRefresh } from "./useAutoRefresh";
@@ -193,6 +194,10 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
+  // What has been typed into the search box. Kept apart from the dropdowns
+  // because it is cleared by its own button — someone who has typed a client
+  // name usually wants to keep the statuses they ticked, and vice versa.
+  const [search, setSearch] = useState("");
   // Empty list = show everything. See matchesAny above.
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
@@ -312,6 +317,13 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   function selectEmployeeFilter(employees: string[]) {
     setEmployeeFilter(employees);
+    paged.reset();
+  }
+
+  // Typing narrows the list under you, so page 3 of the old result has to go
+  // the same way it does for every dropdown above.
+  function typeSearch(value: string) {
+    setSearch(value);
     paged.reset();
   }
 
@@ -513,6 +525,11 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
 
   const filteredTasks = tasks.filter(
     (t) =>
+      // What a task is, who it is for, which group it came from and who is on
+      // it. Status, marketplace and type are deliberately not searched — they
+      // have their own dropdowns directly above the box, and matching them
+      // here would make "ads" quietly also mean "every task of type Ads".
+      matchesSearch(search, t.description, t.clientName, t.chatName, t.assignee) &&
       matchesStatusFilter(t, statusFilter) &&
       matchesTypeFilter(t, typeFilter) &&
       matchesMarketplaceFilter(t, marketplaceFilter) &&
@@ -662,6 +679,27 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
           {/* Every one of these takes as many values as you want to tick —
               two employees, three statuses — and shows anything matching any
               of them. Nothing picked in a box means that box isn't filtering. */}
+          {/* Search sits on its own line above the dropdowns rather than in
+              with them. It is the one control people reach for first when
+              they are looking for a particular task, and in the row below it
+              would be the fifth box along on a wide screen and wrapped onto
+              its own line on a narrow one anyway. */}
+          <div className="filter-search">
+            <input
+              className="field-input"
+              type="search"
+              aria-label="Search tasks"
+              placeholder="Search tasks, clients, groups or people"
+              value={search}
+              onChange={(e) => typeSearch(e.target.value)}
+            />
+            {search.trim() !== "" && (
+              <button className="btn btn-ghost btn-sm" onClick={() => typeSearch("")} type="button">
+                Clear search
+              </button>
+            )}
+          </div>
+
           <div className="filter-row">
             {/* Status sits with the other filters as a dropdown rather than a
                 row of chips — the counts that made the chips worth their width
@@ -1000,6 +1038,24 @@ export default function Dashboard({ user }: { user: CurrentUser }) {
                 )}
               </tbody>
             ))}
+            {/* A search that finds nothing is a normal thing to do — a typo, or
+                a client who simply has no open work — and the board had no
+                empty state at all before there was a box to type into. Bare
+                column headings over nothing read as a screen that has broken
+                rather than one that has answered. */}
+            {tasks.length > 0 && filteredTasks.length === 0 && (
+              <tbody>
+                <tr>
+                  <td
+                    colSpan={CONTROL_COLUMNS + (canRepeat ? 1 : 0) + (canDelete ? 1 : 0)}
+                    className="panel-sub"
+                    style={{ padding: 14 }}
+                  >
+                    Nothing matches. Try fewer words, or clear the search and filters.
+                  </td>
+                </tr>
+              </tbody>
+            )}
           </table>
               <Pagination paged={paged} />
         </div>

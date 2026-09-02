@@ -15,6 +15,7 @@ import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import MultiSelect from "./MultiSelect";
 import Pagination, { usePaged } from "./Paged";
+import { matchesSearch } from "./searchRows";
 import { toLocalInputValue, fromLocalInputValue } from "./dateTimeInput";
 import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
 import { useAutoRefresh } from "./useAutoRefresh";
@@ -49,6 +50,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [search, setSearch] = useState("");
   const [clientFilter, setClientFilter] = useState<string[]>([]);
   const [dayFilter, setDayFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
@@ -144,6 +146,10 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
   // day it next runs is the day it runs.
   const filteredRepeats = repeats.filter(
     (repeat) =>
+      // Same fields as the board's search, so the same words find the repeat
+      // and the tasks it makes. Type is left to its own dropdown beside the
+      // box rather than being searched twice over.
+      matchesSearch(search, repeat.description, repeat.clientName, repeat.chatName, repeat.assignee) &&
       matchesAny(repeat.clientName, clientFilter) &&
       matchesAny(repeat.taskType, typeFilter) &&
       (dayFilter.length === 0 ||
@@ -159,7 +165,22 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
     pagedRepeats.reset();
   }
 
+  // Typing narrows the list under you, so it resets the page like the rest.
+  function typeSearch(value: string) {
+    setSearch(value);
+    pagedRepeats.reset();
+  }
+
+  // What the "Clear filters" button clears — the dropdowns only. Search has
+  // its own button beside the box, the way the board's date range does:
+  // someone who has typed a client name usually wants to keep the day and
+  // type they ticked, and one button that wipes both loses the more
+  // deliberate of the two.
   const anyFilter = clientFilter.length > 0 || dayFilter.length > 0 || typeFilter.length > 0;
+
+  // Whether the list on screen is shorter than the full one, for the count
+  // line and the empty message. Searching narrows it just as much as ticking.
+  const anyNarrowing = anyFilter || search.trim() !== "";
 
   function clearFilters() {
     setClientFilter([]);
@@ -193,7 +214,7 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
           {/* Says both numbers while a filter is on, so a short table reads as
               "filtered" rather than as "most of them have gone". */}
           <span className="panel-sub">
-            {anyFilter
+            {anyNarrowing
               ? `${filteredRepeats.length} of ${repeats.length} set up`
               : `${repeats.length} set up`}
           </span>
@@ -208,6 +229,26 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
         <div className="panel-body">
           {repeats.length === 0 && (
             <p className="panel-sub">Nothing repeating yet.</p>
+          )}
+
+          {/* Above the dropdowns, and cleared on its own — same shape as the
+              board, so the two screens are searched the same way. */}
+          {repeats.length > 0 && (
+            <div className="filter-search">
+              <input
+                className="field-input"
+                type="search"
+                aria-label="Search repeating tasks"
+                placeholder="Search repeating tasks, clients, groups or people"
+                value={search}
+                onChange={(e) => typeSearch(e.target.value)}
+              />
+              {search.trim() !== "" && (
+                <button className="btn btn-ghost btn-sm" onClick={() => typeSearch("")} type="button">
+                  Clear search
+                </button>
+              )}
+            </div>
           )}
 
           {/* Type-to-search dropdowns, the same ones the board's filters use.
@@ -250,7 +291,11 @@ export default function RecurringTasks({ user }: { user: CurrentUser }) {
           {/* A filter that matches nothing needs saying so — an empty table
               under three dropdowns otherwise reads as everything being gone. */}
           {repeats.length > 0 && filteredRepeats.length === 0 && (
-            <p className="panel-sub">Nothing matches those filters.</p>
+            <p className="panel-sub">
+              {search.trim() !== ""
+                ? "Nothing matches. Try fewer words, or clear the search."
+                : "Nothing matches those filters."}
+            </p>
           )}
 
           {filteredRepeats.length > 0 && (
