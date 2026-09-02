@@ -38,6 +38,15 @@ function fieldKey(source: string, index: number, field: ReportField): string {
   return `${source}::${index}::${field.label}`;
 }
 
+// The #DIV/0! note explains one particular column going missing, and reads as
+// a fault in something else entirely when it sits under a column that has
+// nothing to do with dividing. Target Achieved is simply blank in every
+// client's sheet, so since it joined the monthly report that note has been
+// under a card whose Acos is showing perfectly well.
+function mentionsAcos(leftOut: string[]): boolean {
+  return leftOut.some((name) => /acos/i.test(name));
+}
+
 type RowStatus = "sending" | "sent" | "failed";
 
 function rowStatusLabel(status: RowStatus | undefined): string {
@@ -798,9 +807,14 @@ export default function WeeklyReports() {
                                 <strong>Not in this report: {section.leftOut.join(", ")}</strong>
                                 <div>
                                   {section.leftOut.length === 1 ? "That column is" : "Those columns are"}{" "}
-                                  empty or showing an error in this client's sheet for this period.
-                                  Acos is spend ÷ sales, so it reads <code>#DIV/0!</code> when there
-                                  were no sales. Send as is, or fix the sheet and load again.
+                                  empty or showing an error in this client's sheet for this period.{" "}
+                                  {mentionsAcos(section.leftOut) && (
+                                    <>
+                                      Acos is spend ÷ sales, so it reads <code>#DIV/0!</code> when
+                                      there were no sales.{" "}
+                                    </>
+                                  )}
+                                  Send as is, or fix the sheet and load again.
                                 </div>
                               </div>
                             )}
