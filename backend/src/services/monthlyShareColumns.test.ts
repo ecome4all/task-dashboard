@@ -72,7 +72,7 @@ describe("the monthly report Amezia would be sent", () => {
     headers: correctHeaderSpelling(resolveShareColumns(HEADERS)),
     rows: [AUGUST],
   };
-  const found = findMonthlyRowFields(tab, "August")!;
+  const found = findMonthlyRowFields(tab, "August", 2026)!;
   const fields = onlyAgreedColumns("monthly", found).map((f) => ({
     label: f.label,
     value: ensurePercentSuffix(f.label, f.value),
@@ -104,7 +104,7 @@ describe("the monthly report Amezia would be sent", () => {
   // Spelled correctly on the way out, whatever the sheet says.
   it("sends it once the sheet has it", () => {
     const filled: SheetTab = { headers: tab.headers, rows: [[...AUGUST.slice(0, 10), "YES"]] };
-    const withTarget = onlyAgreedColumns("monthly", findMonthlyRowFields(filled, "August")!);
+    const withTarget = onlyAgreedColumns("monthly", findMonthlyRowFields(filled, "August", 2026)!);
     expect(withTarget).toContainEqual({ label: "Target Achieved", value: "YES" });
   });
 });

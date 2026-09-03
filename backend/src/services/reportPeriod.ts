@@ -118,14 +118,127 @@ export function findWeeklyRowFields(tab: SheetTab, monthName: string, weekNumber
   return usableFields(tab.headers, row, [weekIdx, monthIdx]);
 }
 
+// Which calendar year each row of a month table belongs to.
+//
+// The Month column carries no year anywhere in it. The real sheets write
+// "DECEMBER", "Jan", "FEBRUARY", "Aug" — one row per month, running straight
+// down the table and simply carrying on past December into the next year:
+//
+//   DECEMBER JANUARY ... Nov | DECEMBER Jan ... July Aug
+//   \_______ one year ______/ \_______ the next ______/
+//
+// So a sheet that has been running for more than twelve months has two rows
+// headed "Aug", with nothing in either of them to say which is which. Taking
+// the first match sent clients last year's August — reported by Ecom4all,
+// and the reason this exists.
+//
+// The year is worked out from the order instead. The table is chronological,
+// so each time the month goes backwards a new year has started; that gives
+// every row a year relative to the others. The anchor that turns those into
+// calendar years is the last row that actually has figures in it — the most
+// recent month the sheet has been filled in for, which is at or before the
+// month being asked about.
+//
+// Rows with no month in them (blank spacers, a stray total) get null and are
+// skipped, without breaking the run either side of them.
+function monthIndexIn(cellValue: string): number | null {
+  const cell = cellValue.trim().toLowerCase();
+  if (cell === "") return null;
+  // The same first-three-letters rule isSameMonth uses, so the two never
+  // disagree about what a cell says.
+  const found = MONTH_NAMES.findIndex((m) => cell.startsWith(m.toLowerCase().slice(0, 3)));
+  return found === -1 ? null : found;
+}
+
+function assignRowYears(tab: SheetTab, monthIdx: number, today: Date): (number | null)[] {
+  // Year relative to the first block: 0, then 1 after the first wrap past
+  // December, and so on.
+  const offsets: (number | null)[] = [];
+  let offset = 0;
+  let previous: number | null = null;
+
+  for (const row of tab.rows) {
+    const month = monthIndexIn(row[monthIdx] ?? "");
+    if (month === null) {
+      offsets.push(null);
+      continue;
+    }
+    if (previous !== null && month < previous) offset++;
+    previous = month;
+    offsets.push(offset);
+  }
+
+  // The anchor: the last row with a month AND figures beside it. A blank row
+  // for a month not filled in yet must not anchor anything — the sheets carry
+  // rows for months ahead of themselves, and anchoring on one would push every
+  // year in the table out by one.
+  let anchorMonth: number | null = null;
+  let anchorOffset = 0;
+  for (let i = 0; i < tab.rows.length; i++) {
+    if (offsets[i] === null) continue;
+    const row = tab.rows[i];
+    if (!row.some((cell, c) => c !== monthIdx && looksNumeric(cell ?? ""))) continue;
+    anchorMonth = monthIndexIn(row[monthIdx] ?? "");
+    anchorOffset = offsets[i]!;
+  }
+  if (anchorMonth === null) return tab.rows.map(() => null);
+
+  // The anchor row is the most recent month anyone has filled in, so it is the
+  // most recent occurrence of that month at or before today — this year,
+  // unless its month is still ahead of the current one, which puts it in the
+  // year before.
+  //
+  // Deliberately today rather than the month being asked about. Those are the
+  // same thing for a report sent on the day, but not when an earlier month is
+  // being looked at or re-sent: pinning the table to the year asked for would
+  // make every year in it the year asked for, and August 2025 would return
+  // August 2026's figures — the reported fault, mirrored.
+  const anchorYear = today.getFullYear() - (anchorMonth > today.getMonth() ? 1 : 0);
+
+  return offsets.map((o) => (o === null ? null : anchorYear - (anchorOffset - o)));
+}
+
 // Monthly tab: one row per month, matched on the Month column alone. Kept
 // separate from the weekly finder because that one requires a Week column,
 // which this table does not have.
-export function findMonthlyRowFields(tab: SheetTab, monthName: string): ReportField[] | null {
+//
+// `year` is the year the report was asked for — the Reports screen picks a
+// month with <input type="month">, so it always sends one. `today` is what
+// pins the sheet's rows to the calendar, and is separate because an earlier
+// month can be looked at or re-sent long after it ended. Both are only
+// consulted when the sheet has more than one row for the month, which is the
+// only case where the old first-match-wins rule could pick the wrong one; a
+// sheet with a single year of rows behaves exactly as it always did.
+//
+// When the sheet has two rows for the month and neither works out to the year
+// asked for, nothing is returned rather than a guess. The screen then says the
+// sheet has no row for that period, which is true — and far better than
+// sending a client a year-old figure under this year's heading, which is the
+// fault this replaced.
+//
+// findWeeklyRowFields has the same shape of risk, but only on a Weekly tab
+// that carries a Month column and more than a year of rows. No sheet seen has
+// one — the real Weekly tabs hold the current month's four weeks and no Month
+// column at all — so it is deliberately left alone rather than changed blind.
+export function findMonthlyRowFields(
+  tab: SheetTab,
+  monthName: string,
+  year: number,
+  today: Date = new Date()
+): ReportField[] | null {
   const monthIdx = findHeaderIndex(tab.headers, /month/i);
   if (monthIdx === -1) return null;
 
-  const row = tab.rows.find((r) => isSameMonth(r[monthIdx] ?? "", monthName));
+  const matches = tab.rows.filter((r) => isSameMonth(r[monthIdx] ?? "", monthName));
+  if (matches.length === 0) return null;
+
+  let row: string[] | undefined;
+  if (matches.length === 1) {
+    row = matches[0];
+  } else {
+    const years = assignRowYears(tab, monthIdx, today);
+    row = tab.rows.find((r, i) => years[i] === year && isSameMonth(r[monthIdx] ?? "", monthName));
+  }
   if (!row) return null;
 
   const fields = usableFields(tab.headers, row, [monthIdx]);

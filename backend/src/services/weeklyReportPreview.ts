@@ -352,7 +352,10 @@ export async function buildReport(
       emptyReason = latest ? "no_agreed_columns" : "no_period_rows";
     }
   } else if (kind === "monthly") {
-    const found = findMonthlyRowFields(tab, month);
+    // The year matters as much as the month: a sheet running more than a
+    // year has two rows headed "Aug" and no year in either — see
+    // findMonthlyRowFields.
+    const found = findMonthlyRowFields(tab, month, referenceDate.getFullYear());
     const fields = found ? onlyAgreedColumns(kind, found) : [];
     if (fields.length > 0) {
       sections.push({
