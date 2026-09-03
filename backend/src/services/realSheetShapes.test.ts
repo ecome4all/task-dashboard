@@ -166,6 +166,11 @@ describe("Weekly SKU Sales tab", () => {
 });
 
 describe("Monthly Summary tab", () => {
+  // Fixed rather than the real clock. The year a row belongs to is worked out
+  // relative to today, so leaving these to run against whatever day it happens
+  // to be would make them start failing in a different month.
+  const TODAY = new Date(2026, 8, 3);
+
   // Same table as the master's, including the two internal columns.
   const tab: SheetTab = {
     headers: ["Month", "Spend", "Order", "Sales", "Acos", "Target Achieved", "Keyword"],
@@ -177,20 +182,20 @@ describe("Monthly Summary tab", () => {
   };
 
   it("matches the current month", () => {
-    const fields = findMonthlyRowFields(tab, "August", 2026);
+    const fields = findMonthlyRowFields(tab, "August", 2026, TODAY);
     expect(fields?.find((f) => f.label === "Sales")?.value).toBe("21,690");
   });
 
   it("is tolerant of capitalisation", () => {
-    expect(findMonthlyRowFields(tab, "July", 2026)?.find((f) => f.label === "Spend")?.value).toBe("45,028");
+    expect(findMonthlyRowFields(tab, "July", 2026, TODAY)?.find((f) => f.label === "Spend")?.value).toBe("45,028");
   });
 
   it("reports nothing for a month with no figures yet", () => {
-    expect(findMonthlyRowFields(tab, "September", 2026)).toBeNull();
+    expect(findMonthlyRowFields(tab, "September", 2026, TODAY)).toBeNull();
   });
 
   it("returns nothing for a month the sheet has no row for", () => {
-    expect(findMonthlyRowFields(tab, "December", 2026)).toBeNull();
+    expect(findMonthlyRowFields(tab, "December", 2026, TODAY)).toBeNull();
   });
 });
 
@@ -244,6 +249,42 @@ describe("Monthly Summary tab spanning more than one year", () => {
     expect(spendFor("November", 2025)).toBe("12");
     expect(spendFor("January", 2025)).toBe("2");
     expect(spendFor("January", 2026)).toBe("102");
+  });
+
+  // The shape the fault most likely takes in practice, and the reason the year
+  // is checked even when only one row matches: the sheet has last August but
+  // nobody has added this August to it yet, so there is exactly one row headed
+  // "Aug" and it is twelve months old.
+  it("says nothing when this year's row has not been added to the sheet yet", () => {
+    const notYet: SheetTab = {
+      headers: tab.headers,
+      rows: [...run(EARLIER, 1), ...run(LATER.slice(0, 8), 101)], // ends at July
+    };
+    expect(findMonthlyRowFields(notYet, "August", 2026, TODAY)).toBeNull();
+    expect(findMonthlyRowFields(notYet, "July", 2026, TODAY)?.find((f) => f.label === "Spend")?.value).toBe("108");
+  });
+
+  // A December report is shared in January, so it is the one month routinely
+  // asked for after its year has ended. It needs no special case: the Reports
+  // screen picks a month with a year attached.
+  it("still reaches December when it is shared the January after", () => {
+    // The same sheet carried on to the end of the year, so it has all three
+    // Decembers: 2024 at the top, 2025 in the middle, 2026 at the bottom.
+    const toYearEnd: SheetTab = {
+      headers: tab.headers,
+      rows: [...run(EARLIER, 1), ...run(LATER, 101), ...run(["Sep", "Oct", "Nov", "DECEMBER"], 110)],
+    };
+    const inJanuary = new Date(2027, 0, 5);
+    const spendOn = (month: string, year: number) =>
+      findMonthlyRowFields(toYearEnd, month, year, inJanuary)?.find((f) => f.label === "Spend")?.value;
+
+    expect(spendOn("December", 2026)).toBe("113");
+    // Not either of the Decembers above it, which are a year and two years old.
+    expect(spendOn("December", 2025)).toBe("101");
+    expect(spendOn("December", 2024)).toBe("1");
+    // And the new year's own row does not exist yet, so nothing is reported
+    // for it rather than last January's figures.
+    expect(findMonthlyRowFields(toYearEnd, "January", 2027, inJanuary)).toBeNull();
   });
 
   it("reports nothing for a year the sheet does not go back to", () => {

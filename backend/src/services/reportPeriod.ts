@@ -205,16 +205,29 @@ function assignRowYears(tab: SheetTab, monthIdx: number, today: Date): (number |
 // `year` is the year the report was asked for — the Reports screen picks a
 // month with <input type="month">, so it always sends one. `today` is what
 // pins the sheet's rows to the calendar, and is separate because an earlier
-// month can be looked at or re-sent long after it ended. Both are only
-// consulted when the sheet has more than one row for the month, which is the
-// only case where the old first-match-wins rule could pick the wrong one; a
-// sheet with a single year of rows behaves exactly as it always did.
+// month can be looked at or re-sent long after it ended.
 //
-// When the sheet has two rows for the month and neither works out to the year
-// asked for, nothing is returned rather than a guess. The screen then says the
-// sheet has no row for that period, which is true — and far better than
-// sending a client a year-old figure under this year's heading, which is the
-// fault this replaced.
+// The year has to match. It is checked on every sheet, not only on one with
+// two rows for the month, because the fault is not really about duplicate
+// rows — it is about a row from the wrong year being sent. A sheet that has
+// last August but has not had this August added to it yet has exactly one row
+// headed "Aug", and returning it is the same fault wearing a different shape.
+//
+// So a month whose row works out to a different year than the one asked for
+// returns nothing. The screen then says the sheet has no row for that period,
+// which is true, and the person sending goes and looks at the sheet — where
+// the row is genuinely missing. That is the right outcome, and far better than
+// a client receiving a year-old figure under this year's heading.
+//
+// A December report shared in January needs no special case: the Reports
+// screen picks a month with a year attached, so asking for December 2026 in
+// January 2027 asks for, and gets, that December.
+//
+// The one assumption underneath all of this is that the table runs in
+// chronological order, which is how every sheet is built and how the Apps
+// Script copies it. A table sorted some other way would have its years read
+// wrongly — and would report nothing rather than the wrong year, which is the
+// failure worth having.
 //
 // findWeeklyRowFields has the same shape of risk, but only on a Weekly tab
 // that carries a Month column and more than a year of rows. No sheet seen has
@@ -229,16 +242,8 @@ export function findMonthlyRowFields(
   const monthIdx = findHeaderIndex(tab.headers, /month/i);
   if (monthIdx === -1) return null;
 
-  const matches = tab.rows.filter((r) => isSameMonth(r[monthIdx] ?? "", monthName));
-  if (matches.length === 0) return null;
-
-  let row: string[] | undefined;
-  if (matches.length === 1) {
-    row = matches[0];
-  } else {
-    const years = assignRowYears(tab, monthIdx, today);
-    row = tab.rows.find((r, i) => years[i] === year && isSameMonth(r[monthIdx] ?? "", monthName));
-  }
+  const years = assignRowYears(tab, monthIdx, today);
+  const row = tab.rows.find((r, i) => years[i] === year && isSameMonth(r[monthIdx] ?? "", monthName));
   if (!row) return null;
 
   const fields = usableFields(tab.headers, row, [monthIdx]);
