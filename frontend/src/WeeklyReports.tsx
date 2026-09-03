@@ -200,7 +200,41 @@ function weekOf(date: string): number {
 }
 
 function monthOf(date: string): string {
-  return date.slice(0, 7); // YYYY-MM, what <input type="month"> wants
+  return date.slice(0, 7); // YYYY-MM, what the month dropdown holds
+}
+
+// The months this screen offers, and the only ones it offers: this year's, up
+// to the one we are in. There is no year to pick anywhere here.
+//
+// Asked for by Ecom4all after monthly reports went out carrying last year's
+// figures. The sheets write a month with no year beside it — "Aug" appears
+// once per year and nothing in the row says which — so the year came from
+// whatever the screen sent. Not offering one is the other half of the fix that
+// went into findMonthlyRowFields: the backend refuses a row from a year it was
+// not asked for, and this makes the wrong year unaskable.
+//
+// December is the one month wanted after its year has ended, because the
+// December report is shared in January. So while it is January, December is
+// still there — and nothing older than that, ever.
+function monthChoices(today: Date): { value: string; label: string }[] {
+  const year = today.getFullYear();
+  const choices = [];
+
+  if (today.getMonth() === 0) {
+    choices.push({ value: `${year - 1}-12`, label: "December" });
+  }
+  for (let month = 0; month <= today.getMonth(); month++) {
+    choices.push({ value: `${year}-${String(month + 1).padStart(2, "0")}`, label: MONTH_NAMES[month] });
+  }
+
+  return choices;
+}
+
+// The same boundary for the daily report's own day picker, so one control
+// can't reach somewhere the other can't.
+function earliestSelectableDay(today: Date): string {
+  const year = today.getFullYear();
+  return today.getMonth() === 0 ? `${year - 1}-12-01` : `${year}-01-01`;
 }
 
 // Which period the figures on screen are for, so the heading says what is
@@ -550,7 +584,9 @@ export default function WeeklyReports() {
                   className="field-input"
                   value={date}
                   // No future days: those rows are blank in every sheet, so the
-                  // only thing picking one can do is empty the screen.
+                  // only thing picking one can do is empty the screen. And no
+                  // earlier year — see monthChoices.
+                  min={earliestSelectableDay(new Date())}
                   max={todayValue()}
                   onChange={(e) => setDate(e.target.value || todayValue())}
                   disabled={sendingAll}
@@ -563,17 +599,21 @@ export default function WeeklyReports() {
                 <label className="panel-sub" style={{ display: "block", marginBottom: 4 }} htmlFor="report-month">
                   Month
                 </label>
-                <input
+                {/* A list of months rather than <input type="month">, which
+                    carries a year spinner beside it and let one be picked. */}
+                <select
                   id="report-month"
-                  type="month"
-                  className="field-input"
+                  className="field-select"
                   value={monthOf(date)}
-                  max={monthOf(todayValue())}
-                  onChange={(e) =>
-                    setDate(e.target.value ? `${e.target.value}-${DAY_IN_WEEK[weekOf(date)]}` : todayValue())
-                  }
+                  onChange={(e) => setDate(`${e.target.value}-${DAY_IN_WEEK[weekOf(date)]}`)}
                   disabled={sendingAll}
-                />
+                >
+                  {monthChoices(new Date()).map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
