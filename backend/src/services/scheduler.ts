@@ -52,6 +52,29 @@ let lastReminderDate: string | null = null;
 // reminder go out twice.
 const dateKey = localDateKey;
 
+// The due date a repeat puts on the task it creates: the day it lands.
+//
+// A repeat can't carry a due date of its own — a fixed date copied onto every
+// run would have the second one arriving already overdue — so it is worked out
+// each time instead. "The day it appears" is the rule the client picked: a
+// repeat's whole point is that the work comes round again, so anything still
+// sitting there when the next day starts really is late.
+//
+// Midnight local, not the moment of the run, because a due date on this board
+// is a day and never a time — isOverdue on the Tasks screen and isLate in the
+// morning reminder both compare by day, and a task made at 9am must not read
+// as due "09:00".
+//
+// Built from `now` rather than from the repeat's nextRunAt on purpose: a
+// backend that was down over a due moment creates the task when it comes back,
+// and the day it appeared is the day the person holding it can act on. Dating
+// it to a run that was missed would put it on the board already red.
+function dueOnTheDayItLands(now: Date): Date {
+  const due = new Date(now);
+  due.setHours(0, 0, 0, 0);
+  return due;
+}
+
 // Moves a due repeat's clock forward, then creates the Task it was due for —
 // unless the last one it made is still open, in which case it reminds whoever
 // is holding that one instead. Claiming first is what stops the same run
@@ -141,6 +164,11 @@ export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels
           assignee: repeat.assignee,
           taskType: repeat.taskType,
           marketplace: repeat.marketplace,
+          // Without this the task lands with an empty due date, which is why
+          // repeat-made work never turned red on the board and never showed
+          // as late in the morning reminder — both of those give up before
+          // they compare anything when there is no date to compare.
+          dueDate: dueOnTheDayItLands(now),
         });
       } catch (err) {
         // Nothing was created, so hand the run back: the clock returns to what

@@ -182,6 +182,47 @@ describe("runDueRecurringTasks", () => {
       await runDueRecurringTasks(NOW, fakeChannels());
       expect(recurringTaskRepository.recordTask).toHaveBeenCalledWith("repeat-1", "task-this-week");
     });
+
+    // Repeats used to create tasks with no due date at all, so they never
+    // turned red on the board and never counted as late in the morning
+    // reminder — both give up before comparing anything when the date is
+    // empty. Asserted by parts rather than against a fixed timestamp: the
+    // rule is "the day it lands" in whatever timezone the server runs in,
+    // and a test that hard-codes one would pass only on that machine.
+    it("makes it due on the day it lands", async () => {
+      await runDueRecurringTasks(NOW, fakeChannels());
+
+      const { dueDate } = vi.mocked(taskRepository.create).mock.calls[0][0] as { dueDate: Date };
+      expect(dueDate.getFullYear()).toBe(NOW.getFullYear());
+      expect(dueDate.getMonth()).toBe(NOW.getMonth());
+      expect(dueDate.getDate()).toBe(NOW.getDate());
+    });
+
+    // A due date on this board is a day, never a time — the Tasks screen and
+    // the reminder both compare by day, and a task made at nine in the
+    // morning must not read as due "09:00".
+    it("dates it to the whole day rather than the moment it ran", async () => {
+      await runDueRecurringTasks(NOW, fakeChannels());
+
+      const { dueDate } = vi.mocked(taskRepository.create).mock.calls[0][0] as { dueDate: Date };
+      expect([dueDate.getHours(), dueDate.getMinutes(), dueDate.getSeconds()]).toEqual([0, 0, 0]);
+      expect(dueDate.getMilliseconds()).toBe(0);
+    });
+
+    // The backend was down over this repeat's turn and is only now catching
+    // up. The task appears today, so today is the day the person holding it
+    // can act on — dating it to the run that was missed would put it on the
+    // board already red, for a delay that was ours and not theirs.
+    it("uses the day it appears, not a run that was missed", async () => {
+      const missed = new Date("2026-08-12T03:30:00Z");
+      vi.mocked(recurringTaskRepository.due).mockResolvedValue([repeat({ nextRunAt: missed })]);
+
+      await runDueRecurringTasks(NOW, fakeChannels());
+
+      const { dueDate } = vi.mocked(taskRepository.create).mock.calls[0][0] as { dueDate: Date };
+      expect(dueDate.getDate()).toBe(NOW.getDate());
+      expect(dueDate.getDate()).not.toBe(missed.getDate());
+    });
   });
 
   it("leaves a repeat alone when another pass already claimed it", async () => {
