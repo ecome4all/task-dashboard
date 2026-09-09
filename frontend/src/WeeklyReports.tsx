@@ -20,6 +20,18 @@ import MultiSelect from "./MultiSelect";
 // Pause between one client's message and the next.
 const SEND_GAP_MS = 2000;
 
+// What a WhatsApp group is called on screen. Never the raw JID: nobody reads
+// one, and Periskope supplies the name.
+//
+// The four-character tail is the one concession, and only when there is no
+// name at all. This label picks which group a client's report is sent to, so
+// two options reading "Unnamed group" could send a client's figures to the
+// wrong chat — an ambiguity worth four characters to avoid.
+function groupLabel(group: { groupId: string; groupName: string | null }): string {
+  if (group.groupName) return group.groupName;
+  return `Unnamed group (…${group.groupId.replace(/@.*$/, "").slice(-4)})`;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong. Try again.";
 }
@@ -99,7 +111,7 @@ function sendTargetFor(state: ClientReportState): { value: string; label: string
   if (state.sendVia === "phone") return phone ? { value: phone, label: "Phone" } : undefined;
 
   const chosen = groups.find((g) => g.groupId === state.sendVia) ?? groups[0];
-  return { value: chosen.groupId, label: chosen.groupName ?? chosen.groupId };
+  return { value: chosen.groupId, label: groupLabel(chosen) };
 }
 
 // Everything starts ticked, noughts included.
@@ -796,7 +808,7 @@ export default function WeeklyReports() {
                               disabled={sendingAll}
                             >
                               {groups.map((g) => (
-                                <option key={g.id} value={g.groupId}>{g.groupName ?? g.groupId}</option>
+                                <option key={g.id} value={g.groupId}>{groupLabel(g)}</option>
                               ))}
                               <option value="phone">Phone number</option>
                             </select>

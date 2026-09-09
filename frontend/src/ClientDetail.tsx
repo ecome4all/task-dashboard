@@ -392,6 +392,11 @@ export default function ClientDetail({
               <div className="panel-sub">
                 Added {formatDate(client.createdAt)}
                 {tasks.length > 0 && ` · Last work came in ${formatDate(tasks[0].createdAt)}`}
+                {" · "}
+                {client.assignedEmployee
+                  ? `New tasks go to ${client.assignedEmployee.name}`
+                  : "New tasks arrive unassigned"}
+                {" (set on the Clients screen)"}
               </div>
             </div>
           </div>
@@ -498,26 +503,32 @@ export default function ClientDetail({
                     )}
                     {client.whatsappGroups.map((group) => (
                       <div key={group.id} className="cell-list-item">
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div>{group.groupName ?? "No name saved"}</div>
-                          {/* Long, unbroken and rarely read, but occasionally
-                              the only way to tell two of one client's groups
-                              apart — so it is capped, with the whole of it in
-                              the tooltip. */}
-                          <div className="cell-sub-id" title={group.groupId}>
-                            {group.groupId}
-                          </div>
+                        {/* The raw JID is not shown. Nobody reads it and
+                            nobody has to: Periskope supplies the group's name,
+                            and intake saves the link itself the first time the
+                            client posts from their saved number. It stays in
+                            the tooltip only, for the rare afternoon somebody
+                            is matching this screen against Periskope. */}
+                        <div style={{ minWidth: 0, flex: 1 }} title={group.groupId}>
+                          {group.groupName ?? "Unnamed group"}
                         </div>
                         <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(group.id)}>
                           Unlink
                         </button>
                       </div>
                     ))}
+                    {/* The last hand-linking route, and the reason it cannot
+                        go: a group links itself only once it has sent a task,
+                        and a group has to be linked *before* a report can be
+                        sent to it. A client onboarded for reports who has not
+                        messaged yet is reachable no other way. Everything
+                        else links itself, or is one click on Unrecognized
+                        Senders. */}
                     <div className="cell-form">
                       <input
                         className="field-input"
                         type="text"
-                        placeholder="Group id, e.g. 1203634…@g.us"
+                        placeholder="Paste a group id"
                         aria-label="WhatsApp group id"
                         value={newGroupId}
                         onChange={(e) => setNewGroupId(e.target.value)}
@@ -639,9 +650,19 @@ export default function ClientDetail({
             </div>
           </div>
 
+          {/* Counted from this client's tasks, so it is a record of who has
+              actually done their work - not a setting, and not the same thing
+              as the employee the client is assigned to. The two disagree
+              routinely and both are right: somebody can have done every task
+              a client has ever sent without being the person their new work
+              now goes to. Saying so here is the only thing that made that
+              readable. */}
           <div className="panel">
             <div className="panel-head">
-              <span className="panel-title">Who is working on this client</span>
+              <span className="panel-title">Who has worked on this client</span>
+              <span className="panel-sub">
+                Counted from the work logged for them - who has done it, not who new tasks go to
+              </span>
             </div>
             <div className="panel-body">
               {employeeRows.length === 0 && <p className="panel-sub">No work logged for this client yet.</p>}

@@ -42,8 +42,6 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
-  const [newClientGroupId, setNewClientGroupId] = useState("");
-  const [newClientGroupName, setNewClientGroupName] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
   const [marketplaceOptions, setMarketplaceOptions] = useState<ConfigOption[]>([]);
   // Active employees only — the picker must not offer somebody deactivated,
@@ -139,30 +137,31 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     setTasks(taskList);
   }, 60_000);
 
+  // A name and a number. There is deliberately nowhere here to paste a
+  // WhatsApp group id: the group links itself.
+  //
+  // The first time somebody posts in a client's group from the number saved
+  // below, intake recognizes the client by that number and saves the group
+  // against them (clientRepository.ensureGroupLinked). Nobody has to find and
+  // copy a raw group JID, which is why that field was the one thing on this
+  // form that could not be filled in from anything a person actually has to
+  // hand when a client is onboarded.
+  //
+  // Which makes the phone the field that matters: without it, a new client's
+  // group is recognized by nothing, and their messages pile up under
+  // Unrecognized Senders instead of linking themselves. Both fallbacks are
+  // still there when auto-linking has not happened yet — Link on that panel,
+  // and the group form on Client Details.
   async function handleAddClient(e: React.FormEvent) {
     e.preventDefault();
     const name = newName.trim();
     if (!name) return;
     setActionError("");
     try {
-      let client = await createClient({ name, phone: newPhone.trim() || undefined });
-      const groupId = newClientGroupId.trim();
-      // Group is optional and added as a second step right after create —
-      // if it fails (e.g. already linked to another client), the client
-      // itself still gets created rather than losing the whole submission.
-      if (groupId) {
-        try {
-          const group = await addClientWhatsappGroup(client.id, groupId, newClientGroupName.trim() || undefined);
-          client = { ...client, whatsappGroups: [...client.whatsappGroups, group] };
-        } catch (err) {
-          setActionError(errorMessage(err));
-        }
-      }
+      const client = await createClient({ name, phone: newPhone.trim() || undefined });
       setClients((prev) => [...prev, client].sort((a, b) => a.name.localeCompare(b.name)));
       setNewName("");
       setNewPhone("");
-      setNewClientGroupId("");
-      setNewClientGroupName("");
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -337,6 +336,12 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Add client</span>
+          {/* Said here because it changes what somebody does next: having
+              added a client, there is nothing left to link by hand, and the
+              number is what makes that true. */}
+          <span className="panel-sub">
+            Their WhatsApp group links itself the first time somebody posts in it from this number
+          </span>
         </div>
         <div className="panel-body">
           <form className="add-employee" onSubmit={handleAddClient}>
@@ -344,32 +349,22 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
               className="field-input"
               type="text"
               placeholder="Client name"
+              aria-label="Client name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               style={{ flex: 1 }}
             />
+            {/* Not marked optional any more. It technically is — a client can
+                be created without one — but it is the number the group is
+                recognized by, so a client saved without it has nothing to
+                link them to their own chat. */}
             <input
               className="field-input"
               type="text"
-              placeholder="Phone (optional)"
+              placeholder="WhatsApp number"
+              aria-label="WhatsApp number"
               value={newPhone}
               onChange={(e) => setNewPhone(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <input
-              className="field-input"
-              type="text"
-              placeholder="Group id (optional)"
-              value={newClientGroupId}
-              onChange={(e) => setNewClientGroupId(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <input
-              className="field-input"
-              type="text"
-              placeholder="Group name (optional)"
-              value={newClientGroupName}
-              onChange={(e) => setNewClientGroupName(e.target.value)}
               style={{ flex: 1 }}
             />
             <button className="btn btn-primary" type="submit">Add</button>
