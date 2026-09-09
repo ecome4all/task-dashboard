@@ -422,6 +422,21 @@ export interface Client {
   // separate sets of figures. Empty means no reports can be sent for them.
   // Read-only from this app; nothing here writes to a sheet.
   reportSheets: ClientReportSheet[];
+  // The one employee this client's work belongs to. Every new task for them
+  // arrives already assigned to this person instead of landing unassigned —
+  // set on the Clients screen by an admin or a manager.
+  //
+  // Null means nobody is on them, which is a perfectly ordinary state: their
+  // tasks arrive unassigned, exactly as every client's did before this.
+  //
+  // Changing it moves their *next* task. Nothing already on the board is
+  // touched — those keep the assignee they have.
+  assignedEmployeeId: string | null;
+  // The row itself, for display. `active` is here because a client can be
+  // left on somebody who was deactivated afterwards, and that quietly stops
+  // their tasks being assigned to anyone — the screen has to be able to say
+  // so rather than showing a name that looks like it is working.
+  assignedEmployee: { id: string; name: string; active: boolean } | null;
 }
 
 export interface ClientReportSheet {
@@ -501,9 +516,12 @@ export function sendClientUpdate(
   return postJson(`/api/clients/${id}/send-update`, data);
 }
 
+// assignedEmployeeId accepts null, and null means "take this employee off
+// the client" rather than "leave it as it is" — leaving the field out is how
+// you say the latter.
 export function updateClient(
   id: string,
-  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active">>
+  changes: Partial<Pick<Client, "name" | "phone" | "notes" | "active" | "assignedEmployeeId">>
 ): Promise<Client> {
   return request(`/api/clients/${id}`, {
     method: "PATCH",

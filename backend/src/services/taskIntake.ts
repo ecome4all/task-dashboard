@@ -9,6 +9,7 @@ import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
 import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
 import { notifyAssignee } from "./assignmentNotice";
+import { defaultAssignmentFor } from "./clientAssignment";
 import { composeIntakeAck } from "./taskMessages";
 
 export interface TaskIntakeParams {
@@ -131,6 +132,21 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     return alreadyLogged;
   }
 
+  // Who this lands on. A client has one employee on them, and their work
+  // arrives already assigned to that person instead of sitting unassigned
+  // until somebody opens the dashboard — see services/clientAssignment.ts.
+  //
+  // A number tagged in the message beats it, and that order is the whole
+  // point of having both: the standing rule says where this client's work
+  // goes by default, the tag says where *this* task goes. Somebody naming a
+  // person in the message has said something more specific than the setting,
+  // and the setting must not overrule them.
+  const defaultAssignment = defaultAssignmentFor(client);
+  if (defaultAssignment.note) {
+    console.warn(`[intake] ${client.name}: ${defaultAssignment.note}`);
+  }
+  const assignee = mention ? mention.employee.name : defaultAssignment.assignee;
+
   const task = await taskRepository.create({
     source: params.source,
     sourceRef: params.chatId,
@@ -139,7 +155,7 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     description: mention ? mention.description : details.description,
     chatName: params.chatName,
     clientName: client.name,
-    ...(mention && { assignee: mention.employee.name }),
+    assignee,
     ...(details.marketplace && { marketplace: details.marketplace }),
     ...(details.dueDate && { dueDate: details.dueDate }),
   });
@@ -189,14 +205,24 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
     }
   }
 
-  // Never throws — see notifyAssignee.
-  if (mention) {
-    await notifyAssignee(
-      mention.employee.name,
-      { description: task.description, clientName: task.clientName, dueDate: task.dueDate },
-      params.channels
-    );
-  }
+  // Whoever it landed on is told it is theirs, whether that was a tagged
+  // number or the client they are assigned to. Deliberately not limited to
+  // the tagged case any more: the alert is what makes an assignment mean
+  // something, and a task quietly appearing under your name on a board you
+  // may not have open is an assignment you find out about at 9am the next
+  // morning at the earliest.
+  //
+  // Told the name worked out above rather than the one read back off the
+  // saved row — same value, and the decision is what is being acted on here,
+  // not a round trip through the database.
+  //
+  // Never throws, and skips itself when the person has no number saved — see
+  // notifyAssignee.
+  await notifyAssignee(
+    assignee,
+    { description: task.description, clientName: task.clientName, dueDate: task.dueDate },
+    params.channels
+  );
 
   return task;
 }

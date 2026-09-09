@@ -13,6 +13,7 @@ import {
   TaskSnapshot,
 } from "../services/taskMessages";
 import { notifyAssignee } from "../services/assignmentNotice";
+import { defaultAssignmentFor } from "../services/clientAssignment";
 import { requireRole } from "../auth/requireRole";
 import { taskVisibilityFor, isTaskVisible } from "../services/taskVisibility";
 import { clientRepository } from "../repositories/clientRepository";
@@ -141,6 +142,11 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     let sourceRef = "";
     let chatName: string | undefined;
     let clientName: string | undefined;
+    // Who this client's work goes to, used only when the form left the
+    // employee box empty — see services/clientAssignment.ts. Picking somebody
+    // on the form beats it: that is a person saying who this particular task
+    // is for, which is more specific than the client's standing rule.
+    let defaultAssignee: string | null = null;
     if (clientId) {
       const client = await clientRepository.findById(clientId);
       if (!client) {
@@ -148,6 +154,11 @@ export function createTasksRouter(channels: WhatsAppChannels) {
         return;
       }
       clientName = client.name;
+      const defaultAssignment = defaultAssignmentFor(client);
+      if (defaultAssignment.note) {
+        console.warn(`[tasks] ${client.name}: ${defaultAssignment.note}`);
+      }
+      defaultAssignee = defaultAssignment.assignee;
       const group = client.whatsappGroups[0];
       if (group) {
         source = "whatsapp_group";
@@ -179,7 +190,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
       chatName,
       clientName,
       description: description.trim(),
-      assignee: assignee || null,
+      assignee: assignee || defaultAssignee,
       taskType: taskType || null,
       marketplace: marketplace || null,
       dueDate: parsedDueDate,

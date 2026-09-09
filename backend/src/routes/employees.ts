@@ -150,7 +150,9 @@ export function createEmployeesRouter() {
   // did. Deleting is for rows that should never have existed.
   //
   // Their past work is unaffected either way — a task stores the assignee's
-  // name, not a link to this row.
+  // name, not a link to this row. Their *future* work is the thing to check:
+  // a client assigned to them sends every new task their way, and that link
+  // is a real foreign key, so it has to be moved before they can go.
   router.delete("/:id", requireRole("admin"), async (req, res) => {
     const employee = await employeeRepository.findById(req.params.id);
     if (!employee) {
@@ -158,10 +160,19 @@ export function createEmployeesRouter() {
       return;
     }
 
+    const [otherActiveAdmins, assignedClients] = await Promise.all([
+      employeeRepository.countOtherActiveAdmins(employee.id),
+      // Deleting them would leave these clients' incoming tasks arriving
+      // unassigned again — and the foreign key would refuse it anyway (see
+      // the migration). Asked here so the answer can name them.
+      employeeRepository.clientsAssignedTo(employee.id),
+    ]);
+
     const refusal = whyEmployeeCannotBeDeleted({
       isSelf: employee.id === req.employeeId,
       targetIsActiveAdmin: employee.active && employee.role === "admin",
-      otherActiveAdmins: await employeeRepository.countOtherActiveAdmins(employee.id),
+      otherActiveAdmins,
+      clientsAssigned: assignedClients.map((client) => client.name),
     });
     if (refusal) {
       res.status(400).json({ error: refusal });

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { clientRepository } from "../repositories/clientRepository";
+import { employeeRepository } from "../repositories/employeeRepository";
 import { taskRepository } from "../repositories/taskRepository";
 import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
@@ -115,10 +116,12 @@ export function createClientsRouter(channels: WhatsAppChannels) {
     );
   });
 
+  // MANAGE_ROLES, so admins and managers both set who a client belongs to —
+  // the same pair who already maintain the directory and send the reports.
   router.patch("/:id", requireRole(...MANAGE_ROLES), async (req, res) => {
     // Report sheets are not here: a client has one per marketplace now, added
     // and removed through /:id/report-sheets below rather than as a field.
-    const { name, phone, notes, active } = req.body;
+    const { name, phone, notes, active, assignedEmployeeId } = req.body;
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       res.status(400).json({ error: "name must be a non-empty string" });
       return;
@@ -127,12 +130,63 @@ export function createClientsRouter(channels: WhatsAppChannels) {
       res.status(400).json({ error: "active must be a boolean" });
       return;
     }
+
+    // Who this client's new tasks go to from now on. Null clears it — a real
+    // instruction ("take Kinjal off this client"), which is why null and
+    // "field not sent" have to stay distinguishable here and an empty string
+    // from a cleared dropdown is read as null rather than refused.
+    //
+    // Nothing already on the board moves. Changing this decides where the
+    // *next* task goes; the ones sitting there keep the assignee they have,
+    // whoever put it on them. See services/clientAssignment.ts.
+    let assignedEmployeeIdChange: string | null | undefined;
+    if (assignedEmployeeId !== undefined) {
+      if (assignedEmployeeId === null || assignedEmployeeId === "") {
+        assignedEmployeeIdChange = null;
+      } else if (typeof assignedEmployeeId !== "string") {
+        res.status(400).json({ error: "assignedEmployeeId must be an employee id, or null to clear it" });
+        return;
+      } else {
+        // Checked against a live employee for the same reason the assignee
+        // dropdown on the board is: a client pointed at a row that has been
+        // deleted would quietly stop assigning anything, and the screen would
+        // go on showing a name.
+        const employee = await employeeRepository.findById(assignedEmployeeId);
+        if (!employee) {
+          res.status(400).json({ error: "That employee isn't on the list." });
+          return;
+        }
+        // Deactivated staff are refused here rather than accepted and ignored
+        // later. Saved, it would look on screen exactly like a working
+        // assignment while every task for this client kept arriving
+        // unassigned — see defaultAssignmentFor, which treats an inactive
+        // employee as nobody.
+        if (!employee.active) {
+          res.status(400).json({
+            error: `${employee.name} is deactivated, so tasks assigned to them would reach nobody. Pick someone active, or reactivate them on the Employees screen.`,
+          });
+          return;
+        }
+        assignedEmployeeIdChange = employee.id;
+      }
+    }
+
     const client = await clientRepository.update(req.params.id, {
       ...(name !== undefined && { name: name.trim() }),
       ...(phone !== undefined && { phone }),
       ...(notes !== undefined && { notes }),
       ...(active !== undefined && { active }),
+      ...(assignedEmployeeIdChange !== undefined && { assignedEmployeeId: assignedEmployeeIdChange }),
     });
+
+    if (assignedEmployeeIdChange !== undefined) {
+      console.log(
+        `[clients] ${client.name} is now ${
+          client.assignedEmployee ? `assigned to ${client.assignedEmployee.name}` : "assigned to nobody"
+        } — applies to their next task onwards, nothing already on the board`
+      );
+    }
+
     res.json(client);
   });
 

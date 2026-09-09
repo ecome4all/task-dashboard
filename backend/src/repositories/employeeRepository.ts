@@ -196,6 +196,26 @@ export const employeeRepository = {
     return prisma.employee.delete({ where: { id } });
   },
 
+  // The clients whose new work is set to land on this person, by name.
+  //
+  // Read before deleting them: Client.assignedEmployeeId points at this row,
+  // so the delete would fail on the foreign key anyway (ON DELETE RESTRICT).
+  // The point of asking first is to be able to say *which* clients, because
+  // "reassign them first" is not actionable without the list — the same
+  // reason a WhatsApp group already linked elsewhere answers with the name of
+  // the client holding it.
+  //
+  // Deactivating is unaffected and stays the normal way to offboard someone.
+  // A client left on a deactivated employee simply gets unassigned tasks
+  // again, with a line in the log saying so — see services/clientAssignment.
+  clientsAssignedTo(employeeId: string) {
+    return prisma.client.findMany({
+      where: { tenantId: TENANT_ID, assignedEmployeeId: employeeId },
+      orderBy: { name: "asc" },
+      select: { name: true },
+    });
+  },
+
   // Only used to refuse deleting the last admin — see whyEmployeeCannotBeDeleted.
   countOtherActiveAdmins(excludeId: string) {
     return prisma.employee.count({

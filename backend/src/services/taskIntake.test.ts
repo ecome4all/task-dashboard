@@ -83,6 +83,9 @@ describe("handleIncomingTaskMessage", () => {
       sourceRef: "919876543210",
       description: "reduce stock to 5",
       clientName: "Forensic Files",
+      // Nobody is on this client, so it lands unassigned — the same board
+      // state every task arrived in before clients had an employee at all.
+      assignee: null,
     });
     // On the channel it arrived on, not the other one.
     expect(channels.official.sendMessage).toHaveBeenCalledWith("919876543210", "✅ Got it, logged.");
@@ -112,6 +115,7 @@ describe("handleIncomingTaskMessage", () => {
       // The date phrase is gone; the marketplace word stays in the sentence.
       description: "listing not live on flipkart",
       clientName: "Forensic Files",
+      assignee: null,
       marketplace: "flipkart",
       dueDate: new Date("2026-08-20T00:00:00.000Z"),
     });
@@ -153,6 +157,7 @@ describe("handleIncomingTaskMessage", () => {
       sourceRef: "1234@g.us",
       description: "fix the listing images",
       clientName: "Forensic Files",
+      assignee: null,
     });
     expect(channels.whapi.sendMessage).toHaveBeenCalledWith("1234@g.us", "✅ Got it, logged.");
   });
@@ -404,7 +409,7 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
 
     const created = vi.mocked(taskRepository.create).mock.calls[0][0];
     expect(created.description).toBe("call the courier on 918888888888");
-    expect(created.assignee).toBeUndefined();
+    expect(created.assignee).toBeNull();
   });
 
   // Most messages tag nobody — no reason to read the employee table for them.
@@ -557,5 +562,146 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
         expect.any(Date)
       );
     });
+  });
+});
+
+// A client has one employee on them, and their work arrives already on that
+// person instead of sitting unassigned until somebody triages it. The rule
+// itself is covered in clientAssignment.test.ts; what these check is that
+// intake applies it, and what happens when it meets the tagged-number path.
+describe("handleIncomingTaskMessage — assigning from the client's employee", () => {
+  const ASSIGNED = { name: "Asha", phone: "919000000011" };
+
+  function clientAssignedTo(employee: { name: string; active: boolean } | null) {
+    return { id: "client-1", name: "BagsGuru", assignedEmployee: employee } as any;
+  }
+
+  beforeEach(() => {
+    vi.mocked(taskRepository.create).mockReset();
+    vi.mocked(taskRepository.create).mockResolvedValue({
+      id: "task-1",
+      description: "fix the listing",
+      clientName: "BagsGuru",
+      dueDate: null,
+    } as any);
+    vi.mocked(taskRepository.findDuplicateOf).mockReset();
+    vi.mocked(taskRepository.findDuplicateOf).mockResolvedValue(null);
+    vi.mocked(clientRepository.findByChatId).mockReset();
+    vi.mocked(clientRepository.ensureGroupLinked).mockReset();
+    vi.mocked(clientRepository.ensureGroupLinked).mockResolvedValue(null);
+    vi.mocked(employeeRepository.list).mockReset();
+    vi.mocked(employeeRepository.list).mockResolvedValue([ASSIGNED] as any);
+    // How notifyAssignee finds the number to send the "this is yours" alert
+    // to — it looks the assignee's name back up rather than being handed a
+    // phone. Deactivated staff never reach it: intake stops assigning them
+    // before it gets this far.
+    vi.mocked(employeeRepository.findByName).mockReset();
+    vi.mocked(employeeRepository.findByName).mockResolvedValue({ ...ASSIGNED, active: true } as any);
+    vi.mocked(taskNoteRepository.create).mockReset();
+    vi.mocked(taskNoteRepository.create).mockResolvedValue({} as any);
+    vi.mocked(unrecognizedMessageRepository.create).mockReset();
+    vi.mocked(configOptionRepository.list).mockReset();
+    vi.mocked(configOptionRepository.list).mockResolvedValue(MARKETPLACE_OPTIONS as any);
+  });
+
+  it("assigns a new task to the employee the client is on", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(
+      clientAssignedTo({ name: "Asha", active: true })
+    );
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      text: "task: fix the listing",
+      channels: fakeChannels(),
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ clientName: "BagsGuru", assignee: "Asha" })
+    );
+  });
+
+  // Being given work tells you so, the same way a tagged number always has.
+  // Without this the first anyone hears of it is the 9am reminder.
+  it("tells that employee the task is theirs", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(
+      clientAssignedTo({ name: "Asha", active: true })
+    );
+    const channels = fakeChannels();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      text: "task: fix the listing",
+      channels,
+    });
+
+    const toEmployee = channels.whapi.sendMessage.mock.calls.find((call) => call[0] === "919000000011");
+    expect(toEmployee).toBeDefined();
+    expect(toEmployee![1]).toContain("Asha");
+    expect(toEmployee![1]).toContain("fix the listing");
+  });
+
+  // The one that decides which of the two features wins. A number in the
+  // message is somebody saying who *this* task is for, which is more specific
+  // than the client's standing rule — so it has to beat it, not lose to it.
+  it("lets a number tagged in the message beat the client's employee", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(
+      clientAssignedTo({ name: "Asha", active: true })
+    );
+    vi.mocked(employeeRepository.list).mockResolvedValue([
+      ASSIGNED,
+      { name: "Bharat", phone: "919000000022" },
+    ] as any);
+    vi.mocked(employeeRepository.findByName).mockResolvedValue({
+      name: "Bharat",
+      phone: "919000000022",
+      active: true,
+    } as any);
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      text: "task: fix the listing @919000000022",
+      channels: fakeChannels(),
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "fix the listing", assignee: "Bharat" })
+    );
+  });
+
+  // Assigned to somebody deactivated, a task is invisible to every member on
+  // the board and appears in no reminder. Unassigned, anyone can see it.
+  it("leaves the task unassigned when the client's employee has been deactivated", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(
+      clientAssignedTo({ name: "Asha", active: false })
+    );
+    const channels = fakeChannels();
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      text: "task: fix the listing",
+      channels,
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith(expect.objectContaining({ assignee: null }));
+    expect(channels.whapi.sendMessage.mock.calls.some((call) => call[0] === "919000000011")).toBe(false);
+  });
+
+  // Every client on the system the day this shipped, and the state the board
+  // behaved in before the column existed at all.
+  it("leaves the task unassigned when nobody is on the client", async () => {
+    vi.mocked(clientRepository.findByChatId).mockResolvedValue(clientAssignedTo(null));
+
+    await handleIncomingTaskMessage({
+      source: "whatsapp_group",
+      chatId: "120363409833141766@g.us",
+      text: "task: fix the listing",
+      channels: fakeChannels(),
+    });
+
+    expect(taskRepository.create).toHaveBeenCalledWith(expect.objectContaining({ assignee: null }));
   });
 });

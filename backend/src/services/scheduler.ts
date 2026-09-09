@@ -6,6 +6,7 @@ import { advanceNextRunAt, Frequency } from "./recurrence";
 import { composeEmployeeReminder, ReminderTask } from "./reminderMessages";
 import { notifyAssignee } from "./assignmentNotice";
 import { remindAboutOpenTask } from "./repeatReminder";
+import { defaultAssignmentFor } from "./clientAssignment";
 import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { clientRepository } from "../repositories/clientRepository";
 import { buildReport, ReportKind } from "./weeklyReportPreview";
@@ -150,6 +151,35 @@ export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels
         continue;
       }
 
+      // A repeat carries the employee that was on the task it was made from,
+      // and that is the answer whenever there is one. Only when it is empty
+      // does the client's assigned employee fill it — a repeat set up before
+      // anyone was put on the client, or one made from a task nobody had
+      // triaged. Never a replacement: an assignee stored on the repeat was
+      // chosen deliberately and outranks the client's standing rule, the same
+      // way a name picked on the form does.
+      //
+      // Found by name, because a repeat stores `clientName` as text and has
+      // no client id to follow. Safe only because of what it is used for: a
+      // name matching nothing leaves the assignee exactly as empty as it is
+      // today. See clientRepository.findByNameWithAssignee.
+      let assignee = repeat.assignee;
+      if (!assignee && repeat.clientName) {
+        try {
+          const client = await clientRepository.findByNameWithAssignee(repeat.clientName);
+          const defaultAssignment = defaultAssignmentFor(client);
+          if (defaultAssignment.note) {
+            console.warn(`[scheduler] ${repeat.clientName}: ${defaultAssignment.note}`);
+          }
+          assignee = defaultAssignment.assignee;
+        } catch (err) {
+          // The task matters more than who it starts out on: an unassigned
+          // task is visible to everybody and can be picked up, whereas losing
+          // the run means this week's work never appears at all.
+          console.error(`[scheduler] couldn't look up who ${repeat.clientName} is assigned to:`, err);
+        }
+      }
+
       let task;
       try {
         // Carries the triage across too (employee/type/marketplace), so a
@@ -161,7 +191,7 @@ export async function runDueRecurringTasks(now: Date, channels: WhatsAppChannels
           description: repeat.description,
           chatName: repeat.chatName ?? undefined,
           clientName: repeat.clientName ?? undefined,
-          assignee: repeat.assignee,
+          assignee,
           taskType: repeat.taskType,
           marketplace: repeat.marketplace,
           // Without this the task lands with an empty due date, which is why

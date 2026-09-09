@@ -144,6 +144,10 @@ model Employee {
   // reminder job failing. Stored in the same normalized form as Client.phone
   // (country code, digits only) so it can be handed straight to an adapter.
   phone        String?
+  // The clients whose work lands on this person by default — see
+  // Client.assignedEmployeeId. Only here so the relation has two ends, and so
+  // "how many clients would deleting this person strand?" is one query.
+  clients      Client[]
 }
 
 // A managed directory of clients, separate from Task.clientName (which is
@@ -159,6 +163,29 @@ model Client {
   createdAt      DateTime              @default(now())
   whatsappGroups ClientWhatsappGroup[]
   reportSheets   ClientReportSheet[]
+
+  // The one employee this client's work belongs to. Every new task for them
+  // arrives already assigned to this person instead of sitting unassigned
+  // until somebody triages it — see services/clientAssignment.ts for the rule
+  // and for the two things that beat it.
+  //
+  // A link to the Employee row rather than a copy of the name, unlike
+  // Task.assignee: a name copied here would go stale the moment somebody is
+  // renamed, and renaming already has to walk every table holding one (see
+  // employeeRepository.rename). The name is read off this row at the moment a
+  // task is made, so a rename needs no work here at all.
+  //
+  // Null is a real state and the default: a client nobody is on behaves
+  // exactly as every client did before this column existed.
+  //
+  // onDelete: Restrict — deleting an employee still holding clients would
+  // quietly stop those clients' tasks being assigned to anybody, with nothing
+  // on screen to say so. The route refuses first and names them; this is the
+  // backstop for a race between the two.
+  assignedEmployeeId String?
+  assignedEmployee   Employee? @relation(fields: [assignedEmployeeId], references: [id], onDelete: Restrict)
+
+  @@index([assignedEmployeeId])
 }
 
 // The Google Sheet a client's performance numbers are kept in — read-only

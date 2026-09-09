@@ -15,6 +15,13 @@ const PUBLIC_FIELDS = {
   // with the client, since every screen that shows a client shows what it
   // can report on.
   reportSheets: { select: { id: true, marketplace: true, sheetUrl: true } },
+  // Who this client's new work goes to. The id is what the picker on the
+  // Clients screen writes back; the nested row is what it displays, and
+  // `active` is why the row is sent rather than just the name — a client left
+  // on somebody who has since been deactivated gets no assignee at all (see
+  // services/clientAssignment.ts), and the screen has to be able to say so.
+  assignedEmployeeId: true,
+  assignedEmployee: { select: { id: true, name: true, active: true } },
 } as const;
 
 // Staff type a bare 10-digit Indian mobile number most of the time — this
@@ -54,9 +61,19 @@ export const clientRepository = {
     });
   },
 
+  // assignedEmployeeId is nullable on purpose and null is a real value here,
+  // not "leave it alone": taking the employee off a client is a thing staff
+  // do, and an undefined-means-skip check in the route is what keeps the two
+  // apart. Clearing it does not touch a single task already on the board.
   update(
     id: string,
-    changes: { name?: string; phone?: string; notes?: string; active?: boolean }
+    changes: {
+      name?: string;
+      phone?: string;
+      notes?: string;
+      active?: boolean;
+      assignedEmployeeId?: string | null;
+    }
   ) {
     return prisma.client.update({
       where: { id },
@@ -102,6 +119,31 @@ export const clientRepository = {
   findReportSheet(clientId: string, marketplace: string) {
     return prisma.clientReportSheet.findFirst({
       where: { tenantId: TENANT_ID, clientId, marketplace },
+    });
+  },
+
+  // The client of a given name, with whoever is assigned to them.
+  //
+  // Matching a client by name is normally the wrong move in this codebase and
+  // is avoided everywhere else — a client is found by WhatsApp group or phone,
+  // because names are typed by people and two of the live ones differ by a
+  // single letter. This exists for one caller that has nothing else to go on:
+  // a repeating task stores
+  // `clientName` as text, copied off the task it was made from, and has no
+  // clientId to follow.
+  //
+  // Safe there precisely because of what it is used for — filling an assignee
+  // that is otherwise empty. A name that matches nothing returns null and the
+  // task is created exactly as it is today, so the worst a mismatch can do is
+  // nothing at all. Do not reach for this anywhere a wrong match could send a
+  // message or move data.
+  //
+  // Case-insensitive, since the stored name and the copied one can differ by
+  // capitalisation alone.
+  findByNameWithAssignee(name: string) {
+    return prisma.client.findFirst({
+      where: { tenantId: TENANT_ID, active: true, name: { equals: name, mode: "insensitive" } },
+      include: { assignedEmployee: true },
     });
   },
 
@@ -202,16 +244,24 @@ export const clientRepository = {
   //      this lets a known client's own number be recognized even in a
   //      group that hasn't been linked yet.
   async findByChatId(chatId: string, senderPhone?: string) {
+    // The assigned employee comes back with the client on both paths below,
+    // rather than being looked up again afterwards: this is the gate every
+    // incoming WhatsApp message goes through, and intake needs the name to
+    // put on the task it is about to create. Nesting it here keeps that a
+    // property of the client rather than a second query per message.
     const groupMatch = await prisma.clientWhatsappGroup.findFirst({
       where: { tenantId: TENANT_ID, groupId: chatId, client: { active: true } },
-      include: { client: true },
+      include: { client: { include: { assignedEmployee: true } } },
     });
     if (groupMatch) return groupMatch.client;
 
     // Fetches all active clients rather than pushing the digit comparison
     // into SQL — fine at this volume (a handful of clients), and far
     // simpler than raw SQL for a normalize-then-compare match.
-    const clients = await prisma.client.findMany({ where: { tenantId: TENANT_ID, active: true } });
+    const clients = await prisma.client.findMany({
+      where: { tenantId: TENANT_ID, active: true },
+      include: { assignedEmployee: true },
+    });
     const chatDigits = chatId.split("@")[0].replace(/\D/g, "").slice(-10);
     const senderDigits = senderPhone ? senderPhone.split("@")[0].replace(/\D/g, "").slice(-10) : undefined;
     return (

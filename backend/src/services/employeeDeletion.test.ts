@@ -46,4 +46,68 @@ describe("whyEmployeeCannotBeDeleted", () => {
     const why = whyEmployeeCannotBeDeleted({ isSelf: true, targetIsActiveAdmin: true, otherActiveAdmins: 0 });
     expect(why).toContain("your own account");
   });
+
+  // Deleting them would leave these clients' incoming tasks arriving
+  // unassigned again, with nothing on any screen to say why.
+  it("refuses deleting someone who still holds clients, and names them", () => {
+    const why = whyEmployeeCannotBeDeleted({
+      isSelf: false,
+      targetIsActiveAdmin: false,
+      otherActiveAdmins: 2,
+      clientsAssigned: ["Alpha Traders", "Beta Retail"],
+    });
+    expect(why).toContain("Alpha Traders");
+    expect(why).toContain("Beta Retail");
+    expect(why).toContain("Clients screen");
+  });
+
+  it("reads as one client rather than several when it is one", () => {
+    const why = whyEmployeeCannotBeDeleted({
+      isSelf: false,
+      targetIsActiveAdmin: false,
+      otherActiveAdmins: 2,
+      clientsAssigned: ["Gamma Store"],
+    });
+    expect(why).toContain("Gamma Store");
+    expect(why).toContain("that client");
+    expect(why).not.toContain("those clients");
+  });
+
+  // Somebody holding a dozen clients should get a sentence, not the whole
+  // list — they only need enough to recognize where to go.
+  it("summarizes rather than listing everything when there are many", () => {
+    const why = whyEmployeeCannotBeDeleted({
+      isSelf: false,
+      targetIsActiveAdmin: false,
+      otherActiveAdmins: 2,
+      clientsAssigned: ["A", "B", "C", "D", "E", "F"],
+    }) as string;
+    expect(why).toContain("A, B, C and 3 other clients");
+    expect(why).not.toContain("F");
+  });
+
+  // The ordinary case, and every caller that predates this column: nobody is
+  // assigned to anybody, so nothing new refuses.
+  it("allows deleting someone holding no clients", () => {
+    expect(
+      whyEmployeeCannotBeDeleted({
+        isSelf: false,
+        targetIsActiveAdmin: false,
+        otherActiveAdmins: 1,
+        clientsAssigned: [],
+      })
+    ).toBeNull();
+  });
+
+  // The two lock-out reasons come first — being told to reassign three
+  // clients, then finding you still can't delete yourself, is two trips.
+  it("says the lock-out reason first when both apply", () => {
+    const why = whyEmployeeCannotBeDeleted({
+      isSelf: false,
+      targetIsActiveAdmin: true,
+      otherActiveAdmins: 0,
+      clientsAssigned: ["Alpha Traders"],
+    });
+    expect(why).toContain("only active admin");
+  });
 });
