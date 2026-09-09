@@ -116,7 +116,13 @@ export default function DropdownPanel({
       <button
         ref={triggerRef}
         type="button"
-        className={`field-select searchable-select-trigger ${triggerClassName ?? ""}`}
+        // is-open turns the caret upward while the panel is showing — see
+        // .searchable-select-trigger::after. aria-expanded says the same
+        // thing to a screen reader, which the caret alone cannot.
+        aria-expanded={open}
+        className={`field-select searchable-select-trigger ${open ? "is-open" : ""} ${
+          triggerClassName ?? ""
+        }`}
         onClick={() => (open ? close() : openPanel())}
       >
         {label}

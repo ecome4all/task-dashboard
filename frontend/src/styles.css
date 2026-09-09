@@ -139,13 +139,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .pill-neutral { background: var(--bg-alt); color: var(--text); opacity: 0.8; } .pill-neutral::before { background: var(--text); }
 .pill-info { background: var(--info-soft); color: var(--info); } .pill-info::before { background: var(--info); }
 
-/* Same colors as the pills above, applied straight to the Status dropdown
-   trigger — one colored control instead of a pill next to a separate select. */
-.status-trigger-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
-.status-trigger-good { background: var(--good-soft); color: var(--good); border-color: transparent; }
-.status-trigger-neutral { background: var(--bg-alt); color: var(--text); }
-.status-trigger-info { background: var(--info-soft); color: var(--info); border-color: transparent; }
-
 /* ---- panel / card ---- */
 .panel { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 16px; }
 .panel-head { padding: 16px 18px 4px; display: flex; align-items: baseline; justify-content: space-between; }
@@ -182,6 +175,26 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   border: 1px solid var(--border); background: var(--bg); border-radius: 8px;
   padding: 8px 10px; font-size: 13px; color: var(--text);
 }
+
+/* See the note by .searchable-select-trigger::after — the same caret, on the
+   plain selects, so the two kinds of dropdown match. */
+select.field-select {
+  -webkit-appearance: none; appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%233f3d45' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+@media (prefers-color-scheme: dark) {
+  select.field-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cbd0dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}
+/* Chrome and Safari hide a select's own arrow with appearance:none but leave
+   the space it occupied on some platforms; this keeps the text off the caret
+   regardless. Firefox needs the text-indent trick nowhere here — the padding
+   above is enough. */
+select.field-select::-ms-expand { display: none; }
 
 /* table-layout: auto (not fixed) lets each column size to its own content
    instead of splitting the table width evenly across 13 columns — fixed
@@ -422,7 +435,57 @@ table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 /* ---- searchable select ---- */
 /* Renders through a portal at document.body with fixed positioning (see
    SearchableSelect.tsx) so it isn't clipped by a narrow table column. */
-.searchable-select-trigger { width: 100%; text-align: left; cursor: pointer; white-space: normal; overflow-wrap: break-word; }
+/* The trigger is a <button>, and the field rule near the top of this file is
+   `select.field-select` — an element selector, so none of it has ever reached
+   this. The trigger was drawing with the browser's own button chrome: grey,
+   bevelled, a different height and a different corner radius from the input
+   sitting right beside it. That is why the Marketplace picker never matched
+   the box next to it. It is styled here explicitly instead. */
+.searchable-select-trigger {
+  width: 100%; text-align: left; cursor: pointer;
+  white-space: normal; overflow-wrap: break-word;
+  -webkit-appearance: none; appearance: none;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  border-radius: 8px; font: inherit; font-size: 13px;
+  /* The right side is the caret's room — text must not run under it. */
+  padding: 8px 28px 8px 10px;
+  position: relative;
+}
+.searchable-select-trigger:hover { border-color: var(--accent); }
+.searchable-select-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The caret that says "this opens".
+ *
+ * Every dropdown the app builds itself goes through this one trigger —
+ * SearchableSelect (pick one) and MultiSelect (pick several) — so drawing it
+ * here is what puts an arrow on all of them at once. Native <select>s get the
+ * same one further down, so the two kinds stop looking like different
+ * controls.
+ *
+ * Drawn in currentColor rather than a fixed grey, because the Status trigger
+ * takes the colour of the status it is showing (see .status-trigger-* below):
+ * a grey caret on a coloured control reads as a control that has been
+ * disabled. */
+.searchable-select-trigger::after {
+  content: ""; position: absolute; right: 11px; top: 50%;
+  width: 6px; height: 6px; margin-top: -4px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg); opacity: 0.6; pointer-events: none;
+  transition: transform 120ms ease;
+}
+/* Pointing up while the panel is open, so the caret says which way the next
+   click goes rather than only that the control opens at all. */
+.searchable-select-trigger.is-open::after {
+  transform: rotate(-135deg); margin-top: -1px; opacity: 1;
+}
+
+/* Same colors as the pills above, applied straight to the Status dropdown
+   trigger — one colored control instead of a pill next to a separate select. */
+.status-trigger-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.status-trigger-good { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.status-trigger-neutral { background: var(--bg-alt); color: var(--text); }
+.status-trigger-info { background: var(--info-soft); color: var(--info); border-color: transparent; }
+
 .searchable-select-panel {
   position: fixed; z-index: 100; min-width: 200px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
@@ -482,7 +545,10 @@ table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 .error-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--danger-soft); color: var(--danger); border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-bottom: 16px; }
 .error-banner button { flex-shrink: 0; }
 
-@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.4s; } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.4s; }
+  .searchable-select-trigger::after { transition: none; }
+}
 
 /* ---- repeating task setup ---- */
 /* Opens under a task row on the board. The date and time are chosen here
@@ -524,6 +590,32 @@ table.clients-table td { vertical-align: middle; }
 .client-linked { font-size: 12.5px; opacity: 0.75; }
 .client-linked-none { font-size: 12.5px; opacity: 0.45; font-style: italic; }
 
+/* ---- contact and chats, on Client Details ---- */
+/* Three facts that want wildly different widths, so they must not be given a
+ * third each.
+ *
+ * .fact-grid is repeat(auto-fit, minmax(220px, 1fr)) — equal columns, which is
+ * right for the panels it was built for, where every fact is a word or a date.
+ * Here the first fact is a twelve-digit phone number and the other two are
+ * lists with a form under them: a group id box wants 200px on its own, and the
+ * sheet row is a link box, a marketplace picker and a button side by side.
+ * Split equally, the phone got 800px of empty space while the marketplace
+ * picker was squeezed to the point the Add button wrapped under it.
+ *
+ * So: the phone takes what it needs and no more, and the two lists share
+ * everything that is left.
+ */
+.contact-grid {
+  grid-template-columns: minmax(130px, max-content) minmax(270px, 1fr) minmax(270px, 1fr);
+  gap: 18px 28px;
+  align-items: start;
+}
+/* Below about a laptop width the three would each be too narrow for the forms
+   inside them, so they stack instead of being crushed. */
+@media (max-width: 1080px) {
+  .contact-grid { grid-template-columns: 1fr; }
+}
+
 /* ---- editable values inside a row ---- */
 /* A value you can change, that reads as a value until you go to change it.
    A column of ten permanently-bordered boxes made a list of clients read as
@@ -542,7 +634,12 @@ table.clients-table td { vertical-align: middle; }
 .cell-input::placeholder { opacity: 0.45; font-style: italic; }
 
 /* One thing already linked — a group, a sheet — with its own remove button. */
-.cell-list-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.cell-list-item {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
+  /* Capped so Unlink / Remove stays next to the thing it acts on rather than
+     being pushed to the far edge of a wide column. */
+  max-width: 420px;
+}
 /* A group's raw JID under its name. Long, unbroken and rarely read, but
    occasionally the only way to tell two of one client's groups apart — so it
    stays on screen, capped, with the full value in the tooltip. */

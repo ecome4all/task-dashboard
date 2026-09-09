@@ -480,7 +480,9 @@ export default function ClientDetail({
               <span className="panel-sub">The phone is on the Clients screen</span>
             </div>
             <div className="panel-body">
-              <div className="fact-grid">
+              {/* Not the plain .fact-grid: these three facts want very
+                  different widths — see .contact-grid. */}
+              <div className="fact-grid contact-grid">
                 <div>
                   <div className="fact-label">Phone</div>
                   <div className="fact-value">{client.phone || "Not saved"}</div>
