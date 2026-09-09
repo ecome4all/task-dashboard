@@ -14,14 +14,14 @@ import {
   updateClient,
   deleteClient,
   addClientWhatsappGroup,
-  removeClientWhatsappGroup,
-  addClientReportSheet,
-  removeClientReportSheet,
+  fetchEmployees,
+  Employee,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
 import SearchableSelect from "./SearchableSelect";
 import Pagination, { usePaged } from "./Paged";
+import { matchesSearch } from "./searchRows";
 import { SavedTick, saveOnEnter, useSavedFlash } from "./savedFlash";
 import { useAutoRefresh } from "./useAutoRefresh";
 
@@ -45,21 +45,23 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   const [newClientGroupId, setNewClientGroupId] = useState("");
   const [newClientGroupName, setNewClientGroupName] = useState("");
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, string>>({});
-  // A client keeps one report sheet per marketplace, so linking one takes two
-  // values, held per client while they're being typed.
-  const [newSheetUrl, setNewSheetUrl] = useState<Record<string, string>>({});
-  const [newSheetMarketplace, setNewSheetMarketplace] = useState<Record<string, string>>({});
-  const [sheetError, setSheetError] = useState<Record<string, string>>({});
   const [marketplaceOptions, setMarketplaceOptions] = useState<ConfigOption[]>([]);
+  // Active employees only — the picker must not offer somebody deactivated,
+  // since the backend refuses them and a task assigned to one would reach
+  // nobody. fetchEmployees is already the active-only list.
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  // Per client, beside the picker that failed, for the same reason the sheet
+  // and group errors are: on a list of 23 rows the banner at the top is well
+  // out of view by the time you are changing who a client belongs to.
+  const [employeeError, setEmployeeError] = useState<Record<string, string>>({});
+  // 26 clients over three pages, and the only way to reach one was paging to
+  // it — the same problem the Tasks board and Repeating Tasks already solved
+  // with a box that narrows the list as you type.
+  const [search, setSearch] = useState("");
   const [linkChoice, setLinkChoice] = useState<Record<string, string>>({});
-  const [newGroupId, setNewGroupId] = useState<Record<string, string>>({});
-  const [newGroupName, setNewGroupName] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
-  // Per client, so a failed "+ Add" is answered beside the button that failed
-  // rather than only in the banner at the top of a long list.
-  const [groupError, setGroupError] = useState<Record<string, string>>({});
   // The phone box saves itself on the way out — this is what says so.
   const { savedKey, flash } = useSavedFlash();
 
@@ -70,22 +72,43 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     return marketplaceOptions.find((option) => option.value === value)?.label ?? value;
   }
 
+  // What this client has, for the summary line: "1 group · Amazon".
+  //
+  // The marketplaces are named rather than counted. "2 sheets" is not
+  // something anybody acts on; "Amazon, Flipkart" says which reports this
+  // client actually gets, which is the question the column is there to answer.
+  function linkedSummary(client: Client): string[] {
+    const parts: string[] = [];
+    if (client.whatsappGroups.length > 0) {
+      parts.push(
+        client.whatsappGroups.length === 1 ? "1 group" : `${client.whatsappGroups.length} groups`
+      );
+    }
+    if (client.reportSheets.length > 0) {
+      parts.push(client.reportSheets.map((sheet) => marketplaceLabel(sheet.marketplace)).join(", "));
+    }
+    return parts;
+  }
+
   async function load() {
     setLoading(true);
     setLoadError("");
     try {
-      const [clientList, senders, taskList, marketplaceList] = await Promise.all([
+      const [clientList, senders, taskList, marketplaceList, employeeList] = await Promise.all([
         fetchAllClients(),
         fetchUnrecognizedSenders(),
         fetchTasks(),
-        // For the report-sheet picker: a sheet is linked against a marketplace
-        // from the same admin-editable list the task board uses.
+        // Only to name a linked sheet's marketplace in the Linked column —
+        // the sheets themselves are managed on Client Details now.
         fetchConfigOptions("marketplace"),
+        // For the Employee picker: who each client's new tasks go to.
+        fetchEmployees(),
       ]);
       setClients(clientList);
       setUnrecognizedSenders(senders);
       setTasks(taskList);
       setMarketplaceOptions(marketplaceList);
+      setEmployees(employeeList);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -102,9 +125,9 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
   // A minute rather than the default half: nothing here changes as often as
   // the task board, and this reads three lists at once.
   //
-  // The drafts being typed into this screen (a phone, a group id, a sheet
-  // link) are held in their own state keyed by client id, so replacing the
-  // client list underneath them leaves what is half-typed alone.
+  // The phone being typed into a row is held in its own state keyed by client
+  // id, so replacing the client list underneath it leaves a half-typed number
+  // alone.
   useAutoRefresh(async () => {
     const [clientList, senders, taskList] = await Promise.all([
       fetchAllClients(),
@@ -162,47 +185,24 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
     }
   }
 
-  // Linking a sheet, one marketplace at a time. Errors land beside the button
-  // rather than only in the banner at the top — on a list of 23 clients that
-  // banner is well out of view by the time you're adding a sheet.
-  async function handleAddSheet(client: Client) {
-    const sheetUrl = (newSheetUrl[client.id] ?? "").trim();
-    const marketplace = newSheetMarketplace[client.id] ?? "";
-    setSheetError((prev) => ({ ...prev, [client.id]: "" }));
-
-    if (!sheetUrl) {
-      setSheetError((prev) => ({ ...prev, [client.id]: "Paste the link to the sheet first." }));
-      return;
-    }
-    if (!marketplace) {
-      setSheetError((prev) => ({ ...prev, [client.id]: "Pick which marketplace this sheet is for." }));
-      return;
-    }
-
+  // Who this client's work goes to from now on. Clearing the picker sends
+  // null, which takes the employee off rather than leaving them — their tasks
+  // go back to arriving unassigned.
+  //
+  // Nothing already on the board moves. This decides where the client's next
+  // task lands, never who the ones sitting there belong to, and the note
+  // under the column says so on screen.
+  async function handleAssignEmployee(client: Client, employeeId: string) {
+    const next = employeeId || null;
+    if (next === client.assignedEmployeeId) return;
+    setEmployeeError((prev) => ({ ...prev, [client.id]: "" }));
     setActionError("");
     try {
-      const sheet = await addClientReportSheet(client.id, marketplace, sheetUrl);
-      setClients((prev) =>
-        prev.map((c) => (c.id === client.id ? { ...c, reportSheets: [...c.reportSheets, sheet] } : c))
-      );
-      setNewSheetUrl((prev) => ({ ...prev, [client.id]: "" }));
-      setNewSheetMarketplace((prev) => ({ ...prev, [client.id]: "" }));
+      const updated = await updateClient(client.id, { assignedEmployeeId: next });
+      setClients((prev) => prev.map((c) => (c.id === client.id ? updated : c)));
+      flash(`${client.id}:employee`);
     } catch (err) {
-      setSheetError((prev) => ({ ...prev, [client.id]: errorMessage(err) }));
-    }
-  }
-
-  async function handleRemoveSheet(client: Client, sheetId: string) {
-    setActionError("");
-    try {
-      await removeClientReportSheet(client.id, sheetId);
-      setClients((prev) =>
-        prev.map((c) =>
-          c.id === client.id ? { ...c, reportSheets: c.reportSheets.filter((s) => s.id !== sheetId) } : c
-        )
-      );
-    } catch (err) {
-      setActionError(errorMessage(err));
+      setEmployeeError((prev) => ({ ...prev, [client.id]: errorMessage(err) }));
     }
   }
 
@@ -226,43 +226,6 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
       setClients((prev) => prev.filter((c) => c.id !== client.id));
     } catch (err) {
       setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleUnlinkGroup(client: Client, groupRowId: string) {
-    setActionError("");
-    try {
-      await removeClientWhatsappGroup(client.id, groupRowId);
-      setClients((prev) =>
-        prev.map((c) =>
-          c.id === client.id ? { ...c, whatsappGroups: c.whatsappGroups.filter((g) => g.id !== groupRowId) } : c
-        )
-      );
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleAddGroup(client: Client) {
-    const groupId = (newGroupId[client.id] ?? "").trim();
-    setGroupError((prev) => ({ ...prev, [client.id]: "" }));
-
-    // Pressing Add with an empty box used to do nothing and say nothing.
-    if (!groupId) {
-      setGroupError((prev) => ({ ...prev, [client.id]: "Paste the group id first." }));
-      return;
-    }
-
-    setActionError("");
-    try {
-      const group = await addClientWhatsappGroup(client.id, groupId, newGroupName[client.id]?.trim());
-      setClients((prev) =>
-        prev.map((c) => (c.id === client.id ? { ...c, whatsappGroups: [...c.whatsappGroups, group] } : c))
-      );
-      setNewGroupId((prev) => ({ ...prev, [client.id]: "" }));
-      setNewGroupName((prev) => ({ ...prev, [client.id]: "" }));
-    } catch (err) {
-      setGroupError((prev) => ({ ...prev, [client.id]: errorMessage(err) }));
     }
   }
 
@@ -311,7 +274,27 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
 
   const pagedSummary = usePaged(clientSummary, 10);
   const pagedSenders = usePaged(unrecognizedSenders, 10);
-  const pagedClients = usePaged(clients, 10);
+
+  // The client's own words: their name, their number and the names of their
+  // WhatsApp groups. All three are ways staff actually recognize a client —
+  // the name is on the row, but so is the group it was linked from, and a
+  // number is sometimes the only thing to hand. There are no dropdown filters
+  // on this screen for any of them to disagree with.
+  const filteredClients = clients.filter((client) =>
+    matchesSearch(search, client.name, client.phone, ...client.whatsappGroups.map((g) => g.groupName))
+  );
+
+  // 20 rather than the 10 the other screens use: a client is one line here,
+  // so ten of them filled a third of the screen and put 26 clients across
+  // three pages. At 20 the whole directory is two.
+  const pagedClients = usePaged(filteredClients, 20);
+
+  // Typing narrows the list under you, so page 3 of the old result must not
+  // survive it — same reason the other two screens reset on every filter.
+  function typeSearch(value: string) {
+    setSearch(value);
+    pagedClients.reset();
+  }
 
   if (loading) return <Spinner label="Loading clients…" />;
 
@@ -452,174 +435,166 @@ export default function Clients({ onOpenClient }: { onOpenClient: (id: string) =
         </div>
       )}
 
+      {/* The directory: who a client is, who has them, and how to reach them.
+          Nothing else.
+
+          It used to carry its whole editing surface on every row at once — a
+          group id box, a group name box, a sheet link box, a marketplace
+          picker and two Add buttons, on all 26 rows. Fifty empty boxes on
+          screen for the one you were filling in, each row twice as tall as
+          the client's own details, and six clients visible out of 26.
+
+          Groups and report sheets now live on Client Details, next to that
+          client's work and their notes. They are set once when a client is
+          onboarded and rarely touched again; the employee and the phone are
+          read and changed constantly. That is the split. */}
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">Clients</span>
-          <span className="panel-sub">{clients.length} total · click a name to see everything about them</span>
+          <span className="panel-sub">
+            {search.trim() === ""
+              ? `${clients.length} total · click a name for their work, groups and sheets`
+              : `${filteredClients.length} of ${clients.length} match · click a name for their work, groups and sheets`}
+          </span>
         </div>
         <div className="panel-body">
-          <table className="data-table">
+          {/* Same box, same rule and the same place on screen as the one on
+              the Tasks board and Repeating Tasks — every word typed has to
+              appear, in any order. */}
+          <div className="filter-search">
+            <input
+              className="field-input"
+              type="search"
+              aria-label="Search clients"
+              placeholder="Search by client, number or group name"
+              value={search}
+              onChange={(e) => typeSearch(e.target.value)}
+            />
+            {search.trim() !== "" && (
+              <button className="btn btn-ghost btn-sm" onClick={() => typeSearch("")} type="button">
+                Clear search
+              </button>
+            )}
+          </div>
+
+          {/* Said once, here, rather than on all 26 rows. The thing people
+              get wrong about the employee column is the same every time:
+              they change it expecting the client's open tasks to move too. */}
+          <p className="panel-sub" style={{ margin: "0 2px 12px" }}>
+            <strong>Employee</strong> is who a client's new tasks are assigned to — changing it takes effect on
+            their next task, and tasks already on the board keep the person they are on. WhatsApp groups and
+            report sheets are managed on <strong>Client Details</strong>.
+          </p>
+
+          <table className="data-table clients-table">
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Employee</th>
                 <th>Phone</th>
-                <th>WhatsApp Groups</th>
-                <th>Report Sheet</th>
-                <th>Active</th>
-                <th>Actions</th>
+                <th>Linked</th>
+                <th>Manage</th>
               </tr>
             </thead>
             <tbody>
-              {pagedClients.items.map((client) => (
-                <tr key={client.id}>
-                  <td>
-                    <button className="link-button" onClick={() => onOpenClient(client.id)}>
-                      {client.name}
-                    </button>
-                  </td>
-                  <td>
-                    <input
-                      className="field-input"
-                      type="text"
-                      value={phoneDrafts[client.id] ?? client.phone ?? ""}
-                      placeholder="No phone saved"
-                      onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                      onBlur={() => handlePhoneSave(client)}
-                      onKeyDown={saveOnEnter}
-                    />
-                    <SavedTick show={savedKey === `${client.id}:phone`} />
-                  </td>
-                  <td>
-                    {client.whatsappGroups.length === 0 && (
-                      <span className="panel-sub">Not linked</span>
-                    )}
-                    {client.whatsappGroups.map((group) => (
-                      <div key={group.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                        <div>
-                          <div>{group.groupName ?? "—"}</div>
-                          <div className="panel-sub">{group.groupId}</div>
-                        </div>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(client, group.id)}>
-                          Unlink
-                        </button>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                      <input
-                        className="field-input"
-                        type="text"
-                        placeholder="Group id, e.g. 1203634…@g.us"
-                        value={newGroupId[client.id] ?? ""}
-                        onChange={(e) => setNewGroupId((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                        // Every WhatsApp group id begins 120363…, so the part
-                        // that identifies one is the end. At 110px the whole
-                        // of that was off-screen: you could not see what you
-                        // had pasted, and two different groups looked
-                        // identical — which matters here, where one client's
-                        // number can have a separate group per marketplace.
-                        title={newGroupId[client.id] ?? ""}
-                        style={{ width: 230, fontSize: 12 }}
-                      />
-                      <input
-                        className="field-input"
-                        type="text"
-                        placeholder="Group name"
-                        value={newGroupName[client.id] ?? ""}
-                        onChange={(e) => setNewGroupName((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                        style={{ width: 110, fontSize: 12 }}
-                      />
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleAddGroup(client)}>
-                        + Add
+              {pagedClients.items.map((client) => {
+                const linked = linkedSummary(client);
+                return (
+                  <tr key={client.id}>
+                    <td>
+                      <button className="link-button" onClick={() => onOpenClient(client.id)}>
+                        {client.name}
                       </button>
-                    </div>
-                    {/* Beside the button that failed. This used to report only
-                        into the banner at the top of the screen, which on a
-                        list of 23 clients is well out of view by the time you
-                        are adding a group — so "+ Add" looked like it did
-                        nothing at all. */}
-                    {groupError[client.id] && (
-                      <div style={{ color: "var(--danger, #b42318)", fontSize: 12, marginTop: 6, maxWidth: 260 }}>
-                        {groupError[client.id]}
-                      </div>
-                    )}
-                  </td>
-                  {/* One sheet per marketplace: a client selling on Amazon and
-                      Flipkart keeps a separate sheet for each, and gets a
-                      separate report from each. */}
-                  <td>
-                    {client.reportSheets.length === 0 && (
-                      <div className="panel-sub" style={{ marginBottom: 4 }}>No sheet saved</div>
-                    )}
-                    {client.reportSheets.map((sheet) => (
-                      <div key={sheet.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                        <div style={{ minWidth: 120 }}>
-                          <div>{marketplaceLabel(sheet.marketplace)}</div>
-                          <a
-                            className="panel-sub"
-                            href={sheet.sheetUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={sheet.sheetUrl}
-                          >
-                            Open sheet
-                          </a>
+                      {/* Deactivated used to be visible only as the word on
+                          the button at the far end of the row, which reads as
+                          an action rather than as this client's state. */}
+                      {!client.active && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="pill pill-neutral">Inactive</span>
                         </div>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleRemoveSheet(client, sheet.id)}>
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "flex-start" }}>
-                      <input
-                        className="field-input"
-                        type="text"
-                        placeholder="Paste sheet link"
-                        value={newSheetUrl[client.id] ?? ""}
-                        title={newSheetUrl[client.id] ?? ""}
-                        onChange={(e) => setNewSheetUrl((prev) => ({ ...prev, [client.id]: e.target.value }))}
-                        style={{ width: 180, fontSize: 12 }}
-                      />
-                      <div style={{ width: 120 }}>
+                      )}
+                    </td>
+                    <td>
+                      <div style={{ width: 150 }}>
                         <SearchableSelect
-                          value={newSheetMarketplace[client.id] ?? ""}
-                          placeholder="Marketplace"
-                          options={marketplaceOptions.map((option) => ({
-                            value: option.value,
-                            label: option.label,
+                          value={client.assignedEmployeeId ?? ""}
+                          placeholder="Nobody"
+                          options={employees.map((employee) => ({
+                            value: employee.id,
+                            label: employee.name,
                           }))}
-                          onChange={(value) =>
-                            setNewSheetMarketplace((prev) => ({ ...prev, [client.id]: value }))
-                          }
+                          onChange={(value) => handleAssignEmployee(client, value)}
                         />
                       </div>
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleAddSheet(client)}>
-                        + Add
-                      </button>
-                    </div>
-                    {sheetError[client.id] && (
-                      <div style={{ color: "var(--danger, #b42318)", fontSize: 12, marginTop: 6, maxWidth: 300 }}>
-                        {sheetError[client.id]}
+                      <SavedTick show={savedKey === `${client.id}:employee`} />
+                      {/* Somebody can be deactivated after a client was put
+                          on them, and from then on this client's tasks arrive
+                          unassigned. The picker offers active staff only, so
+                          without this the row would show an empty box and no
+                          reason for it. */}
+                      {client.assignedEmployee && !client.assignedEmployee.active && (
+                        <div className="cell-error">
+                          {client.assignedEmployee.name} is deactivated, so tasks are arriving unassigned. Pick
+                          somebody else.
+                        </div>
+                      )}
+                      {employeeError[client.id] && <div className="cell-error">{employeeError[client.id]}</div>}
+                    </td>
+                    <td>
+                      <input
+                        className="cell-input"
+                        type="text"
+                        aria-label={`Phone for ${client.name}`}
+                        value={phoneDrafts[client.id] ?? client.phone ?? ""}
+                        placeholder="No phone saved"
+                        onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [client.id]: e.target.value }))}
+                        onBlur={() => handlePhoneSave(client)}
+                        onKeyDown={saveOnEnter}
+                      />
+                      <SavedTick show={savedKey === `${client.id}:phone`} />
+                    </td>
+                    {/* Read-only, and the marketplaces are named rather than
+                        counted: "2 sheets" is not something anybody acts on,
+                        "Amazon, Flipkart" says which reports this client gets. */}
+                    <td>
+                      {linked.length === 0 ? (
+                        <span className="client-linked-none">Nothing linked</span>
+                      ) : (
+                        <span className="client-linked">{linked.join(" · ")}</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="cell-actions">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleActiveToggle(client, !client.active)}
+                        >
+                          {client.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm btn-danger-quiet"
+                          onClick={() => handleDelete(client)}
+                        >
+                          Delete
+                        </button>
                       </div>
-                    )}
-                  </td>
-                  <td>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleActiveToggle(client, !client.active)}
-                    >
-                      {client.active ? "Deactivate" : "Reactivate"}
-                    </button>
-                  </td>
-                  <td>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(client)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-            <Pagination paged={pagedClients} />
+
+          {/* Searching and finding nothing is an ordinary thing to do — a
+              typo, or a client who simply is not on the list yet. Without
+              this the table just ends, which reads as the screen breaking. */}
+          {filteredClients.length === 0 && clients.length > 0 && (
+            <p className="panel-sub" style={{ margin: "14px 2px" }}>
+              No client matches what you typed. Try fewer words, or clear the search.
+            </p>
+          )}
+
+          <Pagination paged={pagedClients} />
         </div>
       </div>
     </>

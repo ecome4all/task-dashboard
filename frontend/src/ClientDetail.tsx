@@ -10,6 +10,10 @@ import {
   fetchConfigOptions,
   fetchWeeklyReportPreview,
   updateClient,
+  addClientWhatsappGroup,
+  removeClientWhatsappGroup,
+  addClientReportSheet,
+  removeClientReportSheet,
 } from "./api";
 import Spinner from "./Spinner";
 import ErrorBanner from "./ErrorBanner";
@@ -82,6 +86,17 @@ export default function ClientDetail({
   // Which marketplace's sheet the numbers panel is showing, for a client with
   // more than one. Empty means "whichever is first".
   const [reportMarketplace, setReportMarketplace] = useState("");
+  // Linking this client a WhatsApp group or a report sheet. Both used to be
+  // done on the Clients screen, on every row at once; they belong here, on
+  // the one client, beside their work and their notes. Plain strings rather
+  // than the per-client maps that screen needed, because this screen only
+  // ever has one client open.
+  const [newGroupId, setNewGroupId] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [groupError, setGroupError] = useState("");
+  const [newSheetUrl, setNewSheetUrl] = useState("");
+  const [newSheetMarketplace, setNewSheetMarketplace] = useState("");
+  const [sheetError, setSheetError] = useState("");
 
   // The client list and the dropdown option lists don't change when you
   // switch clients, so they're loaded once rather than on every switch.
@@ -121,6 +136,12 @@ export default function ClientDetail({
     setNotesDraft(null);
     setReport(null);
     setReportError("");
+    setNewGroupId("");
+    setNewGroupName("");
+    setGroupError("");
+    setNewSheetUrl("");
+    setNewSheetMarketplace("");
+    setSheetError("");
     try {
       const overview = await fetchClientOverview(id);
       setClient(overview.client);
@@ -184,6 +205,84 @@ export default function ClientDetail({
       setActionError(errorMessage(err));
     } finally {
       setSavingNotes(false);
+    }
+  }
+
+  // Adds one more WhatsApp group to this client — a client can be in several
+  // (separate regional or purpose-specific groups), so this adds rather than
+  // replaces. Fails with a 409 naming the client already holding it, since a
+  // group belongs to exactly one.
+  async function handleAddGroup() {
+    if (!client) return;
+    const groupId = newGroupId.trim();
+    if (!groupId) {
+      setGroupError("Paste the group id first.");
+      return;
+    }
+    setGroupError("");
+    setActionError("");
+    try {
+      const group = await addClientWhatsappGroup(client.id, groupId, newGroupName.trim() || undefined);
+      setClient({ ...client, whatsappGroups: [...client.whatsappGroups, group] });
+      setNewGroupId("");
+      setNewGroupName("");
+    } catch (err) {
+      setGroupError(errorMessage(err));
+    }
+  }
+
+  // Unlinking stops this group's messages becoming tasks for this client —
+  // they go back to being logged as unrecognized until somebody links them
+  // again. It does not touch the tasks it has already produced.
+  async function handleUnlinkGroup(groupRowId: string) {
+    if (!client) return;
+    setActionError("");
+    try {
+      await removeClientWhatsappGroup(client.id, groupRowId);
+      setClient({
+        ...client,
+        whatsappGroups: client.whatsappGroups.filter((group) => group.id !== groupRowId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  // One sheet per marketplace: a client selling on both Amazon and Flipkart
+  // has two separate sets of figures, and one sheet cannot hold two accounts'
+  // numbers in the same columns. A second sheet for a marketplace they
+  // already have is refused rather than replacing the link somebody set.
+  async function handleAddSheet() {
+    if (!client) return;
+    const sheetUrl = newSheetUrl.trim();
+    if (!sheetUrl) {
+      setSheetError("Paste the link to the sheet first.");
+      return;
+    }
+    if (!newSheetMarketplace) {
+      setSheetError("Pick which marketplace this sheet is for.");
+      return;
+    }
+    setSheetError("");
+    setActionError("");
+    try {
+      const sheet = await addClientReportSheet(client.id, newSheetMarketplace, sheetUrl);
+      setClient({ ...client, reportSheets: [...client.reportSheets, sheet] });
+      setNewSheetUrl("");
+      setNewSheetMarketplace("");
+    } catch (err) {
+      setSheetError(errorMessage(err));
+    }
+  }
+
+  async function handleRemoveSheet(sheetId: string) {
+    if (!client) return;
+    setActionError("");
+    try {
+      await removeClientReportSheet(client.id, sheetId);
+      setClient({ ...client, reportSheets: client.reportSheets.filter((sheet) => sheet.id !== sheetId) });
+    } catch (err) {
+      setActionError(errorMessage(err));
     }
   }
 
@@ -365,10 +464,20 @@ export default function ClientDetail({
             </div>
           </div>
 
+          {/* Where a client's groups and report sheets are set. Both were on
+              the Clients screen, open on all 26 rows at once, which is what
+              turned that list into a wall of empty boxes. They are set when a
+              client is onboarded and rarely touched again, and when they are
+              touched it is about one client — so they belong here, beside that
+              client's work and notes, rather than on the directory.
+
+              The phone stays on the Clients screen: it is read and changed
+              constantly, and it is one short value on a row rather than a
+              list that needs managing. */}
           <div className="panel">
             <div className="panel-head">
               <span className="panel-title">Contact and chats</span>
-              <span className="panel-sub">Change these on the Clients screen</span>
+              <span className="panel-sub">The phone is on the Clients screen</span>
             </div>
             <div className="panel-body">
               <div className="fact-grid">
@@ -376,32 +485,121 @@ export default function ClientDetail({
                   <div className="fact-label">Phone</div>
                   <div className="fact-value">{client.phone || "Not saved"}</div>
                 </div>
+
                 <div>
                   <div className="fact-label">WhatsApp groups</div>
                   <div className="fact-value">
-                    {client.whatsappGroups.length === 0 && "Not linked to any group"}
+                    {client.whatsappGroups.length === 0 && (
+                      <div className="client-linked-none" style={{ marginBottom: 8 }}>
+                        Not linked to any group
+                      </div>
+                    )}
                     {client.whatsappGroups.map((group) => (
-                      <div key={group.id} style={{ marginBottom: 4 }}>
-                        <div>{group.groupName ?? "No name saved"}</div>
-                        <div className="panel-sub">{group.groupId}</div>
+                      <div key={group.id} className="cell-list-item">
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div>{group.groupName ?? "No name saved"}</div>
+                          {/* Long, unbroken and rarely read, but occasionally
+                              the only way to tell two of one client's groups
+                              apart — so it is capped, with the whole of it in
+                              the tooltip. */}
+                          <div className="cell-sub-id" title={group.groupId}>
+                            {group.groupId}
+                          </div>
+                        </div>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlinkGroup(group.id)}>
+                          Unlink
+                        </button>
                       </div>
                     ))}
+                    <div className="cell-form">
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Group id, e.g. 1203634…@g.us"
+                        aria-label="WhatsApp group id"
+                        value={newGroupId}
+                        onChange={(e) => setNewGroupId(e.target.value)}
+                        // A group id begins 120363…, so the part that
+                        // identifies one is the end. In a narrow box the whole
+                        // of that is off-screen and two different groups look
+                        // identical — which matters here, where one client can
+                        // have a separate group per marketplace.
+                        title={newGroupId}
+                        style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12 }}
+                      />
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Group name"
+                        aria-label="WhatsApp group name"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        style={{ flex: "1 1 110px", minWidth: 0, fontSize: 12 }}
+                      />
+                      <button className="btn btn-ghost btn-sm" onClick={handleAddGroup}>
+                        + Add
+                      </button>
+                    </div>
+                    {groupError && <div className="cell-error">{groupError}</div>}
                   </div>
                 </div>
+
                 <div>
                   {/* One sheet per marketplace — a client selling on Amazon
                       and Flipkart keeps a separate set of figures for each. */}
                   <div className="fact-label">Report sheets</div>
                   <div className="fact-value">
-                    {client.reportSheets.length === 0
-                      ? "Not saved"
-                      : client.reportSheets.map((sheet) => (
-                          <div key={sheet.id}>
-                            <a href={sheet.sheetUrl} target="_blank" rel="noreferrer">
-                              {marketplaceLabels[sheet.marketplace] ?? sheet.marketplace}
-                            </a>
-                          </div>
-                        ))}
+                    {client.reportSheets.length === 0 && (
+                      <div className="client-linked-none" style={{ marginBottom: 8 }}>
+                        No sheet saved — no reports can be sent
+                      </div>
+                    )}
+                    {client.reportSheets.map((sheet) => (
+                      <div key={sheet.id} className="cell-list-item">
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div>{marketplaceLabels[sheet.marketplace] ?? sheet.marketplace}</div>
+                          <a
+                            className="panel-sub"
+                            href={sheet.sheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={sheet.sheetUrl}
+                          >
+                            Open sheet
+                          </a>
+                        </div>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleRemoveSheet(sheet.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <div className="cell-form">
+                      <input
+                        className="field-input"
+                        type="text"
+                        placeholder="Paste sheet link"
+                        aria-label="Report sheet link"
+                        value={newSheetUrl}
+                        title={newSheetUrl}
+                        onChange={(e) => setNewSheetUrl(e.target.value)}
+                        style={{ flex: "1 1 170px", minWidth: 0, fontSize: 12 }}
+                      />
+                      <div style={{ flex: "0 0 120px" }}>
+                        <SearchableSelect
+                          value={newSheetMarketplace}
+                          placeholder="Marketplace"
+                          options={marketplaceOptions.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                          onChange={setNewSheetMarketplace}
+                        />
+                      </div>
+                      <button className="btn btn-ghost btn-sm" onClick={handleAddSheet}>
+                        + Add
+                      </button>
+                    </div>
+                    {sheetError && <div className="cell-error">{sheetError}</div>}
                   </div>
                 </div>
               </div>

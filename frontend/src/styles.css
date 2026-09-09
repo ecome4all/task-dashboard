@@ -493,3 +493,67 @@ table.tasks-table { table-layout: fixed; min-width: 1080px; max-width: 1500px; }
 .note-internal { font-size: 11px; color: var(--text); opacity: 0.45; }
 .note-add-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .note-send-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
+
+
+/* ---- the clients list ---- */
+/* The directory, and only the directory: who a client is, who has them, how
+ * to reach them, and a read-only word on what they have linked.
+ *
+ *   NAME            EMPLOYEE    PHONE          LINKED             MANAGE
+ *   Alpha Traders   Asha    v   9190000000xx   1 group . Amazon   Deactivate  Delete
+ *
+ * Every client used to carry its whole editing surface on its own row: a
+ * group id box, a group name box, a sheet link box, a marketplace picker and
+ * two Add buttons, on all 26 rows. Ten rows to a page meant fifty empty boxes
+ * on screen for the one you were filling in, each row twice as tall as the
+ * client's own details, and six clients visible out of 26.
+ *
+ * Groups and report sheets moved to Client Details, beside that client's work
+ * and notes. They are set once when a client is onboarded and rarely touched
+ * again, and touching them is about one client. The employee and the phone
+ * stayed, because those are read and changed constantly and are one value
+ * each rather than a list that needs managing. That is the whole split, and
+ * it is the reason this table is five narrow columns instead of seven wide
+ * ones.
+ */
+table.clients-table td { vertical-align: middle; }
+
+/* What this client has, on the line, read-only: "1 group . Amazon". The
+   marketplaces are named rather than counted — "2 sheets" says nothing you
+   would act on, "Amazon, Flipkart" says which reports they get. */
+.client-linked { font-size: 12.5px; opacity: 0.75; }
+.client-linked-none { font-size: 12.5px; opacity: 0.45; font-style: italic; }
+
+/* ---- editable values inside a row ---- */
+/* A value you can change, that reads as a value until you go to change it.
+   A column of ten permanently-bordered boxes made a list of clients read as
+   a stack of forms. The border returns on hover and on focus, so it is still
+   obviously editable the moment a pointer comes near — the affordance is
+   delayed, not removed, which is the whole difference between quiet and
+   hidden. */
+.cell-input {
+  border: 1px solid transparent; background: none; border-radius: 8px;
+  padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text);
+  width: 100%; max-width: 160px;
+}
+.cell-input:hover { border-color: var(--border); }
+.cell-input:focus { border-color: var(--accent); background: var(--bg); outline: none; }
+/* "No phone saved" has to read as an absence, not as a value. */
+.cell-input::placeholder { opacity: 0.45; font-style: italic; }
+
+/* One thing already linked — a group, a sheet — with its own remove button. */
+.cell-list-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+/* A group's raw JID under its name. Long, unbroken and rarely read, but
+   occasionally the only way to tell two of one client's groups apart — so it
+   stays on screen, capped, with the full value in the tooltip. */
+.cell-sub-id {
+  font-size: 11px; color: var(--text); opacity: 0.5; font-variant-numeric: tabular-nums;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cell-form { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; align-items: flex-start; }
+/* An error about one client, shown against that client. On a list of 26 the
+   banner at the top of the screen is well out of view by the time you are
+   editing one of them. */
+.cell-error { color: var(--danger); font-size: 12px; margin-top: 5px; max-width: 240px; }
+.cell-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.btn-danger-quiet { color: var(--danger); }
