@@ -517,7 +517,7 @@ export default function WeeklyReports() {
       setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "sending" }));
       try {
         const message = composeMessage(state, kind);
-        await sendClientUpdate(rowKey(state), { phone: target.value, channel: "whapi", message });
+        await sendClientUpdate(rowKey(state), { phone: target.value, message });
         setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "sent" }));
       } catch (err) {
         setRowStatus((prev) => ({ ...prev, [rowKey(state)]: "failed" }));

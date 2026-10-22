@@ -40,10 +40,8 @@ function fakeAdapter() {
   return { sendMessage: vi.fn().mockResolvedValue(undefined) } satisfies WhatsAppAdapter;
 }
 
-// The group channel and the official channel are separate adapters — which
-// one a reply goes out on is the thing several of these tests are checking.
-function fakeChannels(): WhatsAppChannels & { whapi: ReturnType<typeof fakeAdapter> } {
-  return { whapi: fakeAdapter(), official: fakeAdapter() };
+function fakeChannels(): WhatsAppChannels & { periskope: ReturnType<typeof fakeAdapter> } {
+  return { periskope: fakeAdapter() };
 }
 
 describe("handleIncomingTaskMessage", () => {
@@ -65,13 +63,13 @@ describe("handleIncomingTaskMessage", () => {
     vi.mocked(configOptionRepository.list).mockResolvedValue(MARKETPLACE_OPTIONS as any);
   });
 
-  it("creates a task and acknowledges on the same channel for a known client", async () => {
+  it("creates a task and acknowledges in the same chat for a known client", async () => {
     vi.mocked(clientRepository.findByChatId).mockResolvedValue({ id: "client-1", name: "Forensic Files" } as any);
     vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
     const channels = fakeChannels();
 
     const task = await handleIncomingTaskMessage({
-      source: "whatsapp_official",
+      source: "whatsapp_group",
       chatId: "919876543210",
       text: "task: reduce stock to 5",
       channels,
@@ -79,7 +77,7 @@ describe("handleIncomingTaskMessage", () => {
 
     expect(clientRepository.findByChatId).toHaveBeenCalledWith("919876543210", undefined);
     expect(taskRepository.create).toHaveBeenCalledWith({
-      source: "whatsapp_official",
+      source: "whatsapp_group",
       sourceRef: "919876543210",
       description: "reduce stock to 5",
       clientName: "Forensic Files",
@@ -87,9 +85,7 @@ describe("handleIncomingTaskMessage", () => {
       // state every task arrived in before clients had an employee at all.
       assignee: null,
     });
-    // On the channel it arrived on, not the other one.
-    expect(channels.official.sendMessage).toHaveBeenCalledWith("919876543210", "✅ Got it, logged.");
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).toHaveBeenCalledWith("919876543210", "✅ Got it, logged.");
     expect(unrecognizedMessageRepository.create).not.toHaveBeenCalled();
     expect(task).toEqual({ id: "task-1" });
   });
@@ -133,7 +129,7 @@ describe("handleIncomingTaskMessage", () => {
       channels,
     });
 
-    expect(channels.whapi.sendMessage).toHaveBeenCalledWith(
+    expect(channels.periskope.sendMessage).toHaveBeenCalledWith(
       "1234@g.us",
       "✅ Got it, logged — Amazon, due 20 Aug 2026."
     );
@@ -159,7 +155,7 @@ describe("handleIncomingTaskMessage", () => {
       clientName: "Forensic Files",
       assignee: null,
     });
-    expect(channels.whapi.sendMessage).toHaveBeenCalledWith("1234@g.us", "✅ Got it, logged.");
+    expect(channels.periskope.sendMessage).toHaveBeenCalledWith("1234@g.us", "✅ Got it, logged.");
   });
 
   it("does nothing and returns null for a non-task message", async () => {
@@ -174,7 +170,7 @@ describe("handleIncomingTaskMessage", () => {
 
     expect(clientRepository.findByChatId).not.toHaveBeenCalled();
     expect(taskRepository.create).not.toHaveBeenCalled();
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
     expect(task).toBeNull();
   });
 
@@ -197,7 +193,7 @@ describe("handleIncomingTaskMessage", () => {
       chatName: "Unknown Group",
     });
     expect(taskRepository.create).not.toHaveBeenCalled();
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
     expect(task).toBeNull();
   });
 
@@ -263,7 +259,7 @@ describe("handleIncomingTaskMessage", () => {
     vi.mocked(taskRepository.create).mockResolvedValue({ id: "task-1" } as any);
 
     await handleIncomingTaskMessage({
-      source: "whatsapp_official",
+      source: "whatsapp_group",
       chatId: "919876543210",
       text: "task: hello",
       channels: fakeChannels(),
@@ -368,33 +364,11 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
       channels,
     });
 
-    const sends = channels.whapi.sendMessage.mock.calls;
+    const sends = channels.periskope.sendMessage.mock.calls;
     const toEmployee = sends.find((call) => call[0] === "919876543210");
     expect(toEmployee).toBeDefined();
     expect(toEmployee![1]).toContain("Shivani");
     expect(toEmployee![1]).toContain("fix the listing");
-  });
-
-  // A task raised on the official channel still has to reach the employee,
-  // and the official Cloud API can't start a chat with staff — it goes out on
-  // the group channel's number instead.
-  it("uses the group channel to reach the employee even for an official-channel task", async () => {
-    vi.mocked(taskRepository.create).mockResolvedValue({
-      id: "task-1",
-      description: "fix the listing",
-      clientName: "BagsGuru",
-      dueDate: null,
-    } as any);
-    const channels = fakeChannels();
-
-    await handleIncomingTaskMessage({
-      source: "whatsapp_official",
-      chatId: "919999999999",
-      text: "task: fix the listing @919876543210",
-      channels,
-    });
-
-    expect(channels.whapi.sendMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("Shivani"));
   });
 
   it("leaves a number that belongs to nobody alone", async () => {
@@ -435,7 +409,7 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
       dueDate: null,
     } as any);
     const channels = fakeChannels();
-    channels.whapi.sendMessage.mockRejectedValue(new Error("Periskope down"));
+    channels.periskope.sendMessage.mockRejectedValue(new Error("Periskope down"));
 
     const task = await handleIncomingTaskMessage({
       source: "whatsapp_group",
@@ -532,7 +506,7 @@ describe("handleIncomingTaskMessage — assigning from a tagged number", () => {
         channels,
       });
 
-      expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+      expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
     });
 
     it("gives back the task that was already made", async () => {
@@ -636,7 +610,7 @@ describe("handleIncomingTaskMessage — assigning from the client's employee", (
       channels,
     });
 
-    const toEmployee = channels.whapi.sendMessage.mock.calls.find((call) => call[0] === "919000000011");
+    const toEmployee = channels.periskope.sendMessage.mock.calls.find((call) => call[0] === "919000000011");
     expect(toEmployee).toBeDefined();
     expect(toEmployee![1]).toContain("Asha");
     expect(toEmployee![1]).toContain("fix the listing");
@@ -687,7 +661,7 @@ describe("handleIncomingTaskMessage — assigning from the client's employee", (
     });
 
     expect(taskRepository.create).toHaveBeenCalledWith(expect.objectContaining({ assignee: null }));
-    expect(channels.whapi.sendMessage.mock.calls.some((call) => call[0] === "919000000011")).toBe(false);
+    expect(channels.periskope.sendMessage.mock.calls.some((call) => call[0] === "919000000011")).toBe(false);
   });
 
   // Every client on the system the day this shipped, and the state the board

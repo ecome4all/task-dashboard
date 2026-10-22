@@ -1,13 +1,10 @@
 import { WhatsAppAdapter } from "./whatsappAdapter";
 
+// Periskope is the only WhatsApp channel: tasks arrive from client groups
+// through it, and every reply, assignment notice, reminder and report goes
+// out through it. Kept as an object rather than a bare adapter so the many
+// callers that take `channels` don't have to change shape if a second
+// channel is ever added.
 export interface WhatsAppChannels {
-  whapi: WhatsAppAdapter;
-  official: WhatsAppAdapter;
-}
-
-// A task must be replied to on the same channel it arrived on — a group
-// task can only be answered via whapi.cloud, an official-channel task only
-// via the Cloud API. There's no cross-sending between the two.
-export function resolveAdapterForSource(source: string, channels: WhatsAppChannels): WhatsAppAdapter {
-  return source === "whatsapp_official" ? channels.official : channels.whapi;
+  periskope: WhatsAppAdapter;
 }

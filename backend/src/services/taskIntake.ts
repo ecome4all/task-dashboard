@@ -7,7 +7,7 @@ import { clientRepository } from "../repositories/clientRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
 import { unrecognizedMessageRepository } from "../repositories/unrecognizedMessageRepository";
-import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { notifyAssignee } from "./assignmentNotice";
 import { defaultAssignmentFor } from "./clientAssignment";
 import { composeIntakeAck } from "./taskMessages";
@@ -16,24 +16,19 @@ export interface TaskIntakeParams {
   source: string;
   chatId: string;
   text: string;
-  // Both channels, not just the one this message arrived on: the reply goes
-  // back on the arriving channel, but telling the assigned employee always
-  // goes out on the group channel — see assignmentNotice.ts.
   channels: WhatsAppChannels;
   chatName?: string;
   senderPhone?: string;
 }
 
 // WhatsApp JIDs: a group is "<digits>-<digits>@g.us" or "<digits>@g.us",
-// anything else ("<number>@c.us", or a bare number on the official channel)
-// is a 1:1 chat, where there's no group to link in the first place.
+// anything else ("<number>@c.us") is a 1:1 chat, where there's no group to link in the first place.
 function isGroupChat(chatId: string): boolean {
   return chatId.endsWith("@g.us");
 }
 
-// Shared by every intake channel (whapi group, official 1:1, Periskope): parse
-// the task: prefix, gate on a known client, store it, and acknowledge on the
-// same channel it arrived on. Returns null when the message wasn't a task (no
+// Called by the Periskope webhook: parse the task: prefix, gate on a known
+// client, store it, and acknowledge in the chat it arrived from. Returns null when the message wasn't a task (no
 // prefix) OR the sender isn't a recognized client yet, so callers can log
 // "ignored" without duplicating either check.
 //
@@ -169,7 +164,7 @@ export async function handleIncomingTaskMessage(params: TaskIntakeParams) {
   // the message, so a date understood wrongly is caught by the one person who
   // knows what was meant, straight away.
   try {
-    await resolveAdapterForSource(params.source, params.channels).sendMessage(
+    await params.channels.periskope.sendMessage(
       params.chatId,
       composeIntakeAck({
         marketplaceLabel: marketplaceOptions.find((o) => o.value === details.marketplace)?.label,

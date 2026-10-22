@@ -266,11 +266,7 @@ export async function sendEmployeeReminders(now: Date, channels: WhatsAppChannel
     if (!message) continue;
 
     try {
-      // Reminders go out on the group channel's adapter — it's the one
-      // connected to a real WhatsApp number that can message an arbitrary
-      // person, unlike the official Cloud API, which can only reply inside
-      // a 24-hour window opened by the recipient.
-      await channels.whapi.sendMessage(employee.phone, message);
+      await channels.periskope.sendMessage(employee.phone, message);
       sent += 1;
     } catch (err) {
       // One employee's send failing must not stop the rest of the round.
@@ -364,7 +360,7 @@ export async function runScheduledReports(now: Date, channels: WhatsAppChannels)
     }
 
     try {
-      await channels.whapi.sendMessage(target, message);
+      await channels.periskope.sendMessage(target, message);
       results.push({ clientName: reportedAs, sent: true });
       console.log(`[scheduler] sent ${config.kind} report to ${reportedAs}`);
     } catch (err) {
@@ -407,7 +403,7 @@ async function tellStaffWhatWentOut(
   for (const person of staff) {
     if (!person.phone) continue;
     try {
-      await channels.whapi.sendMessage(person.phone, summary);
+      await channels.periskope.sendMessage(person.phone, summary);
     } catch (err) {
       // The reports themselves already went out; failing to report on that
       // must not throw into the tick.

@@ -72,12 +72,7 @@ export async function messageEmployee(
       return false;
     }
 
-    // Always the group channel's adapter, whichever channel the task itself
-    // came in on: it's the one on a real WhatsApp number that can message an
-    // arbitrary person. The official Cloud API can only reply inside a
-    // 24-hour window the recipient opened, which staff never do. Same
-    // reasoning as the daily reminder in scheduler.ts.
-    await channels.whapi.sendMessage(employee.phone, compose(employee.name));
+    await channels.periskope.sendMessage(employee.phone, compose(employee.name));
     return true;
   } catch (err) {
     console.error(`[${logTag}] failed to message ${assigneeName}:`, err);

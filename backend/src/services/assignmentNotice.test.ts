@@ -10,9 +10,8 @@ vi.mock("../repositories/employeeRepository", () => ({
 
 function fakeChannels() {
   return {
-    whapi: { sendMessage: vi.fn().mockResolvedValue(undefined) },
-    official: { sendMessage: vi.fn().mockResolvedValue(undefined) },
-  } as unknown as WhatsAppChannels & { whapi: { sendMessage: ReturnType<typeof vi.fn> } };
+    periskope: { sendMessage: vi.fn().mockResolvedValue(undefined) },
+  } as unknown as WhatsAppChannels & { periskope: { sendMessage: ReturnType<typeof vi.fn> } };
 }
 
 const TASK = {
@@ -60,13 +59,13 @@ describe("notifyAssignee", () => {
     const channels = fakeChannels();
 
     expect(await notifyAssignee("Shivani", TASK, channels)).toBe(true);
-    expect(channels.whapi.sendMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("Shivani"));
+    expect(channels.periskope.sendMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("Shivani"));
   });
 
   it("sends nothing when the task isn't assigned to anyone", async () => {
     const channels = fakeChannels();
     expect(await notifyAssignee(null, TASK, channels)).toBe(false);
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
   });
 
   it("sends nothing when the employee has no number saved", async () => {
@@ -78,7 +77,7 @@ describe("notifyAssignee", () => {
     const channels = fakeChannels();
 
     expect(await notifyAssignee("Shivani", TASK, channels)).toBe(false);
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
   });
 
   it("sends nothing when the name doesn't match an employee any more", async () => {
@@ -86,7 +85,7 @@ describe("notifyAssignee", () => {
     const channels = fakeChannels();
 
     expect(await notifyAssignee("Someone Who Left", TASK, channels)).toBe(false);
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
   });
 
   it("sends nothing to a deactivated employee", async () => {
@@ -98,7 +97,7 @@ describe("notifyAssignee", () => {
     const channels = fakeChannels();
 
     expect(await notifyAssignee("Shivani", TASK, channels)).toBe(false);
-    expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+    expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
   });
 
   // Callers assign first and notify after, so a failure here must never
@@ -110,7 +109,7 @@ describe("notifyAssignee", () => {
       active: true,
     } as any);
     const channels = fakeChannels();
-    channels.whapi.sendMessage.mockRejectedValue(new Error("Periskope 401"));
+    channels.periskope.sendMessage.mockRejectedValue(new Error("Periskope 401"));
 
     expect(await notifyAssignee("Shivani", TASK, channels)).toBe(false);
   });

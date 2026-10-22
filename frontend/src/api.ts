@@ -511,7 +511,7 @@ export function ignoreUnrecognizedSender(chatId: string): Promise<void> {
 
 export function sendClientUpdate(
   id: string,
-  data: { phone: string; channel: "whapi" | "official"; message: string }
+  data: { phone: string; message: string }
 ): Promise<{ sent: boolean }> {
   return postJson(`/api/clients/${id}/send-update`, data);
 }

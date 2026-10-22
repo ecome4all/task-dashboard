@@ -2,9 +2,9 @@ import { WhatsAppAdapter } from "./whatsappAdapter";
 
 const PERISKOPE_BASE_URL = "https://api.periskope.app";
 
-// Group and 1:1 chat IDs use the same "<id>@g.us" / "<number>@c.us" JIDs as
-// whapi.cloud, so callers (resolveAdapterForSource, task.sourceRef) don't
-// need to know which provider is actually behind this adapter.
+// Group and 1:1 chat IDs are standard WhatsApp JIDs ("<id>@g.us" /
+// "<number>@c.us"), so callers (task.sourceRef) don't need to know which
+// provider is behind this adapter.
 // Periskope addresses a chat, not a person: a plain number is not a chat_id.
 // Callers that send to an individual hold a bare number (Employee.phone for
 // assignment alerts and daily reminders, Client.phone for a report) rather

@@ -2,8 +2,6 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { createWebhookRouter } from "./routes/webhook";
-import { createOfficialWebhookRouter } from "./routes/officialWebhook";
 import { createPeriskopeWebhookRouter } from "./routes/periskopeWebhook";
 import { createTasksRouter } from "./routes/tasks";
 import { createEmployeesRouter } from "./routes/employees";
@@ -13,7 +11,6 @@ import { createDiagnosticsRouter } from "./routes/diagnostics";
 import { createAuthRouter } from "./routes/auth";
 import { requireAuth } from "./auth/requireAuth";
 import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
-import { CloudApiAdapter } from "./whatsapp/cloudApiAdapter";
 import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
 import { createRecurringTasksRouter } from "./routes/recurringTasks";
 import { startScheduler } from "./services/scheduler";
@@ -53,32 +50,14 @@ app.use(
 );
 app.use(cookieParser());
 
-// The "whapi" key is a historical name — the group channel was originally
-// meant to run on whapi.cloud, but that was never actually connected (no API
-// key was ever issued), so it now runs on Periskope instead. Renaming the key
-// itself would ripple into the "whapi" | "official" channel literal used
-// across routes and the frontend for no real benefit, so it stays as-is.
-// The official Cloud API channel runs alongside it indefinitely (see
-// PROPOSAL_V2.md — moving existing clients off the group channel is the
-// client's own call, not part of this project). Each adapter only knows how
-// to send on its own channel — see resolveAdapter.ts for how a reply picks
-// the right one.
+// Periskope is the only WhatsApp channel — see resolveAdapter.ts.
 const channels: WhatsAppChannels = {
-  whapi: new PeriskopeAdapter(process.env.PERISKOPE_API_KEY ?? "", process.env.PERISKOPE_PHONE ?? ""),
-  official: new CloudApiAdapter(
-    process.env.WHATSAPP_CLOUD_API_TOKEN ?? "",
-    process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? ""
-  ),
+  periskope: new PeriskopeAdapter(process.env.PERISKOPE_API_KEY ?? "", process.env.PERISKOPE_PHONE ?? ""),
 };
 
-// Not behind requireAuth: WhatsApp calls these directly, not a logged-in
-// browser. See the shared-secret/signature checks inside each router.
-// Each router gets both channels, not just its own: it replies on the channel
-// the message arrived on, but a task that tags an employee also has to reach
-// that employee, and staff are only reachable on the group channel's number.
-app.use("/webhook", createWebhookRouter(channels));
+// Not behind requireAuth: Periskope calls this directly, not a logged-in
+// browser. See the signature check inside the router.
 app.use("/webhook", createPeriskopeWebhookRouter(channels));
-app.use("/webhook", createOfficialWebhookRouter(channels));
 
 app.use("/api/auth", createAuthRouter());
 app.use("/api/tasks", requireAuth, createTasksRouter(channels));

@@ -12,7 +12,6 @@ Never committed, and must stay that way:
 |---|---|
 | `LOGIN.txt` | real dashboard passwords — gitignored at the repo root |
 | `backend/.env`, `frontend/.env` | live database URL, API keys, JWT secret. Only `.env.example` (empty placeholders) is tracked |
-| `../Official Whatsapp API/` | client proposals and internal effort/cost estimates — ai4work commercial detail |
 | `../files recvd/` | client-supplied spreadsheets, logos and screenshots |
 | `../periskope-integration/` | separate package, its own concern |
 
@@ -23,7 +22,7 @@ Two rules follow from the repo being public:
 
 ## Structure
 
-- `backend/` — Express + TypeScript API. Receives WhatsApp webhooks (both the Periskope group channel and the official Cloud API channel), parses `task:` messages, stores tasks in Postgres via Prisma, serves the dashboard API, handles login sessions and roles.
+- `backend/` — Express + TypeScript API. Receives WhatsApp webhooks from Periskope, parses `task:` messages, stores tasks in Postgres via Prisma, serves the dashboard API, handles login sessions and roles.
 - `frontend/` — React + Vite dashboard. Login screen, then lists tasks, assigns them, marks them done.
 
 ## Local setup
@@ -63,7 +62,7 @@ cd backend
 npm test
 ```
 
-389 tests, covering: the `task:` message parser, both webhook payload extractors (Periskope and official Cloud API), Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the shared task-intake handler (including the group auto-link), the channel-resolver that picks the right WhatsApp adapter to reply on, the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, the email/password rules used when giving someone a login, the scheduled report round's config reading, due-check and message wording, the service-account key reshaping, the rule that stops a second repeat being set up for work that already repeats, the one that treats the same task arriving twice in a minute as one, and the repeat runner's decision between creating a task and reminding about the open one (including that a failed reminder must not put the clock back and re-fire the repeat five minutes later). All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
+439 tests, covering: the `task:` message parser, the Periskope webhook payload extractor, Periskope's webhook signature verification, the auth service (password hashing, session signing), the `requireRole` permission check, the task-intake handler (including the group auto-link), the repeat-schedule maths, the employee reminder composer, the tagged-number-to-employee matcher, the assignment alert, the email/password rules used when giving someone a login, the scheduled report round's config reading, due-check and message wording, the service-account key reshaping, the rule that stops a second repeat being set up for work that already repeats, the one that treats the same task arriving twice in a minute as one, and the repeat runner's decision between creating a task and reminding about the open one (including that a failed reminder must not put the clock back and re-fire the repeat five minutes later). All pure logic with mocked dependencies where needed — no DB required. Repositories and routes themselves aren't covered by automated tests yet since there's no test database wired up in this environment; test those manually against a real Neon/Supabase instance before go-live.
 
 ## Deployment
 
@@ -80,8 +79,7 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
 - **Railway approval gate:** deployments triggered by a GitHub account that isn't a member of the Railway workspace/team require manual approval in the Railway dashboard before they'll build. This will keep happening on every push unless the pushing account is added as a proper Railway team member (not just a GitHub repo collaborator).
 - **Repo is public.** Vercel's Hobby (free) plan blocks deploys triggered by a commit author without contributing access on the project, for *private* repos — the fix without paying for Pro is keeping this repo public, which is why it is. If it's ever made private again, deploys from a non-owner account will start failing with "Deployment Blocked" until either Pro is purchased or the repo goes public again.
 - **Git integration can silently be disconnected.** If pushes stop producing new Vercel deployments, check Project Settings → Git first — reconnecting doesn't retroactively deploy past commits, and neither does clicking "Redeploy" on an already-blocked deployment (it replays that deployment's cached decision). A fresh commit is what actually re-triggers a real build.
-- **Periskope webhook (group channel):** register `https://task-dashboard-production-7d35.up.railway.app/webhook/periskope` in Periskope Settings → Webhooks, with the signing secret set to `PERISKOPE_WEBHOOK_SECRET`. Unlike whapi.cloud, there's no secret in the URL — Periskope signs each POST with an HMAC-SHA256 of the raw body in the `x-periskope-signature` header, verified in `backend/src/routes/periskopeWebhook.ts`.
-- **Official Cloud API webhook:** register `https://task-dashboard-production-7d35.up.railway.app/webhook/official` in the Meta App Dashboard, with the verify token set to `WHATSAPP_VERIFY_TOKEN`. Meta calls this URL with a `GET` once to confirm you control it before it'll deliver real messages.
+- **Periskope webhook (group channel):** register `https://task-dashboard-production-7d35.up.railway.app/webhook/periskope` in Periskope Settings → Webhooks, with the signing secret set to `PERISKOPE_WEBHOOK_SECRET`. There's no secret in the URL — Periskope signs each POST with an HMAC-SHA256 of the raw body in the `x-periskope-signature` header, verified in `backend/src/routes/periskopeWebhook.ts`.
 - **Handing the group channel over to the client:** the group channel is tied to whatever WhatsApp number is connected in Periskope (`PERISKOPE_PHONE`) and whichever Periskope account/API key owns that connection. For a real handover, the client should get their **own** Periskope account (not keep using ai4work's) — create it, connect their WhatsApp number there, then update `PERISKOPE_API_KEY`, `PERISKOPE_PHONE`, and `PERISKOPE_WEBHOOK_SECRET` in Railway's Variables tab (a plain number swap under the same account only needs `PERISKOPE_PHONE` updated). Either way, **existing WhatsApp groups were joined using the old number** — sending into a group requires the connected number to actually be a member of it, so the new number needs to be added to every group you want task-logging to keep working in. 1:1 chats aren't affected (they're keyed by the client's own number, not the org's).
 
 ## What's here vs. what's still needed
@@ -89,11 +87,9 @@ Both are on the `ecome4all` Railway/Vercel/GitHub accounts, deployed from `githu
 **Done:**
 - Task schema (with `tenantId` on every row for future multi-tenant use, per the architecture discussion — not used yet, just present so it's a filter later, not a migration)
 - `task:` message parser, with unit tests
-- **Two WhatsApp channels, both wired up:**
-  - Periskope (group channel) — webhook receiver (`backend/src/routes/periskopeWebhook.ts`) with HMAC signature verification (`x-periskope-signature`), confirmed against real traffic rather than just Periskope's docs — see `backend/src/parser/extractPeriskopeMessage.ts` and the standalone `periskope-integration` package (sibling folder, outside this repo) for the specifics and the gotchas that don't match Periskope's own documentation examples (event field is `event_type` not `event`; a text message's `message_type` is `"chat"` not `"text"`; a chat's display name isn't on the message webhook at all, only on a separate `GET /v1/chats` call)
-  - Official WhatsApp Cloud API (1:1 channel) — webhook receiver with exact parsing (Meta's payload shape is documented and stable) plus the `hub.challenge` verification handshake
-  - A reply always goes out on the *same* channel a task came in on (`whatsapp/resolveAdapter.ts`) — a group task can't be answered via the official API and vice versa
-- Auto-acknowledgement reply on task creation, on whichever channel it arrived on
+- **WhatsApp via Periskope** (the only channel — every incoming task and every outgoing message goes through it):
+  - Webhook receiver (`backend/src/routes/periskopeWebhook.ts`) with HMAC signature verification (`x-periskope-signature`), confirmed against real traffic rather than just Periskope's docs — see `backend/src/parser/extractPeriskopeMessage.ts` and the standalone `periskope-integration` package (sibling folder, outside this repo) for the specifics and the gotchas that don't match Periskope's own documentation examples (event field is `event_type` not `event`; a text message's `message_type` is `"chat"` not `"text"`; a chat's display name isn't on the message webhook at all, only on a separate `GET /v1/chats` call)
+- Auto-acknowledgement reply on task creation, in the chat it arrived from
 - Client gating on task intake: an incoming `task:` message only becomes a real Task if its chat_id (or, in a group, the individual sender's phone) is already tied to an active Client — otherwise it's logged to `UnrecognizedMessage` instead, visible on the Clients page for staff to review and link
 - **Automatic group linking:** when a `task:` message arrives from a WhatsApp group that isn't linked to anyone yet, but the *sender's own phone* matches a client, that group is saved to that client there and then (`clientRepository.ensureGroupLinked`). From that point on every other member of the group — the client's staff, colleagues — is recognized too, so nobody ever has to find and copy a raw group JID by hand. Deliberately **never reassigns**: a group already linked (by hand or by an earlier message) stays where it is, so a group can't silently move to another client because someone else posted in it. The one thing it will update on an existing link is filling in a missing group name. Best-effort — if the link fails, the task is still created
 - Dashboard: paginated task list (10/page), clickable status filter chips (with live counts) to narrow the list to one status, a per-client summary panel (total/pending/done), assign from a real employee list, change status/marketplace/type via a searchable dropdown, set a due date (admin/manager only — members can edit everything else on a task but not this, enforced server-side too)
@@ -120,7 +116,7 @@ The account's plan has lapsed or downgraded — this is not a code or credential
 
 - No `✅ Got it, logged.` acknowledgement on task intake
 - No automatic "done" status notification back to the group
-- Reports → "Send to all" fails (the `whapi` channel is the `PeriskopeAdapter` — see `server.ts`, the key name is historical)
+- Reports → "Send to all" fails
 - `getChatName` returns undefined, so newly linked groups save with **no name** and show their raw JID in the UI
 
 Evidence it's a plan change and not a long-standing bug: tasks logged on 24–25 July captured group names fine ("Test 3", "Test 1"), and the one from 23 July didn't. Restoring the Periskope plan should fix all of the above with no code change — `ensureGroupLinked` backfills a missing group name the next time a task comes in from that group.
@@ -388,8 +384,7 @@ context.
 `parser/taskDetails.ts`. **"task: listing not live on flipkart due 20/8"**
 lands on the board already carrying both, instead of waiting for someone to
 pick them from two dropdowns. Same principle as the tagged-number assignment:
-the message is plain text on every channel, so this needs no provider-specific
-mention data and works from a group, the official channel and Periskope alike.
+the message is plain text, so this needs no provider-specific mention data.
 
 **Marketplace** is matched against the **live option list**, so one an admin
 adds in Settings is understood from the next message on with nothing to change

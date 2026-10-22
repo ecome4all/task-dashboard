@@ -4,7 +4,7 @@
 // an @ in front — "task: fix the listing @919876543210" — so a tag is just
 // text by the time it reaches us, on every channel, with no provider-specific
 // mention metadata needed. Numbers typed by hand ("+91 98765 43210") work the
-// same way, which is what makes this usable from the official channel too.
+// the same way.
 
 export interface MentionableEmployee {
   name: string;

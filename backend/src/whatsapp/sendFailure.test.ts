@@ -32,13 +32,6 @@ describe("sendProblemOf", () => {
     expect(sendProblemOf(new Error("socket hang up"))).toBe("unknown");
     expect(sendProblemOf("not an Error at all")).toBe("unknown");
   });
-
-  it("works for the other two providers' wording", () => {
-    expect(sendProblemOf(new Error("whapi.cloud send failed (429): slow down"))).toBe("too_many");
-    expect(
-      sendProblemOf(new Error("WhatsApp Cloud API send failed (401): {}"))
-    ).toBe("credentials");
-  });
 });
 
 describe("sendFailure", () => {

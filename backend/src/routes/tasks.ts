@@ -3,7 +3,7 @@ import { taskRepository } from "../repositories/taskRepository";
 import { taskNoteRepository } from "../repositories/taskNoteRepository";
 import { configOptionRepository } from "../repositories/configOptionRepository";
 import { employeeRepository } from "../repositories/employeeRepository";
-import { WhatsAppChannels, resolveAdapterForSource } from "../whatsapp/resolveAdapter";
+import { WhatsAppChannels } from "../whatsapp/resolveAdapter";
 import { sendFailure } from "../whatsapp/sendFailure";
 import {
   composeSendUpdateMessage,
@@ -34,7 +34,7 @@ const CREATE_ROLES = ["admin", "manager"];
 
 // source for a task raised on the board that isn't tied to any client chat —
 // it has nowhere to send updates back to. Intake's own values
-// ("whatsapp_group" / "whatsapp_official") always have a chat behind them.
+// ("whatsapp_group") always has a chat behind it.
 const MANUAL_SOURCE = "manual";
 
 // A task reached by id that isn't on this person's board is answered as if it
@@ -435,7 +435,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     let notesSent = 0;
     if (stageChanged) {
       try {
-        const whatsapp = resolveAdapterForSource(task.source, channels);
+        const whatsapp = channels.periskope;
         const statusLabels = Object.fromEntries(statusOptions.map((o) => [o.value, o.label]));
         const marketplaceLabels = Object.fromEntries(marketplaceOptions.map((o) => [o.value, o.label]));
         // This is the message notes are written to travel with: whoever
@@ -537,7 +537,7 @@ export function createTasksRouter(channels: WhatsAppChannels) {
     });
 
     try {
-      const whatsapp = resolveAdapterForSource(task.source, channels);
+      const whatsapp = channels.periskope;
       await whatsapp.sendMessage(task.sourceRef, message);
     } catch (err) {
       console.error("Failed to send manual task update:", err);

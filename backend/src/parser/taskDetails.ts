@@ -5,7 +5,7 @@
 //
 // Same principle as the tagged-number assignment in employeeMention.ts: the
 // message is plain text on every channel, so this needs no provider-specific
-// data and works from a group, the official channel and Periskope alike.
+// data.
 // Nothing here can invent a value — an unrecognized marketplace or an
 // unreadable date simply isn't set, and the task looks exactly as it did
 // before, for someone to fill in by hand.

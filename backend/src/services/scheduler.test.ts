@@ -22,9 +22,9 @@ vi.mock("./weeklyReportPreview", () => ({ buildReport: vi.fn() }));
 
 const NOW = new Date("2026-08-19T03:30:00Z");
 
-function fakeChannels(): WhatsAppChannels & { whapi: { sendMessage: ReturnType<typeof vi.fn> } } {
+function fakeChannels(): WhatsAppChannels & { periskope: { sendMessage: ReturnType<typeof vi.fn> } } {
   const adapter = { sendMessage: vi.fn().mockResolvedValue(undefined) } satisfies WhatsAppAdapter;
-  return { whapi: adapter, official: { sendMessage: vi.fn().mockResolvedValue(undefined) } };
+  return { periskope: adapter };
 }
 
 function repeat(overrides: Record<string, unknown> = {}) {
@@ -91,8 +91,8 @@ describe("runDueRecurringTasks", () => {
       const channels = fakeChannels();
       await runDueRecurringTasks(NOW, channels);
 
-      expect(channels.whapi.sendMessage).toHaveBeenCalledTimes(1);
-      const [to, message] = channels.whapi.sendMessage.mock.calls[0];
+      expect(channels.periskope.sendMessage).toHaveBeenCalledTimes(1);
+      const [to, message] = channels.periskope.sendMessage.mock.calls[0];
       expect(to).toBe("919978988619");
       expect(message).toContain("still open");
       expect(message).toContain("*Ads Optimise*");
@@ -124,7 +124,7 @@ describe("runDueRecurringTasks", () => {
 
       await runDueRecurringTasks(NOW, channels);
 
-      expect(channels.whapi.sendMessage).not.toHaveBeenCalled();
+      expect(channels.periskope.sendMessage).not.toHaveBeenCalled();
       expect(taskRepository.create).not.toHaveBeenCalled();
     });
 
@@ -132,7 +132,7 @@ describe("runDueRecurringTasks", () => {
     // fire again on the next tick five minutes later.
     it("does not retry the run when the reminder fails to send", async () => {
       const channels = fakeChannels();
-      channels.whapi.sendMessage.mockRejectedValue(new Error("provider down"));
+      channels.periskope.sendMessage.mockRejectedValue(new Error("provider down"));
 
       await runDueRecurringTasks(NOW, channels);
 
@@ -174,7 +174,7 @@ describe("runDueRecurringTasks", () => {
       const channels = fakeChannels();
       await runDueRecurringTasks(NOW, channels);
 
-      const [, message] = channels.whapi.sendMessage.mock.calls[0];
+      const [, message] = channels.periskope.sendMessage.mock.calls[0];
       expect(message).toContain("a new task is yours");
     });
 

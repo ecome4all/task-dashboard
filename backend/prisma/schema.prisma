@@ -14,11 +14,11 @@ datasource db {
 model Task {
   id           String     @id @default(cuid())
   tenantId     String     @default("default")
-  source       String // "whatsapp_group" | "whatsapp_official"
+  source       String // "whatsapp_group" | "manual"
   sourceRef    String // WhatsApp group id or phone number the task came from
-  // Human-readable group name from whapi's webhook (chat_name), captured at
-  // intake time so staff can recognize a group without reading its raw JID.
-  // Null for official-channel (1:1) tasks, which have no group name.
+  // Human-readable group name, looked up from Periskope at intake time so
+  // staff can recognize a group without reading its raw JID. Null for 1:1
+  // chats, which have no group name.
   chatName     String?
   description  String
   clientName   String?
@@ -219,7 +219,7 @@ model ClientReportSheet {
   @@index([clientId])
 }
 
-// One of possibly several WhatsApp groups a client's tasks come from (whapi
+// One of possibly several WhatsApp groups a client's tasks come from (its
 // chat_id, e.g. "919001524054-1380436383@g.us"), and its display name at the
 // time it was linked. Manually assigned by staff from the groups seen on
 // incoming tasks — never auto-matched. A client with any groups linked sends

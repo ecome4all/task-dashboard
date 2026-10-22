@@ -479,13 +479,11 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
   // picks which fields to include and sees a live preview there) — this route
   // only exists because sending WhatsApp messages needs server-side API keys.
   router.post("/:id/send-update", requireRole(...MANAGE_ROLES), async (req, res) => {
-    const { phone, channel, message } = req.body;
+    // Any `channel` field an older frontend still sends is ignored — there is
+    // only one channel to send on.
+    const { phone, message } = req.body;
     if (typeof phone !== "string" || !phone.trim()) {
       res.status(400).json({ error: "phone is required" });
-      return;
-    }
-    if (channel !== "whapi" && channel !== "official") {
-      res.status(400).json({ error: "channel must be 'whapi' or 'official'" });
       return;
     }
     if (typeof message !== "string" || !message.trim()) {
@@ -494,7 +492,7 @@ function parseDateParam(value: unknown): Date | null | "invalid" {
     }
 
     try {
-      await channels[channel as "whapi" | "official"].sendMessage(phone.trim(), message.trim());
+      await channels.periskope.sendMessage(phone.trim(), message.trim());
     } catch (err) {
       // A failed send (network blip, bad number, provider outage) must not
       // crash the server — an uncaught rejection here would take down the
