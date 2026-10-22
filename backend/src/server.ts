@@ -9,6 +9,7 @@ import { createClientsRouter } from "./routes/clients";
 import { createConfigOptionsRouter } from "./routes/configOptions";
 import { createDiagnosticsRouter } from "./routes/diagnostics";
 import { createAuthRouter } from "./routes/auth";
+import { createBackupRouter } from "./routes/backup";
 import { requireAuth } from "./auth/requireAuth";
 import { PeriskopeAdapter } from "./whatsapp/periskopeAdapter";
 import { WhatsAppChannels } from "./whatsapp/resolveAdapter";
@@ -68,6 +69,9 @@ app.use("/api/recurring-tasks", requireAuth, createRecurringTasksRouter());
 // Admin-only, and read-only: reports why a report sheet won't read when the
 // answer is on the host rather than in the sheet. See routes/diagnostics.ts.
 app.use("/api/diagnostics", requireAuth, createDiagnosticsRouter());
+// Not behind requireAuth: fetched weekly by an Apps Script in the client's
+// Google account, guarded by BACKUP_TOKEN instead. See routes/backup.ts.
+app.use("/api/backup", createBackupRouter());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
