@@ -25,7 +25,15 @@ export function createPeriskopeWebhookRouter(channels: WhatsAppChannels) {
 
   router.post("/periskope", async (req, res) => {
     const secret = process.env.PERISKOPE_WEBHOOK_SECRET;
-    if (secret && !isValidSignature((req as any).rawBody, req.get("x-periskope-signature"), secret)) {
+    const signature = req.get("x-periskope-signature");
+    if (secret && !isValidSignature((req as any).rawBody, signature, secret)) {
+      // Logged so a signing-key mismatch shows up in the deploy logs rather
+      // than looking exactly like Periskope not sending at all. Never log the
+      // signature or the secret themselves.
+      console.warn(
+        "[periskope webhook] rejected: signature",
+        signature ? "does not match PERISKOPE_WEBHOOK_SECRET" : "header missing"
+      );
       res.status(401).send("unauthorized");
       return;
     }
